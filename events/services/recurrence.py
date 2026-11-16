@@ -182,6 +182,7 @@ def apply_template(series: EventSeries, event: Event, audience: dict | None = No
     event.subtype_id = series.subtype_id
     event.title = series.title
     event.location_id = series.location_id
+    event.notes = series.notes
     event.opponent_id = series.opponent_id
     event.club_wide = series.club_wide
     event.end = event.start + series.duration if series.duration is not None else None
@@ -335,6 +336,7 @@ def split_series(series: EventSeries, at: datetime.datetime) -> EventSeries:
         title=series.title,
         location_id=series.location_id,
         opponent_id=series.opponent_id,
+        notes=series.notes,
         club_wide=series.club_wide,
     )
     for name, objs in _audience(series).items():

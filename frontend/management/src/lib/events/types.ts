@@ -92,6 +92,8 @@ export type EventDetail = EventRow & {
 	lineup: LineupInfo;
 	competition: string;
 	competition_label: string;
+	/** Written by staff for the invitees (plain text). */
+	notes: string;
 	score_for: number | null;
 	score_against: number | null;
 	is_live: boolean;
@@ -139,6 +141,7 @@ export type EventIn = {
 	deadline?: string | null;
 	location_id?: string | null;
 	opponent_id?: string | null;
+	notes?: string;
 	team_ids?: string[];
 	group_ids?: string[];
 	club_wide?: boolean;
@@ -165,6 +168,7 @@ export type EventValues = {
 	deadline: string | null;
 	location_id: string | null;
 	opponent_id: string | null;
+	notes: string;
 	team_ids: string[];
 	group_ids: string[];
 	club_wide: boolean;

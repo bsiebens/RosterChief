@@ -48,6 +48,7 @@
 		scopeBlocked,
 		SHOWN_FIELDS,
 		mondayBefore,
+		NOTES_MAX,
 		shiftLocal,
 		titleOptional,
 		titleSuggestion,
@@ -386,6 +387,12 @@
 							{#if fe('is_friendly')}<span class="mt-1 block text-xs text-error">{fe('is_friendly')}</span>{/if}
 						</div>
 					{/if}
+					<div class="form-control w-full">
+						<label class="label" for="{uid}-notes"><span class="label-text">{t('eventform.notes')}</span></label>
+						<textarea id="{uid}-notes" class="textarea textarea-bordered min-h-24 w-full {fe('notes') ? 'input-error' : ''}" rows="3" maxlength={NOTES_MAX} bind:value={v.notes} aria-invalid={fe('notes') ? 'true' : undefined} aria-describedby="{uid}-notes-help"></textarea>
+						{#if fe('notes')}<span class="mt-1 block text-xs text-error">{fe('notes')}</span>{/if}
+						<span id="{uid}-notes-help" class="label-text-alt mt-1 block">{t('eventform.notes_help')}</span>
+					</div>
 				</div>
 			</section>
 

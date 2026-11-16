@@ -30,6 +30,7 @@ from .routers import notifications_inbox as notifications_router
 from .routers import officiating_levels as officiating_levels_router
 from .routers import overview as overview_router
 from .routers import portal as portal_router
+from .routers import portal_calendar as portal_calendar_router
 from .routers import portal_profile as portal_profile_router
 from .routers import portal_shop as portal_shop_router
 from .routers import public_forms as public_forms_router
@@ -69,6 +70,7 @@ register_error_handlers(api)
 api.add_router("/portal", portal_router.router, tags=["club app"])
 api.add_router("/portal/shop", portal_shop_router.router, tags=["club app"])
 api.add_router("/portal/me", portal_profile_router.router, tags=["club app"])
+api.add_router("/portal/me", portal_calendar_router.router, tags=["club app"])
 api.add_router("/members", members_router.router, tags=["members"])
 api.add_router("/memberships", memberships_router.router, tags=["memberships"])
 api.add_router("/club", club_settings_router.router, tags=["club settings"])
@@ -109,6 +111,7 @@ api.add_router("/teams", analytics_router.teams_router, tags=["analytics"])
 api.add_router("/members", analytics_router.members_router, tags=["analytics"])
 api.add_router("/members", member_stats_router.router, tags=["members"])
 api.add_router("/public", public_stats_router.router, tags=["public"])
+api.add_router("/public/calendar", portal_calendar_router.public_router, tags=["public"])
 api.add_router("/public/news", public_news_router.router, tags=["public"])
 api.add_router("/public/forms", public_forms_router.router, tags=["public"])
 api.add_router("/public/registration", public_registration_router.router, tags=["public"])

@@ -70,9 +70,10 @@ from . import subtypes
 
 MSG = "Please correct the highlighted fields."
 SCOPES = ("this", "following", "all")
+NOTES_MAX = 2000
 
 COMMON_KEYS = (
-    "title", "kind", "subtype_id", "start", "end", "gathering", "deadline", "location_id", "opponent_id",
+    "title", "kind", "subtype_id", "start", "end", "gathering", "deadline", "location_id", "opponent_id", "notes",
     "team_ids", "group_ids", "club_wide", "invited_member_ids", "excluded_member_ids",
 )  # fmt: skip
 EVENT_KEYS = (*COMMON_KEYS, "season_id", "is_friendly", "cancelled")
@@ -80,7 +81,7 @@ SERIES_KEYS = (*COMMON_KEYS, "recurrence", "rrule")
 M2M = {"team_ids": "teams", "group_ids": "groups", "invited_member_ids": "invited_members", "excluded_member_ids": "excluded_members"}
 DEFAULTS = {
     "title": "", "kind": Event.EventKind.OTHER, "subtype_id": None, "start": None, "end": None, "gathering": None, "deadline": None,
-    "location_id": None, "opponent_id": None, "team_ids": [], "group_ids": [], "club_wide": False,
+    "location_id": None, "opponent_id": None, "notes": "", "team_ids": [], "group_ids": [], "club_wide": False,
     "invited_member_ids": [], "excluded_member_ids": [], "season_id": None, "is_friendly": False, "cancelled": False,
 }  # fmt: skip
 
@@ -228,6 +229,13 @@ def _clean(values: dict, errors: dict, *, creating: bool) -> dict:
     out["groups"] = _many(Group, values.get("group_ids"), "group_ids", errors, "Unknown group.")
     out["invited_members"] = _many(Member, values.get("invited_member_ids"), "invited_member_ids", errors, "Unknown member.")
     out["excluded_members"] = _many(Member, values.get("excluded_member_ids"), "excluded_member_ids", errors, "Unknown member.")
+    notes = values.get("notes") or ""
+    if not isinstance(notes, str):
+        errors["notes"] = ["Enter text."]
+        notes = ""
+    elif len(notes) > NOTES_MAX:
+        errors["notes"] = [f"At most {NOTES_MAX} characters."]
+    out["notes"] = notes.strip()[:NOTES_MAX]
     out["club_wide"] = bool(values.get("club_wide"))
     if out["club_wide"] and (out["teams"] or out["groups"]):
         errors["club_wide"] = ["A whole-club event can't also list specific teams or groups: clear them, or turn this off."]
@@ -324,7 +332,7 @@ def event_values(event: Event) -> dict:
     """The editable values of ``event`` in the input shape (ids as UUIDs)."""
     return {
         "title": event.title, "kind": event.kind, "subtype_id": event.subtype_id, "start": event.start, "end": event.end, "gathering": event.gathering,
-        "deadline": event.deadline, "location_id": event.location_id, "opponent_id": event.opponent_id,
+        "deadline": event.deadline, "location_id": event.location_id, "opponent_id": event.opponent_id, "notes": event.notes,
         "team_ids": _ids(event.teams.all()), "group_ids": _ids(event.groups.all()), "club_wide": event.club_wide,
         "invited_member_ids": _ids(event.invited_members.all()), "excluded_member_ids": _ids(event.excluded_members.all()),
         "is_friendly": event.is_friendly, "cancelled": event.cancelled,
@@ -340,7 +348,7 @@ def series_values(series: EventSeries) -> dict:
         "end": start + series.duration if series.duration is not None else None,
         "gathering": start - series.gathering_offset if series.gathering_offset is not None else None,
         "deadline": start - series.deadline_offset if series.deadline_offset is not None else None,
-        "location_id": series.location_id, "opponent_id": series.opponent_id,
+        "location_id": series.location_id, "opponent_id": series.opponent_id, "notes": series.notes,
         "team_ids": _ids(series.teams.all()), "group_ids": _ids(series.groups.all()), "club_wide": series.club_wide,
         "invited_member_ids": _ids(series.invited_members.all()), "excluded_member_ids": _ids(series.excluded_members.all()),
         "recurrence": rec.recurrence_values(series),
@@ -348,7 +356,7 @@ def series_values(series: EventSeries) -> dict:
 
 
 def _state(obj) -> dict:
-    fields = ["title", "kind", "subtype_id", "location_id", "opponent_id", "club_wide"]
+    fields = ["title", "kind", "subtype_id", "location_id", "opponent_id", "notes", "club_wide"]
     if isinstance(obj, Event):
         fields += ["start", "end", "gathering", "deadline", "season_id", "is_friendly", "cancelled", "detached", "series_id"]
     else:
@@ -394,7 +402,7 @@ def _member_of(actor):
 
 
 def _assign_event(event: Event, c: dict) -> None:
-    for f in ("title", "kind", "subtype", "start", "end", "gathering", "deadline", "location", "opponent", "season", "club_wide", "is_friendly", "cancelled"):
+    for f in ("title", "kind", "subtype", "start", "end", "gathering", "deadline", "location", "opponent", "notes", "season", "club_wide", "is_friendly", "cancelled"):
         setattr(event, f, c[f])
     event.save()
     for rel in M2M.values():
@@ -404,6 +412,7 @@ def _assign_event(event: Event, c: dict) -> None:
 def _assign_template(series: EventSeries, c: dict) -> None:
     start = c["start"]
     series.title, series.kind, series.subtype, series.location, series.opponent, series.club_wide = c["title"], c["kind"], c["subtype"], c["location"], c["opponent"], c["club_wide"]
+    series.notes = c["notes"]
     series.duration = c["end"] - start if c["end"] is not None else None
     series.gathering_offset = start - c["gathering"] if c["gathering"] is not None else None
     series.deadline_offset = start - c["deadline"] if c["deadline"] is not None else None

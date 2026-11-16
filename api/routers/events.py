@@ -240,6 +240,7 @@ def _detail(request, event) -> dict:
         lineup=_lineup_info(event),
         competition=event.competition,
         competition_label=event.competition_label,
+        notes=event.notes,
         score_for=event.score_for,
         score_against=event.score_against,
         is_live=event.is_live,

@@ -19,7 +19,7 @@
 	import EventHero from '#lib/components/portal/EventHero.svelte';
 	import MonthPicker from '#lib/components/portal/MonthPicker.svelte';
 	import News from '#lib/components/portal/News.svelte';
-	import SampleBadge from '#lib/components/SampleBadge.svelte';
+	import CalendarSync from '#lib/components/portal/CalendarSync.svelte';
 	import OfficiatingRow from '#lib/components/portal/OfficiatingRow.svelte';
 	import FollowedGames from '#lib/components/portal/FollowedGames.svelte';
 	import GameTimelineDialog from '#lib/components/portal/GameTimelineDialog.svelte';
@@ -319,8 +319,7 @@
 {#snippet calendarActions()}
 	<div class="hidden items-center gap-2 md:flex">
 		{@render viewSwitch()}
-		<button class="btn btn-outline gap-1.5" type="button" disabled title={t('portal.sample_help')}><CalendarDays size={14} aria-hidden="true" />{t('portal.sync_calendar')}</button>
-		<SampleBadge what="calendar-sync" />
+		<CalendarSync />
 	</div>
 {/snippet}
 
@@ -622,6 +621,7 @@
 					</div>
 				{/if}
 				{#if event.score_for != null && event.score_against != null}<p class="font-display text-2xl font-extrabold">{event.score_for}–{event.score_against}</p>{/if}
+				{#if event.notes}<p class="mt-1 border-t border-line pt-2 text-sm whitespace-pre-line text-slate">{event.notes}</p>{/if}
 			</div>
 			{#if event.kind === 'game' && extras?.follow}
 				<div class="flex items-center gap-3 rounded-box border border-line px-4 py-2.5">

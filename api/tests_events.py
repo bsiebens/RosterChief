@@ -298,6 +298,34 @@ class EventsApiTests(TestCase):
         self.assertEqual(self.call("delete", f"/events/{e.pk}", self.head.user).status_code, 204)
         self.assertFalse(Event.objects.filter(pk=e.pk).exists())
 
+    def test_event_notes_are_saved_validated_shown_and_copied_by_a_series(self):
+        r = self.call("post", "/events", self.head.user, self.body(notes="  Bring a white shirt.\nMeet at the gate.  "))
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["notes"], "Bring a white shirt.\nMeet at the gate.")
+        event_id = r.json()["id"]
+        self.assertEqual(self.call("get", f"/events/{event_id}/form", self.head.user).json()["event"]["notes"], "Bring a white shirt.\nMeet at the gate.")
+        self.assertEqual(self.call("patch", f"/events/{event_id}", self.head.user, {"title": "Other"}).json()["notes"], "Bring a white shirt.\nMeet at the gate.")
+        self.assertEqual(self.call("patch", f"/events/{event_id}", self.head.user, {"notes": ""}).json()["notes"], "")
+        too_long = self.call("patch", f"/events/{event_id}", self.head.user, {"notes": "x" * 2001})
+        self.assertEqual(too_long.status_code, 422)
+        self.assertIn("notes", too_long.json()["errors"])
+        self.assertEqual(self.call("post", "/events", self.head.user, self.body()).json()["notes"], "")
+
+        start = timezone.localtime(timezone.now() + datetime.timedelta(days=2)).replace(hour=18, minute=0, second=0, microsecond=0)
+        from events.services.recurrence import WEEKDAY_CODES
+
+        data = self.body(start=self.iso(start), notes="Series note", recurrence={"frequency": "weekly", "weekdays": [WEEKDAY_CODES[start.weekday()]], "count": 3})
+        series = EventSeries.objects.get(pk=self.call("post", "/events", self.head.user, data).json()["series_id"])
+        self.assertEqual(series.notes, "Series note")
+        occ = list(series.occurrences.order_by("start"))
+        self.assertEqual({e.notes for e in occ}, {"Series note"})
+        self.assertEqual(self.call("get", f"/events/{occ[0].pk}/form", self.head.user).json()["series"]["notes"], "Series note")
+        self.assertEqual(self.call("patch", f"/events/{occ[0].pk}?scope=all", self.head.user, {"notes": "New series note"}).status_code, 200)
+        self.assertEqual({e.notes for e in Event.objects.filter(series=series)}, {"New series note"})
+        self.assertEqual(self.call("patch", f"/events/{occ[1].pk}?scope=this", self.head.user, {"notes": "Just this one"}).json()["notes"], "Just this one")
+        self.assertEqual(self.call("patch", f"/events/{occ[2].pk}?scope=following", self.head.user, {"notes": "From here"}).status_code, 200)
+        self.assertEqual(list(Event.objects.filter(pk__in=[o.pk for o in occ]).order_by("start").values_list("notes", flat=True)), ["New series note", "Just this one", "From here"])
+
     def test_series_with_scopes(self):
         start = timezone.localtime(timezone.now() + datetime.timedelta(days=2)).replace(hour=18, minute=0, second=0, microsecond=0)
         from events.services.recurrence import WEEKDAY_CODES

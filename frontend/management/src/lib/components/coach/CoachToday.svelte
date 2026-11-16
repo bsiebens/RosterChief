@@ -30,6 +30,7 @@
 		<article class="card overflow-hidden">
 			<h2 class="card-title px-4 pt-3 pb-1 md:pb-3">{t(isToday ? 'portal.today_session' : 'portal.next_session')}</h2>
 			<a class="block" href={href(session)}><EventHero event={{ ...session, is_home: session.is_home }} {background} {crest} /></a>
+			{#if session.notes}<p class="px-4 pt-3 text-sm whitespace-pre-line text-slate">{session.notes}</p>{/if}
 			<div class="flex flex-wrap items-center gap-x-5 gap-y-3 bg-subhead px-4 py-3">
 				{#each [[session.going, 'portal.going'], [session.out, 'portal.out'], [session.unanswered, 'coach.waiting']] as [count, label] (label)}
 					<div class="min-w-14">

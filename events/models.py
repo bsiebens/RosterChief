@@ -155,6 +155,7 @@ class Event(UUIDModel):
     deadline = models.DateTimeField(_("registration deadline"), blank=True, null=True)
 
     location = models.ForeignKey(Location, on_delete=models.SET_NULL, related_name="events", null=True, blank=True, verbose_name=_("location"))
+    notes = models.TextField(_("notes"), blank=True, max_length=2000, help_text=_("Written by staff, shown to everyone invited (plain text)."))
     opponent = models.ForeignKey(Opponent, on_delete=models.SET_NULL, related_name="events", null=True, blank=True, verbose_name=_("opponent"))
     created_by = models.ForeignKey(Member, on_delete=models.SET_NULL, related_name="created_events", null=True, blank=True, verbose_name=_("created by"))
 
@@ -378,6 +379,7 @@ class EventSeries(UUIDModel):
     subtype = models.ForeignKey("EventSubtype", on_delete=models.SET_NULL, related_name="event_series", null=True, blank=True, verbose_name=_("subtype"))
     title = models.CharField(_("title"), max_length=255)
     location = models.ForeignKey(Location, on_delete=models.SET_NULL, related_name="event_series", null=True, blank=True, verbose_name=_("location"))
+    notes = models.TextField(_("notes"), blank=True, max_length=2000, help_text=_("Copied onto each generated occurrence."))
     opponent = models.ForeignKey(Opponent, on_delete=models.SET_NULL, related_name="event_series", null=True, blank=True, verbose_name=_("opponent"))
     teams = models.ManyToManyField("teams.Team", related_name="event_series", blank=True, verbose_name=_("teams"))
     groups = models.ManyToManyField(Group, related_name="event_series", blank=True, verbose_name=_("groups"), help_text=_("Invite every current member of these groups."))
@@ -759,3 +761,18 @@ class StatsRefresh(UUIDModel):
 
     def __str__(self):
         return f"{self.member} / {self.team} ({self.status})"
+
+
+class CalendarFeed(UUIDModel):
+    """An account's secret calendar link (``/public/calendar/<token>.ics``) to subscribe to from Google, Apple or Outlook calendar.
+    One per login in this club: it carries that person's events and those of the children they manage. No row means the link is off."""
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="calendar_feed", verbose_name=_("user"))
+    token = models.CharField(_("token"), max_length=64, unique=True, editable=False)
+
+    class Meta:
+        verbose_name = _("calendar feed")
+        verbose_name_plural = _("calendar feeds")
+
+    def __str__(self):
+        return f"calendar feed of {self.user}"

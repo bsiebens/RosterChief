@@ -136,6 +136,7 @@ class EventDetailOut(EventRowOut):
     lineup: LineupInfo
     competition: str = ""
     competition_label: str = ""
+    notes: str = ""
     is_live: bool = False
     created_by: Ref | None = None
     task_count: int = 0
@@ -188,6 +189,7 @@ class EventIn(Schema):
     deadline: datetime.datetime | None = None
     location_id: uuid.UUID | None = None
     opponent_id: uuid.UUID | None = None
+    notes: str | None = None
     team_ids: list[uuid.UUID] = []
     group_ids: list[uuid.UUID] = []
     club_wide: bool = False
@@ -212,6 +214,7 @@ class EventPatch(Schema):
     deadline: datetime.datetime | None = None
     location_id: uuid.UUID | None = None
     opponent_id: uuid.UUID | None = None
+    notes: str | None = None
     team_ids: list[uuid.UUID] | None = None
     group_ids: list[uuid.UUID] | None = None
     club_wide: bool | None = None
@@ -235,6 +238,7 @@ class EventValues(Schema):
     deadline: datetime.datetime | None = None
     location_id: uuid.UUID | None = None
     opponent_id: uuid.UUID | None = None
+    notes: str = ""
     team_ids: list[uuid.UUID]
     group_ids: list[uuid.UUID]
     club_wide: bool

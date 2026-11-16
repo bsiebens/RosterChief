@@ -199,6 +199,7 @@
                         <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><Repeat size={15} aria-hidden="true"/></dt><dd class="min-w-0 break-words text-slate">{series}{#if ev.detached} · <span class="text-muted">{t('events.detached')}</span>{/if}</dd></div>
                     {/if}
                 </dl>
+                {#if ev.notes}<p class="border-t border-line pt-2.5 text-sm break-words whitespace-pre-line text-slate">{ev.notes}</p>{/if}
                 {#if ev.opponent}
                     <div class="flex min-w-0 items-center gap-3 border-t border-line pt-2.5">
                         {#if ev.opponent.logo_url}<img src={ev.opponent.logo_url} alt="" class="h-10 w-10 shrink-0 object-contain"/>{:else}<ClubCrest name={ev.opponent.name} size={40}/>{/if}
@@ -304,6 +305,7 @@
                             {#if ev.detached} · <span class="text-muted">{t('events.detached')}</span>{/if}</span>
                     </p>
                 {/if}
+                {#if ev.notes}<p class="mt-3 max-w-prose border-t border-line pt-3 text-sm break-words whitespace-pre-line text-slate">{ev.notes}</p>{/if}
             </div>
             {#if ev.opponent}
                 <div class="flex items-center gap-4 self-center">

@@ -29,6 +29,8 @@ export type FormState = {
 	deadline: string;
 	location_id: string;
 	opponent_id: string;
+	/** Notes for the players (plain text, at most NOTES_MAX characters). */
+	notes: string;
 	is_friendly: boolean;
 	team_ids: string[];
 	group_ids: string[];
@@ -48,6 +50,7 @@ export type FormState = {
 	notify: boolean;
 };
 
+export const NOTES_MAX = 2000;
 export const isGame = (kind: string) => kind === 'game';
 /** Kinds whose title the backend generates (from the subtype's template); the form shows it instead of a title field. */
 export const generatesTitle = (kind: string) => kind === 'game' || kind === 'training';
@@ -133,6 +136,7 @@ export function blankState(init: Partial<FormState> = {}): FormState {
 		deadline: '',
 		location_id: '',
 		opponent_id: '',
+		notes: '',
 		is_friendly: false,
 		team_ids: [],
 		group_ids: [],
@@ -179,6 +183,7 @@ export function valuesToState(v: EventValues, names: { invited: Ref[]; excluded:
 		deadline: isoToLocalInput(v.deadline),
 		location_id: v.location_id ?? '',
 		opponent_id: v.opponent_id ?? '',
+		notes: v.notes ?? '',
 		is_friendly: v.is_friendly,
 		team_ids: [...v.team_ids],
 		group_ids: [...v.group_ids],
@@ -222,6 +227,7 @@ export function createPayload(s: FormState): EventIn {
 		deadline: orNull(normLocal(s.deadline)),
 		location_id: orNull(s.location_id),
 		opponent_id: isGame(s.kind) ? orNull(s.opponent_id) : null,
+		notes: s.notes.trim(),
 		...audience(s),
 		invited_member_ids: s.invited.map((m) => m.id),
 		excluded_member_ids: s.excluded.map((m) => m.id),
@@ -254,6 +260,7 @@ export function patchPayload(s: FormState, initial: FormState, opts: { seriesShi
 	if (s.location_id !== initial.location_id) body.location_id = orNull(s.location_id);
 	const opponent = isGame(s.kind) ? s.opponent_id : '';
 	if (opponent !== initial.opponent_id) body.opponent_id = orNull(opponent);
+	if (s.notes.trim() !== initial.notes.trim()) body.notes = s.notes.trim();
 	const friendly = isGame(s.kind) && s.is_friendly;
 	if (friendly !== initial.is_friendly) body.is_friendly = friendly;
 	const a = audience(s);
@@ -393,7 +400,7 @@ export function describeRecurrence(s: FormState): string {
 
 /** The API's field names the form shows next to an input; other field errors go into the summary at the top. */
 export const SHOWN_FIELDS = [
-	'kind', 'subtype_id', 'title', 'start', 'end', 'gathering', 'deadline', 'location_id', 'opponent_id', 'is_friendly', 'team_ids', 'group_ids', 'club_wide',
+	'kind', 'subtype_id', 'title', 'start', 'end', 'gathering', 'deadline', 'location_id', 'opponent_id', 'notes', 'is_friendly', 'team_ids', 'group_ids', 'club_wide',
 	'invited_member_ids', 'excluded_member_ids', 'frequency', 'interval', 'weekdays', 'until', 'count', 'rrule', 'recurrence', 'scope'
 ]; // prettier-ignore
 

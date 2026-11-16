@@ -9,21 +9,8 @@ Every block still drawn from sample content carries `<SampleBadge what="…" />`
 
 ## 1. Blocks still on sample data
 
-### 1.1 `calendar-sync` — member calendar, "Sync to my calendar"
-Where: `routes/(app)/parent/+page.svelte` (calendar header, disabled button + badge).
-Need: a personal calendar feed so a family can subscribe in Google/Apple/Outlook.
-- A per-person (or per-account, covering the family) secret feed URL: `GET /public/calendar/{token}.ics` (no login), with a token that
-  can be created, shown, replaced and switched off (same pattern as `members.services.stats_sharing` for the personal stats link).
-- Content: the person's (and managed children's) events for the current and next season: games, trainings, other; title,
-  start/end, gathering time as an alarm or in the description, location, "Cancelled" status, the player's answer in the description.
-- `GET/PUT/DELETE /portal/me/calendar-feed` to read, enable/rotate and disable it; the frontend then shows the URL with Copy and the
-  "webcal://" link, like the statistics share card (`components/portal/StatsShare.svelte`).
-
-### 1.2 `finance-totals` — manage Finance list, totals row
-Where: `routes/(app)/finance/+page.svelte`, fixture `src/lib/finance-sample.ts`.
-Need: `GET /finance/summary?season_id=…&from=…&to=…` returning, for confirmed invoices in the selection: `invoiced` (sum), `received`
-(sum of payments), `open` (sum), `overdue` (sum and count of invoices past their due date). Amounts as strings (decimals), one query
-with aggregates, respecting the same filters as the invoice list.
+None left: the calendar link (`events.CalendarFeed`, `GET/PUT/DELETE /portal/me/calendar-feed`, public `/public/calendar/<token>.ics`) and the
+Finance totals (`GET /finance/summary`) read live data. `SampleBadge.svelte` stays for future placeholders.
 
 ## 2. Mockup features the API cannot supply yet
 
@@ -38,11 +25,7 @@ Cancel and a requirements dialog; that stays. If the product wants per-requireme
 decline it with a reason, request a new one), the registration model needs per-requirement review state and a reason; reuse
 `MemberRequirementStatus.is_pending_review` and the approve/reopen services in `members/services/onboarding.py`.
 
-### 2.3 Event notes
-Events have no notes/description field, so the phone event form (coach view) cannot edit one. Add `Event.notes` (text, staff-written,
-shown to invitees in the member event drawer), an `EventIn/EventOut` field and the form field.
-
-### 2.4 Line-up lines in notifications and the member app
+### 2.3 Line-up lines in notifications and the member app
 Line-up lines (sport-level feature, `Sport.lineup_slots_enabled` + `lineup_template`, `LineupSlotAssignment`) are informational only.
 A slot holds one player but a player can be in several slots (regular lines plus power play, penalty kill, extra attacker); un-picking
 removes all their slots. `GET /events/{id}/lineup.pdf` renders a PDF overview of the lines (WeasyPrint, English, 503 without it).
@@ -51,7 +34,7 @@ Not done: the player's line in the "You're in the line-up" notification (the bod
 Decision taken: lines are **not** used in statistics, because lines change during games. A per-team opt-in with a warning was
 considered and deliberately left out.
 
-### 2.5 Phone attendance for coaches without manage rights
+### 2.4 Phone attendance for coaches without manage rights
 A coach on a phone who may see but not manage attendance gets the desktop attendance table (the read-only cards were removed). A
 read-only phone list (answer pills, counts) would be nicer; no backend work needed.
 
@@ -60,7 +43,10 @@ read-only phone list (answer pills, counts) would be nicer; no backend work need
 - **Early renewal of expiring requirements.** A requirement that is `expiring_soon` is locked for the member (only expired/missing ones
   can be handed in again). Decide whether members may hand in a renewal early; `submit_as` in `members/services/onboarding.py` is the
   place.
-- **Invoice download for memberships** in the member profile only works when the signed-in person was the registration contact.
+- **Invoice link in the profile overview.** The download itself (`/portal/invoices/{id}.pdf`) follows `members.services.invoice_access`
+  (registration contact, or a parent/guardian of the family of the invoiced people). `membership` rows in `api/routers/portal_profile.py`
+  (`_membership_rows`) still show `invoice_id` only when the contact is among the viewer's people: make it use
+  `invoice_access.can_download(viewer, batch)` so a non-contact parent also gets the link.
 - **Team staff permissions.** Roster and staff writes are allowed for anyone with a management position on that team (e.g. head coach);
   assistants are read-only in the coach Squad page. Letting every staffed coach edit would also let them edit team settings and the team
   photo, because those share one permission check (`teams.services.teams`). Split the check if that is wanted.
@@ -86,6 +72,8 @@ read-only phone list (answer pills, counts) would be nicer; no backend work need
 | events | `0014_attendance_status_before_lineup` | answer before a line-up was published |
 | events | `0015_lineup_selection_slot` | line-up slot per selected player |
 | club | `0012_sport_lineup_slots` | sport-level switch and template for line-up lines |
+| events | `0017_event_notes` | `Event.notes` and `EventSeries.notes` (staff notes for the invitees) |
+| events | `0018_calendar_feed` | `CalendarFeed`: one secret calendar link per account |
 
 A missing migration hides pages silently: server `load` functions drop any part whose API call fails (the manage overview vanished
 once because `members.0016` was not applied).

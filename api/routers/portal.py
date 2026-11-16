@@ -23,7 +23,7 @@ from formbuilder.models import FormSend, Submission
 from formbuilder.services import audience
 from formbuilder.services.submission import submit_form
 from members.models import ClubMembership, Member
-from members.services import access, memberships
+from members.services import access, invoice_access, memberships
 from members.services.errors import Invalid
 from news.services import member_news
 from registration.models import RegistrationBatch, RegistrationSettings
@@ -76,6 +76,7 @@ def _event_display(event):
         "score_for": event.score_for,
         "score_against": event.score_against,
         "cancelled": event.cancelled,
+        "notes": event.notes,
     }
 
 
@@ -161,7 +162,7 @@ def portal_home(request):
     )
     blockers = _blockers(events, now)
     fees = ClubMembership.objects.filter(member_id__in=people).select_related("season", "registration_details__batch").prefetch_related("payments")
-    invoices = RegistrationBatch.objects.filter(contact=viewer, confirmed_at__isnull=False, cancelled_at__isnull=True, invoice_number__isnull=False)
+    invoices = invoice_access.downloadable_invoices(viewer)
     sends = list(
         FormSend.objects.filter(is_active=True)
         .filter(Q(closes_at__isnull=True) | Q(closes_at__gte=now))
@@ -257,7 +258,7 @@ def submitted_form(request, submission_id: UUID):
 @router.get("/invoices/{invoice_id}.pdf")
 def portal_invoice(request, invoice_id: UUID):
     viewer = _viewer(request)
-    batch = RegistrationBatch.objects.filter(pk=invoice_id, contact=viewer, confirmed_at__isnull=False, cancelled_at__isnull=True, invoice_number__isnull=False).first()
+    batch = invoice_access.downloadable_invoices(viewer).filter(pk=invoice_id).first()
     if batch is None:
         raise HttpError(404, "Not found.")
     try:
@@ -535,7 +536,7 @@ def coach_home(request):
                 "id": event.pk, "title": event.title, "start": event.start, "location": event.location.name if event.location else "",
                 "kind": event.kind, "deadline": event.deadline, "team_ids": [team.pk for team in event.teams.all()],
                 "opponent_logo": event.opponent.logo.url if event.opponent and event.opponent.logo else None, "is_home": event.is_home_game,
-                "end": event.end, "gathering": event.gathering, "opponent": event.opponent.name if event.opponent else "",
+                "end": event.end, "gathering": event.gathering, "opponent": event.opponent.name if event.opponent else "", "notes": event.notes,
                 "going": event.going, "out": event.out, "unanswered": event.unanswered, "maybe": event.maybe, "invited": event.invited,
                 "has_game_sheet": hasattr(event, "timeline"),
                 "cancelled": event.cancelled, "lineup": event.kind in (Event.EventKind.GAME, Event.EventKind.TOURNAMENT),
