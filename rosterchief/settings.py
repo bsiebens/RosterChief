@@ -15,6 +15,7 @@ from pathlib import Path
 
 from decouple import Csv, config
 from dj_database_url import parse as db_url
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -217,6 +218,12 @@ if config("DJANGO_SMTP_HOST", default=""):
             "timeout": 20,
         },
     }
+# Resend's HTTP API instead of SMTP (set one or the other, not both). Resend's SMTP relay needs no code: use the SMTP settings above.
+RESEND_API_KEY = config("RESEND_API_KEY", default="")
+if RESEND_API_KEY:
+    if config("DJANGO_SMTP_HOST", default=""):
+        raise ImproperlyConfigured("Set either DJANGO_SMTP_HOST or RESEND_API_KEY, not both.")
+    MAILERS["default"] = {"BACKEND": "rosterchief.mail.ResendEmailBackend", "OPTIONS": {"api_key": RESEND_API_KEY}}
 DEFAULT_FROM_EMAIL = config("DJANGO_FROM_EMAIL", default="webmaster@localhost")
 
 # Multi-tenancy: base domain whose subdomains resolve to a club, e.g.
