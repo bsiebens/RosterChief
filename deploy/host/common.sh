@@ -11,11 +11,20 @@ rc_has_backend() { [[ $1 == full || $1 == backend ]]; }
 rc_has_frontend() { [[ $1 == full || $1 == frontend ]]; }
 rc_valid_role() { [[ $1 == full || $1 == backend || $1 == frontend ]]; }
 
+# The sizing profile from site.env: "standard" (default) or "small" (a 1 GB staging box: no Celery worker or beat, one gunicorn
+# worker, memory caps, a trimmed PostgreSQL and Valkey). Celery tasks then run inside the web request (CELERY_TASK_ALWAYS_EAGER).
+rc_profile() {
+    local p
+    p=$(grep -E '^ROSTERCHIEF_PROFILE=' "$RC_CONFIG/site.env" 2> /dev/null | cut -d= -f2 || true)
+    printf '%s\n' "${p:-standard}"
+}
+
 # The application units (the ones stopped and started around a release) for a role.
 rc_app_units() {
     local role=$1
     if rc_has_backend "$role"; then
-        printf '%s\n' rosterchief-web.service rosterchief-worker.service rosterchief-beat.service
+        printf '%s\n' rosterchief-web.service
+        [[ $(rc_profile) == small ]] || printf '%s\n' rosterchief-worker.service rosterchief-beat.service
     fi
     if rc_has_frontend "$role"; then
         printf '%s\n' rosterchief-management.service rosterchief-controlpanel.service
@@ -90,7 +99,27 @@ rc_install_host_files() {
             install -m 0644 "$unit" "/etc/systemd/system/$name"
         fi
     done
+    rc_install_profile "$src" "$role"
     install -m 0644 "$src/Caddyfile.$role" "$RC_CONFIG/Caddyfile"
     rc_write_tls_snippet
     systemctl daemon-reload
+}
+
+# Drop-ins of the sizing profile (deploy/host/profiles/<profile>/<unit>.conf become /etc/systemd/system/<unit>.d/10-rosterchief-profile.conf).
+# Always removes the ones installed earlier, so going back to "standard" really goes back.
+rc_install_profile() {
+    local src=$1 role=$2 conf name dir
+    rm -f /etc/systemd/system/*.service.d/10-rosterchief-profile.conf
+    [[ $(rc_profile) == small ]] || return 0
+    for conf in "$src"/profiles/small/*.conf; do
+        name=$(basename "$conf" .conf)
+        rc_unit_wanted "$role" "$name" || continue
+        dir=/etc/systemd/system/$name.d
+        install -d -m 0755 "$dir"
+        install -m 0644 "$conf" "$dir/10-rosterchief-profile.conf"
+    done
+    if rc_has_backend "$role"; then
+        # No Celery worker or beat on a small host. They may have been enabled by an earlier deploy.
+        systemctl disable --now rosterchief-worker.service rosterchief-beat.service > /dev/null 2>&1 || true
+    fi
 }

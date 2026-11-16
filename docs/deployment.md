@@ -20,6 +20,8 @@ This is the checklist. The command reference and the details of how a host insta
 **Servers**
 
 - Amazon Linux 2023, 64-bit. For one box: 2 vCPU / 4 GB RAM is a sensible start. Attach a persistent EBS volume.
+- Every host gets a 1 GB swap file when `rc provision` runs (Amazon Linux has none), so a memory spike slows the host down instead of freezing it. `--swap-mb` on `bootstrap.sh` changes the size; 0 skips it.
+- A staging box of 1 GB works with `PROFILE=small` in the environment file (then run `rc provision` again, and deploy). It drops the Celery worker and beat (tasks run inside the web request, scheduled jobs do not run), uses one gunicorn worker, caps the web and Node services with `MemoryHigh`/`MemoryMax` so a runaway service restarts instead of starving the host, protects `sshd` from the OOM killer, and trims PostgreSQL and Valkey. Do not use it for production.
 - Security group: ports 80 and 443 open (see the Cloudflare note below). Keep PostgreSQL, Valkey, Gunicorn and the SvelteKit ports private. Open SSH only to your own address, or use SSM and open nothing.
 - For a split setup (separate frontend and backend), put both in the same VPC. The backend listens on its **private address, port 8001**, and only the frontend host(s) may reach it.
 - SSH access needs key login and passwordless `sudo` for the operator user (`ec2-user` by default).
@@ -43,7 +45,7 @@ This is the checklist. The command reference and the details of how a host insta
 1. **Cut the first release.** From a clean, pushed `development` branch:
    ```bash
    deploy/rc release 1.0.0
-   gh run watch          # CI builds and publishes the GitHub Release
+   gh run watch          # CI checks, tests, then builds and publishes the GitHub Release
    ```
    This merges `development` into `main`, sets the version, tags `v1.0.0` and pushes. The release holds four files: backend, frontend, host scripts and `SHA256SUMS`.
 2. **Provision the server** (installs packages, PostgreSQL, Valkey, Caddy with the Cloudflare module, users, directories, systemd units):
@@ -257,7 +259,7 @@ Optionally stop a secret before it is ever committed, with a pre-commit hook (`.
 
 **2. In the repository cutover** (`docs/repo-cutover.md`). `deploy/cutover/cutover.sh prepare` runs gitleaks on the history it is about to publish, plus a built-in check, and records the result. `push` **refuses** unless that scan was clean. If gitleaks is not installed the result is "unscanned" and `push` refuses too. `--allow-unscanned` overrides it, knowingly. `cutover.sh scan --new . --new-branch development` runs the same scan on its own.
 
-**3. In CI.** The `secrets` job in `.github/workflows/ci.yml` runs gitleaks on every push and pull request over the full history. It uses `gitleaks/gitleaks-action`, which is free for repositories owned by a personal account; for an organisation-owned repository it needs a `GITLEAKS_LICENSE` secret (check the current terms before relying on it).
+**3. In CI.** The `secrets` job in `.github/workflows/ci.yml` runs gitleaks on every push to `main` over the full history. It uses `gitleaks/gitleaks-action`, which is free for repositories owned by a personal account; for an organisation-owned repository it needs a `GITLEAKS_LICENSE` secret (check the current terms before relying on it).
 
 **Configuration.** `.gitleaks.toml` starts from gitleaks' default rules and allowlists only the example environment files (`deploy/environments/*.example`, `deploy/host/app.env.example`), whose values are placeholders. Add other false positives there as narrowly as you can (a path, or a regex for one value), or list a single finding's fingerprint in `.gitleaksignore`. Never allowlist a real secret.
 

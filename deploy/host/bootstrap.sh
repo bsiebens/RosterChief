@@ -17,6 +17,9 @@ Usage: sudo bootstrap.sh --role full|backend|frontend --domain BASE_DOMAIN --own
   --backend-url URL           frontend: the backend's private URL, e.g. http://10.0.1.5:8001 (required)
   --github-repo OWNER/REPO    where releases are downloaded from (written to deploy.env)
   --caddy-binary PATH         use this Caddy build instead of downloading one with the Cloudflare DNS module
+  --profile standard|small    small: a 1 GB staging host. No Celery worker or beat (tasks run in the request), one gunicorn worker,
+                              memory caps on the services, a trimmed PostgreSQL and Valkey. Default standard.
+  --swap-mb N                 size of the swap file in MB, created when the host has no swap (0: none). Default 1024.
 
 Secrets come from the environment, never the command line:
   CLOUDFLARE_API_TOKEN        full/frontend: Zone:Read + DNS:Edit on the zone, for the wildcard certificate
@@ -32,7 +35,7 @@ if [[ ${ID:-} != amzn || ${VERSION_ID:-} != 2023 ]]; then
     exit 2
 fi
 
-role='' domain='' owner_email='' proxied=true access=dns private_ip='' trusted_cidr='' backend_url='' github_repo='' caddy_binary=''
+role='' domain='' owner_email='' proxied=true access=dns private_ip='' trusted_cidr='' backend_url='' github_repo='' caddy_binary='' profile=standard swap_mb=1024
 while [[ $# -gt 0 ]]; do
     [[ $# -ge 2 ]] || usage
     case $1 in
@@ -46,6 +49,8 @@ while [[ $# -gt 0 ]]; do
         --backend-url) backend_url=$2 ;;
         --github-repo) github_repo=$2 ;;
         --caddy-binary) caddy_binary=$2 ;;
+        --profile) profile=$2 ;;
+        --swap-mb) swap_mb=$2 ;;
         *) usage ;;
     esac
     shift 2
@@ -58,6 +63,8 @@ source "$source_dir/common.sh"
 rc_valid_role "$role" || usage
 [[ $proxied == true || $proxied == false ]] || usage
 [[ $access == dns || $access == ip ]] || usage
+[[ $profile == standard || $profile == small ]] || usage
+[[ $swap_mb =~ ^[0-9]+$ ]] || usage
 [[ $access == dns || $proxied == false ]] || { echo "--access ip cannot be combined with the Cloudflare proxy." >&2; exit 2; }
 if [[ ! $domain =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]*[a-z0-9])?$ || ! $owner_email =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z0-9]+$ ]]; then
     echo "Supply a lowercase public DNS domain and the platform owner's email address." >&2
@@ -82,6 +89,20 @@ if [[ -f $RC_CONFIG/site.env ]]; then
         echo "The host is already configured for another domain, owner or role." >&2
         exit 2
     fi
+fi
+
+# ---------------------------------------------------------------- swap
+# Amazon Linux 2023 has none. Without it a memory spike freezes the host (SSH included) instead of slowing it down.
+# Done first: installing packages and building the Python environment are memory-hungry too.
+if [[ $swap_mb -gt 0 && -z $(swapon --show --noheadings) ]]; then
+    if [[ ! -f /swapfile ]]; then
+        dd if=/dev/zero of=/swapfile bs=1M count="$swap_mb" status=none  # dd, not fallocate: always works on XFS
+        chmod 0600 /swapfile
+        mkswap -q /swapfile
+    fi
+    swapon /swapfile
+    grep -Eq '^/swapfile[[:space:]]' /etc/fstab || printf '/swapfile none swap sw 0 0\n' >> /etc/fstab
+    echo "Swap: ${swap_mb} MB at /swapfile."
 fi
 
 # ---------------------------------------------------------------- packages, accounts, directories
@@ -168,6 +189,17 @@ if rc_has_backend "$role"; then
     elif [[ $pg_reload == true ]]; then
         systemctl reload postgresql.service
     fi
+    if [[ $profile == small ]]; then
+        # A 1 GB host: a small cache and few connections (the web app runs one worker).
+        if [[ $(pg -Atqc 'SHOW shared_buffers') != 48MB ]]; then
+            pg -qc "ALTER SYSTEM SET shared_buffers = '48MB'"
+            pg -qc "ALTER SYSTEM SET max_connections = 20"
+            pg -qc "ALTER SYSTEM SET work_mem = '2MB'"
+            pg -qc "ALTER SYSTEM SET maintenance_work_mem = '32MB'"
+            pg -qc "ALTER SYSTEM SET effective_cache_size = '256MB'"
+            systemctl restart postgresql.service
+        fi
+    fi
     if [[ $(pg -Atqc "SELECT 1 FROM pg_roles WHERE rolname = 'rosterchief'") != 1 ]]; then
         runuser -u postgres -- createuser --no-superuser --no-createdb --no-createrole rosterchief
     fi
@@ -175,17 +207,23 @@ if rc_has_backend "$role"; then
         runuser -u postgres -- createdb --owner=rosterchief rosterchief
     fi
 
-    install -m 0644 /dev/stdin /etc/valkey/rosterchief.conf << 'VALKEY'
-bind 127.0.0.1
-protected-mode yes
-appendonly yes
-VALKEY
+    printf '%s\n' 'bind 127.0.0.1' 'protected-mode yes' > "$scratch/valkey.conf"
+    if [[ $profile == small ]]; then
+        # No Celery queue lives here on a small host: a bounded cache, and no append-only file (its rewrites fork the process).
+        printf '%s\n' 'appendonly no' 'maxmemory 64mb' 'maxmemory-policy allkeys-lru' >> "$scratch/valkey.conf"
+    else
+        printf '%s\n' 'appendonly yes' >> "$scratch/valkey.conf"
+    fi
+    valkey_changed=false
+    cmp -s "$scratch/valkey.conf" /etc/valkey/rosterchief.conf 2> /dev/null || valkey_changed=true
+    install -m 0644 "$scratch/valkey.conf" /etc/valkey/rosterchief.conf
     if ! grep -Fxq 'include /etc/valkey/rosterchief.conf' /etc/valkey/valkey.conf; then
         printf '\ninclude /etc/valkey/rosterchief.conf\n' >> /etc/valkey/valkey.conf
-        systemctl enable valkey.service
+        valkey_changed=true
+    fi
+    systemctl enable --now valkey.service
+    if [[ $valkey_changed == true ]]; then
         systemctl restart valkey.service
-    else
-        systemctl enable --now valkey.service
     fi
 fi
 
@@ -197,6 +235,7 @@ rc_set_kv "$RC_CONFIG/site.env" PLATFORM_OWNER_EMAIL "$owner_email"
 rc_set_kv "$RC_CONFIG/site.env" CADDY_ACME_EMAIL "$owner_email"
 rc_set_kv "$RC_CONFIG/site.env" CLOUDFLARE_PROXIED "$proxied"
 rc_set_kv "$RC_CONFIG/site.env" ACCESS_MODE "$access"
+rc_set_kv "$RC_CONFIG/site.env" ROSTERCHIEF_PROFILE "$profile"
 case $role in
     full)
         grep -q '^ROSTERCHIEF_DATABASE_NAME=.\+' "$RC_CONFIG/site.env" || rc_set_kv "$RC_CONFIG/site.env" ROSTERCHIEF_DATABASE_NAME rosterchief
@@ -245,5 +284,5 @@ if rc_has_frontend "$role"; then
 fi
 rc_validate_caddyfile "$RC_CONFIG/Caddyfile" || { echo "The Caddyfile does not validate." >&2; exit 1; }
 
-echo "Host configured as '$role' for $domain (Cloudflare proxy: $proxied)."
+echo "Host configured as '$role' for $domain (Cloudflare proxy: $proxied, profile: $profile)."
 echo "Next: install a release with 'deploy/rc deploy <environment> vX.Y.Z', or on this host 'sudo rosterchief-deploy release vX.Y.Z'."

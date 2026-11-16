@@ -192,6 +192,7 @@ cmd_provision() {
     role=${H_ROLE[i]}
     args=(--role "$role" --domain "$BASE_DOMAIN" --owner-email "$OWNER_EMAIL" --proxied "$CLOUDFLARE_PROXIED" --github-repo "$GITHUB_REPO")
     [[ $ACCESS != ip ]] || args+=(--access ip)
+    args+=(--profile "$PROFILE")
     case $role in
         backend)
             [[ -n $TRUSTED_CIDR ]] || die "Set TRUSTED_CIDR (the private network frontends live in) in the environment file."
