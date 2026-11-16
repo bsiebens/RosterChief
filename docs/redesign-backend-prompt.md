@@ -31,10 +31,6 @@ read-only phone list (answer pills, counts) would be nicer; no backend work need
 
 - **Early renewal keeps one file.** A member's early renewal keeps the old completion valid until approval, but the stored document is
   replaced when the new file is handed in (no per-version file history); `RequirementEvent` records who did what, not the files.
-- **Invoice link in the profile overview.** The download itself (`/portal/invoices/{id}.pdf`) follows `members.services.invoice_access`
-  (registration contact, or a parent/guardian of the family of the invoiced people). `membership` rows in `api/routers/portal_profile.py`
-  (`_membership_rows`) still show `invoice_id` only when the contact is among the viewer's people: make it use
-  `invoice_access.can_download(viewer, batch)` so a non-contact parent also gets the link.
 - **Team staff permissions.** Roster and staff writes are allowed for anyone with a management position on that team (e.g. head coach);
   assistants are read-only in the coach Squad page. Letting every staffed coach edit would also let them edit team settings and the team
   photo, because those share one permission check (`teams.services.teams`). Split the check if that is wanted.

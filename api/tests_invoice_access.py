@@ -63,6 +63,12 @@ class InvoiceAccessTests(TestCase):
         self.assertEqual(self.get("contact").status_code, 200)
         self.assertEqual(self.get("parent").status_code, 200)
 
+    def test_profile_overview_links_the_invoice_for_a_parent_who_is_not_the_contact(self):
+        login = Client().post("/_allauth/app/v1/auth/login", data={"email": self.users["parent"].email, "password": PASSWORD}, content_type="application/json", HTTP_HOST=self.host)
+        token = login.json()["meta"]["session_token"]
+        rows = Client().get("/api/v1/portal/me/overview", HTTP_HOST=self.host, HTTP_X_SESSION_TOKEN=token).json()["memberships"]
+        self.assertEqual([(row["member_id"], row["invoice_id"]) for row in rows], [(str(self.child.pk), str(self.batch.pk))])
+
     def test_child_other_adult_and_stranger_get_404(self):
         for name in ("teen", "uncle", "stranger"):
             self.assertEqual(self.get(name).status_code, 404, name)

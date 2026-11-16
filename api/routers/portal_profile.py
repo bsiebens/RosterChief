@@ -19,7 +19,7 @@ from members.models import ClubMembership, Member, MemberRequirementStatus
 from members.services import memberships as membership_services, onboarding
 from shop.models import Voucher
 from members.services import members as member_services
-from members.services import stats_sharing
+from members.services import invoice_access, stats_sharing
 from members.services.errors import Invalid
 from api.routers.analytics import member_document
 from api.schemas_analytics import MemberGameStatsOut
@@ -222,7 +222,8 @@ def _requirement_item(item):
     }
 
 
-def _membership_rows(people):
+def _membership_rows(people, viewer):
+    allowed = set(invoice_access.downloadable_invoices(viewer).values_list("pk", flat=True))  # the invoices this person may download (contact or a parent of the family)
     rows = ClubMembership.objects.filter(member_id__in=people, season__end_date__gte=timezone.localdate()).select_related("season", "registration_details__batch").prefetch_related("requirement_statuses__events", "payments").order_by("season__start_date")
     out = []
     for row in rows:
@@ -231,7 +232,7 @@ def _membership_rows(people):
         out.append({
             "member_id": row.member_id, "season": row.season.name, "status": row.status, "fee_status": row.fee_status,
             "fee": str(row.fee_amount), "paid": str(row.amount_paid), "balance": str(membership_services.remaining_balance(row)),
-            "invoice_id": invoice.pk if invoice and invoice.contact_id and invoice.contact_id in people else None, "invoice_number": invoice.invoice_number if invoice else None,
+            "invoice_id": invoice.pk if invoice and invoice.pk in allowed else None, "invoice_number": invoice.invoice_number if invoice else None,
             "requirements": [_requirement_item(item) for item in onboarding.checklist_for(row)],
         })
     return out
@@ -246,7 +247,7 @@ def overview(request):
     sends = list(FormSend.objects.filter(is_active=True).filter(Q(closes_at__isnull=True) | Q(closes_at__gte=now)).select_related("form"))
     recipients = audience.audience_ids_by_send(sends)
     return {
-        "memberships": _membership_rows(people),
+        "memberships": _membership_rows(people, viewer),
         "forms": [
             {"id": send.pk, "title": send.form.title, "member_id": member_id, "closes_at": send.closes_at}
             for send in sends
@@ -284,7 +285,7 @@ def hand_in(request, member_id: UUID, requirement_id: UUID, answer: str | None =
             onboarding.submit_as(request.user, membership, requirement, document=document, valid_until=valid_until)
     except Invalid as error:
         raise HttpError(409 if getattr(error, "code", "") == "locked" else 422, str(error)) from None
-    return {"memberships": _membership_rows(_people(viewer))}
+    return {"memberships": _membership_rows(_people(viewer), viewer)}
 
 
 @router.get("/requirements/{member_id}/{requirement_id}/sent-file", response={200: None}, summary="Download the document the club sent me (or my child) for a requirement")
