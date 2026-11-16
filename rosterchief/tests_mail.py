@@ -12,7 +12,7 @@ MAILERS = {"default": {"BACKEND": "rosterchief.mail.ResendEmailBackend", "OPTION
 def session_returning(status=200):
     session = mock.MagicMock()
     session.__enter__.return_value = session
-    response = mock.Mock(status_code=status)
+    response = mock.Mock(status_code=status, text='{"name":"validation_error","message":"Invalid `from` field."}')
     response.raise_for_status.side_effect = None if status < 400 else requests.HTTPError("boom")
     session.post.return_value = response
     return session
@@ -47,6 +47,12 @@ class ResendBackendTests(SimpleTestCase):
             with self.assertRaises(requests.HTTPError):
                 ResendEmailBackend(api_key="re_test").send_messages([message])
             self.assertEqual(ResendEmailBackend(fail_silently=True, api_key="re_test").send_messages([message]), 0)
+
+    def test_a_refusal_carries_what_resend_said(self):
+        message = EmailMessage("Hi", "Body", "webmaster@localhost", ["a@example.com"])
+        with mock.patch("rosterchief.mail.requests.Session", return_value=session_returning(422)):
+            with self.assertRaisesMessage(requests.HTTPError, "Invalid `from` field."):
+                ResendEmailBackend(api_key="re_test").send_messages([message])
 
     def test_without_an_api_key_nothing_is_sent_and_it_says_so(self):
         message = EmailMessage("Hi", "Body", "club@example.com", ["a@example.com"])
