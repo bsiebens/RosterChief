@@ -54,8 +54,9 @@ activate() {
 }
 
 wait_for_app() {
-
-    for _ in {1..15}; do
+    local tries=15
+    [[ $(rc_profile) != small ]] || tries=45  # one gunicorn worker on a small host starts slowly
+    for ((n = 0; n < tries; n++)); do
         if /usr/local/sbin/rosterchief-health; then
             return 0
         fi
