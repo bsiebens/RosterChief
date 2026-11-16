@@ -13,7 +13,7 @@ Goal: the existing GitHub repository (the old RosterChief) carries the new code 
 
 1. **Old production**: pin it to an immutable image tag (`IMAGE_TAG=v0.13.3` in its `.env`) instead of the floating `:main`, so nothing that happens to the repository can change what it pulls. Keep it running (frozen or read-only) until the new system is proven: rolling back *code* does not roll back *data* entered in the new system, because the import from the old one is one-way.
 2. Make sure the new codebase's `development` branch is **committed** and the checkout is clean. Only committed work is published.
-3. Check the old repo's `main` locally matches GitHub (`git fetch` in the old checkout), or just use the GitHub URL as `--old`, which is what the script wants.
+3. Use the **GitHub URL** as `--old`, not a local checkout: a local clone can be stale. The old checkout on this machine has its local `main` 129 commits behind `origin/main`, and the tag `v0.13.3` is only on `origin/main`.
 4. The repository is **public**. Run the scan and read it: `deploy/cutover/cutover.sh scan --new . --new-branch development`. It is a heuristic; run a real scanner such as gitleaks too.
 5. Note down GitHub settings the scripts cannot change: branch protection on `main`, and its **required status checks** (they name the old CI jobs and would block the PR forever).
 
@@ -58,4 +58,4 @@ deploy/cutover/cutover.sh finish --out <out>
 - `rollback --mode revert` restores the old files without a force-push, and `--mode reset` restores the exact old commits;
 - a dirty new checkout is refused, and the scan flags a committed `.env`.
 
-A rehearsal against a clone of the real old repository is described in the commit that added these scripts. Nothing has been pushed to the real GitHub repository.
+It was also rehearsed on a throwaway bare copy of the real old repository (922 commits on the local `main`, 64 tags) with this repository as the new codebase. That run found and fixed a bug the synthetic repositories missed: a relative `--new .` was resolved inside the working clone, so the "new" code silently became the old `development`. The final run showed `main` and `development` with exactly the new tree, the old `main` and `development` and the new history all reachable, the old workflow gone, and both rollback modes restoring the old files and the exact old commits. That copy was made from the local checkout, which is behind GitHub (see above), so it did not exercise the real `main`. Nothing has been pushed to the real GitHub repository.
