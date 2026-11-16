@@ -1,6 +1,6 @@
 [project]
 name = "RosterChief"
-version = "1.0.0-rc5"
+version = "1.0.0-rc6"
 requires-python = ">=3.14"
 dependencies = [
     "beautifulsoup4>=4.15.0",
