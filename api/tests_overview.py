@@ -64,6 +64,14 @@ class OverviewTests(TestCase):
         headers = {"HTTP_HOST": self.host, "HTTP_X_SESSION_TOKEN": login_session(user)}
         return Client().get("/api/v1/overview", **headers)
 
+    def test_club_staff_is_never_unrostered_and_counts_as_staff(self):
+        before = self.get(self.owner).json()
+        with schema_context(self.club.schema_name):
+            Member.objects.filter(pk=self.bob.pk).update(club_staff=True)  # a member on no team, but the club's own staff
+        after = self.get(self.owner).json()
+        self.assertEqual(after["kpis"]["unrostered_members"], before["kpis"]["unrostered_members"] - 1)
+        self.assertEqual(after["cards"]["people"]["staff"], before["cards"]["people"]["staff"] + 1)
+
     def test_numbers(self):
         r = self.get(self.owner)
         self.assertEqual(r.status_code, 200, r.content)

@@ -445,7 +445,7 @@ def club_overview(club) -> dict:
         this_year = members.filter(created__year=now.year).count()
         with_login = members.filter(user__isnull=False).count()
         by_type = {
-            Member.Role.MEMBER: members.members().count(),
+            Member.Role.MEMBER: members.member_role().count(),
             Member.Role.GUARDIAN: members.guardians().count(),
             Member.Role.STAFF: members.staff().count(),
         }

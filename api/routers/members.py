@@ -11,7 +11,7 @@ clash with it.
 import uuid
 
 from django.db import transaction
-from django.db.models import Exists, F, OuterRef, Prefetch, Q, Subquery, Value
+from django.db.models import BooleanField, Exists, ExpressionWrapper, F, OuterRef, Prefetch, Q, Subquery, Value
 from django.db.models.functions import Coalesce, Lower, NullIf
 from django.http import HttpResponse
 from ninja import File, Form, Query, Router, UploadedFile
@@ -91,9 +91,9 @@ def _clean_values(values: dict) -> dict:
 
 def _annotate_roles(qs):
     return qs.annotate(
-        is_member_flag=Exists(ClubMembership.objects.filter(member=OuterRef("pk"))),
+        is_member_flag=Exists(ClubMembership.objects.filter(member=OuterRef("pk")).exclude(status=ClubMembership.StatusChoices.CANCELLED)),
         is_guardian_flag=Exists(Member.objects.guardians().filter(pk=OuterRef("pk"))),
-        is_staff_flag=Exists(StaffAssignment.objects.filter(member=OuterRef("pk"))),
+        is_staff_flag=ExpressionWrapper(Q(club_staff=True) | Q(Exists(StaffAssignment.objects.filter(member=OuterRef("pk")))), output_field=BooleanField()),
     )
 
 
@@ -119,6 +119,7 @@ def _member_detail(request, member: Member) -> dict:
         "profile_photo_url": member.profile_photo_url,
         "player_photo_url": member.player_photo_url if admin else None,
         "roles": sorted(str(r.value) for r in member.roles),
+        "club_staff": member.club_staff,
         "family_ids": sorted({str(link.family_id) for link in links}),
         "has_login": bool(member.user_id),
         "photo_public_consent": member.photo_public_consent,
@@ -277,7 +278,7 @@ def list_members(request, filters: Query[MemberFilters]):
     qs = qs.exclude(pk__in=awaiting_only_member_ids())  # people of a registration staff have not confirmed yet are not members yet
 
     if filters.role == "member":
-        qs = qs.filter(pk__in=Member.objects.members(filters.season).values("pk"))
+        qs = qs.filter(pk__in=Member.objects.member_role(filters.season).values("pk"))
     elif filters.role == "guardian":
         qs = qs.filter(pk__in=Member.objects.guardians().values("pk"))
     elif filters.role == "staff":
@@ -287,7 +288,7 @@ def list_members(request, filters: Query[MemberFilters]):
         role_season = Season.objects.filter(pk=filters.season).first() if filters.season else Season.get_current()
         has_role = Member.objects.guardians().values("pk")
         if role_season is not None:  # without a season nobody has a seasonal role, only the guardian link counts
-            has_role = has_role.union(Member.objects.members(role_season).values("pk"), Member.objects.staff(role_season).values("pk"))
+            has_role = has_role.union(Member.objects.member_role(role_season).values("pk"), Member.objects.staff(role_season).values("pk"))
         qs = qs.exclude(pk__in=has_role)
     elif filters.season:
         qs = qs.filter(pk__in=Member.objects.members(filters.season).values("pk"))
@@ -316,8 +317,8 @@ def list_members(request, filters: Query[MemberFilters]):
         if filters.team:
             on_roster = TeamMembership.objects.filter(member=OuterRef("pk"), season=season)
             on_staff = StaffAssignment.objects.filter(member=OuterRef("pk"), season=season)
-            if filters.team == "none":  # on no team's roster or staff this season
-                qs = qs.exclude(Exists(on_roster) | Exists(on_staff))
+            if filters.team == "none":  # on no team's roster or staff this season (club staff belong to no team by design)
+                qs = qs.exclude(Exists(on_roster) | Exists(on_staff)).exclude(club_staff=True)
             else:
                 try:
                     team_id = uuid.UUID(filters.team)

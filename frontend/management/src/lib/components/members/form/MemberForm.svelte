@@ -87,6 +87,15 @@
 			<Field label={t('members.form.emergency_phone')} name="emergency_phone" type="tel" bind:value={v.emergency_phone} error={fields.emergency_phone} autocomplete="off" />
 		</div>
 
+		<div class="form-control">
+			<label class="label cursor-pointer justify-start gap-3">
+				<input type="checkbox" name="club_staff" class="checkbox" bind:checked={v.club_staff} />
+				<span class="label-text">{t('members.form.club_staff')}</span>
+			</label>
+			<span class="block text-xs text-muted">{t('members.form.club_staff_help')}</span>
+			{#if fields.club_staff}<span class="block text-xs text-error">{fields.club_staff}</span>{/if}
+		</div>
+
 		{@render section(t('members.form.section.privacy'), ShieldCheck)}
 		<div class="form-control">
 			<label class="label cursor-pointer justify-start gap-3">

@@ -36,13 +36,23 @@ class MemberQuerySet(models.QuerySet):
     records that make them one, so one person can be a member, a guardian and
     staff at once without any flag drifting out of date.
 
-    - member:   holds a ``ClubMembership`` (plays/pays in some season)
+    - member:   holds a ``ClubMembership`` that is not cancelled (plays/pays in some season)
     - guardian: is a parent/guardian in a family that also has a child
-    - staff:    has a ``teams.StaffAssignment`` (reverse ``staff_assignments``)
+    - staff:    has a ``teams.StaffAssignment`` (reverse ``staff_assignments``), or is
+      ``club_staff``: works for the club without being tied to a team (an administrator, a treasurer)
+
+    ``members()`` is "holds a membership record of any status" (it is what a season filter or a
+    ``status=cancelled`` list needs); ``member_role()`` is the role itself, which a cancelled membership does not give.
     """
 
     def members(self, season=None):
         qs = ClubMembership.objects.filter(member=OuterRef("pk"))
+        if season is not None:
+            qs = qs.filter(season=season)
+        return self.filter(Exists(qs))
+
+    def member_role(self, season=None):
+        qs = ClubMembership.objects.filter(member=OuterRef("pk")).exclude(status=ClubMembership.StatusChoices.CANCELLED)
         if season is not None:
             qs = qs.filter(season=season)
         return self.filter(Exists(qs))
@@ -58,7 +68,7 @@ class MemberQuerySet(models.QuerySet):
         qs = StaffAssignment.objects.filter(member=OuterRef("pk"))
         if season is not None:
             qs = qs.filter(season=season)
-        return self.filter(Exists(qs))
+        return self.filter(Q(Exists(qs)) | Q(club_staff=True))
 
 
 class Member(UUIDModel):
@@ -98,6 +108,12 @@ class Member(UUIDModel):
 
     license_number = models.CharField(_("license number"), max_length=50, blank=True, null=True)  # noqa: DJ001
 
+    club_staff = models.BooleanField(
+        _("club staff"),
+        default=False,
+        help_text=_("Works for the club without being tied to a team (an administrator, a treasurer). Counts as staff, and is never flagged as a member without a team."),
+    )
+
     objects = MemberQuerySet.as_manager()
 
     class Meta:
@@ -111,7 +127,8 @@ class Member(UUIDModel):
 
     @property
     def is_member(self) -> bool:
-        return self.club_memberships.exists()
+        """A cancelled membership does not make anyone a member."""
+        return self.club_memberships.exclude(status=ClubMembership.StatusChoices.CANCELLED).exists()
 
     @property
     def is_guardian(self) -> bool:
@@ -119,7 +136,7 @@ class Member(UUIDModel):
 
     @property
     def is_staff_member(self) -> bool:
-        return self.staff_assignments.exists()
+        return self.club_staff or self.staff_assignments.exists()
 
     @property
     def roles(self) -> set:

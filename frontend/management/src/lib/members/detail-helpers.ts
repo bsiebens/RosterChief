@@ -96,7 +96,8 @@ export function formValuesFrom(m?: Partial<MemberDetail>): FormValues {
 		date_of_birth: m?.date_of_birth ?? '',
 		language: m?.language ?? '',
 		license_number: m?.license_number ?? '',
-		photo_public_consent: m?.photo_public_consent ?? false
+		photo_public_consent: m?.photo_public_consent ?? false,
+		club_staff: m?.club_staff ?? false
 	};
 }
 
@@ -113,7 +114,8 @@ export function formToBody(form: FormData): Record<string, unknown> {
 		date_of_birth: opt('date_of_birth'),
 		language: s('language'),
 		license_number: opt('license_number'),
-		photo_public_consent: form.get('photo_public_consent') === 'on'
+		photo_public_consent: form.get('photo_public_consent') === 'on',
+		club_staff: form.get('club_staff') === 'on'
 	};
 }
 
@@ -128,6 +130,7 @@ export function valuesFromForm(form: FormData): FormValues {
 		date_of_birth: s('date_of_birth'),
 		language: s('language'),
 		license_number: s('license_number'),
-		photo_public_consent: form.get('photo_public_consent') === 'on'
+		photo_public_consent: form.get('photo_public_consent') === 'on',
+		club_staff: form.get('club_staff') === 'on'
 	};
 }

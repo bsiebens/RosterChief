@@ -101,6 +101,38 @@ class RoleTests(ServiceTestBase):
         self.assertNotIn(coach, Member.objects.staff(self.old_season))
         self.assertNotIn(coach, Member.objects.members())
 
+    def test_a_cancelled_membership_is_not_a_member_role(self):
+        person = self.person("Left")
+        membership = memberships.create_membership(self.admin, person, self.season)
+        self.assertEqual(person.roles, {Member.Role.MEMBER})
+        memberships.cancel(self.admin, membership)
+        self.assertEqual(person.roles, set())
+        self.assertNotIn(person, Member.objects.member_role())
+        self.assertNotIn(person, Member.objects.member_role(self.season))
+        self.assertIn(person, Member.objects.members(self.season))  # the record is still there: a status=cancelled list needs it
+
+    def test_a_second_membership_keeps_the_role_when_one_is_cancelled(self):
+        person = self.person("Back")
+        old = memberships.create_membership(self.admin, person, self.old_season)
+        memberships.create_membership(self.admin, person, self.season)
+        memberships.cancel(self.admin, old)
+        self.assertEqual(person.roles, {Member.Role.MEMBER})
+        self.assertNotIn(person, Member.objects.member_role(self.old_season))
+        self.assertIn(person, Member.objects.member_role(self.season))
+
+    def test_club_staff_is_staff_in_every_season_without_a_team(self):
+        admin = self.person("Admin", club_staff=True)
+        self.assertEqual(admin.roles, {Member.Role.STAFF})
+        self.assertIn(admin, Member.objects.staff(self.season))
+        self.assertIn(admin, Member.objects.staff(self.old_season))
+        self.assertIn(admin, Member.objects.staff())
+        self.assertNotIn(admin, Member.objects.member_role())
+
+    def test_club_staff_who_also_plays_is_both(self):
+        both = self.person("Both", club_staff=True)
+        memberships.create_membership(self.admin, both, self.season)
+        self.assertEqual(both.roles, {Member.Role.MEMBER, Member.Role.STAFF})
+
 
 class AccessTests(ServiceTestBase):
     def setUp(self):
