@@ -393,6 +393,45 @@ def team_detail(actor, team, season) -> dict:
     return {**team_out(team), "season_id": season.pk if season else None, "photo_url": photo_url(team, season), "can_manage": access.can_manage_team(actor, team), "roster": roster, "staff": staff}
 
 
+def roster_pdf_context(team, season, *, now=None) -> dict:
+    """What the roster PDF prints: the club and team header, the players (shirt number, name, position, captain marks) and the staff
+    (name, position) of ``season``. Names and roles only: no contact details, birth dates or photos."""
+    from django.utils import timezone
+
+    from events.services.lineup import current_club
+
+    players = [
+        {
+            "number": m.jersey_number,
+            "name": m.member.get_full_name(),
+            "position": m.position.name if m.position_id else "",
+            "captain": m.is_captain,
+            "alternate": m.is_alternate_captain,
+        }
+        for m in roster_for(team, season)
+    ]
+    staff = []
+    if season is not None:
+        assignments = StaffAssignment.objects.filter(team=team, season=season).select_related("member", "position").order_by("position__ordering", "position__name", "member__last_name", "member__first_name")
+        staff = [{"name": a.member.get_full_name(), "position": a.position.name} for a in assignments]
+    return {"club": current_club(), "team": team, "season": season, "players": players, "staff": staff, "generated_at": now or timezone.localtime()}
+
+
+def render_roster_pdf(team, season) -> bytes:
+    """The roster as a PDF (WeasyPrint). Raises ``shop.services.invoices.PDFUnavailable`` when it cannot render here."""
+    from django.template.loader import render_to_string
+
+    from shop.services import invoices
+
+    try:
+        from weasyprint import HTML
+    except (ImportError, OSError) as error:
+        raise invoices.PDFUnavailable("PDF rendering is not available on this server.") from error
+    context = roster_pdf_context(team, season)
+    context["logo_data_uri"] = invoices._logo_uri(context["club"])
+    return HTML(string=render_to_string("teams/roster.html", context)).write_pdf()
+
+
 # -- roster ---------------------------------------------------------------------------------------------------
 
 ROSTER_FIELDS = ("position_id", "jersey_number", "is_captain", "is_alternate_captain")

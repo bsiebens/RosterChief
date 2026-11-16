@@ -77,7 +77,7 @@
 	};
 
 	// ---- Contrast (WCAG): the text colour that actually lands on each brand colour, chosen automatically when left empty.
-	const HEX = /^#[0-9a-f]{6}$/;
+	const HEX = /^#[0-9a-f]{6}$/i; // saved colours arrive in capitals (#E11B22)
 	const lum = (hex: string) => {
 		const [r, g, b] = [1, 3, 5].map((i) => {
 			const c = parseInt(hex.slice(i, i + 2), 16) / 255;

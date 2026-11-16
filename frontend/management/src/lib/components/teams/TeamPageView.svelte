@@ -2,7 +2,7 @@
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
-	import { ArrowLeft, BarChart3, CalendarCheck, Hash, Pencil, Trash2, TrendingDown, TrendingUp, TriangleAlert, Upload, UserMinus, UserPlus, Users, UsersRound, UserX } from '@lucide/svelte';
+	import { ArrowLeft, BarChart3, CalendarCheck, FileDown, Hash, Pencil, Trash2, TrendingDown, TrendingUp, TriangleAlert, Upload, UserMinus, UserPlus, Users, UsersRound, UserX } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Avatar from '#lib/components/Avatar.svelte';
 	import Modal from '#lib/components/Modal.svelte';
@@ -56,6 +56,8 @@
 
 	const watermark = $derived(data.branding?.logo_url || '/images/rosterchief-white.svg');
 	const addHref = $derived(`/teams/${team?.id}/add${season ? `?season=${season}` : ''}`);
+	// The roster of the selected season as a PDF: players and staff, for everyone who can see the team.
+	const rosterPdfHref = $derived(`/api/v1/teams/${team?.id}/roster.pdf${season || seasonId ? `?season=${season || seasonId}` : ''}`);
 	const manage = $derived(canManageTeam(data.me, team?.id));
 	const seasonObj = $derived((data.seasons ?? []).find((x) => x.id === seasonId));
 	const seasonName = $derived(seasonObj?.name ?? '');
@@ -158,6 +160,7 @@
 				</div>
 				<div class="flex flex-wrap gap-2">
 					<FollowButton kind="team" id={team.id} class="btn gap-2 border-white/25 bg-white/10 text-white hover:bg-white/20" />
+					<a class="btn gap-2 border-white/25 bg-white/10 text-white hover:bg-white/20" href={rosterPdfHref} target="_blank" rel="noopener noreferrer"><FileDown size={14} aria-hidden="true" /> {t('teampage.roster_pdf')}</a>
 					{#if team.analytics_available}<a class="btn gap-2 border-white/25 bg-white/10 text-white hover:bg-white/20" href={analyticsHref(team.id, season || seasonId)}><BarChart3 size={14} aria-hidden="true" /> {t('analytics.button')}</a>{/if}
 					{#if manage}<button class="btn gap-2 border-white/25 bg-white/10 text-white hover:bg-white/20" type="button" onclick={() => (editOpen = true)}><Pencil size={14} /> {t('common.edit')}</button>{/if}
 					{#if isSettings}<button class="btn gap-2 border-white/25 bg-white/10 text-white hover:bg-white/20" type="button" onclick={() => (deleteOpen = true)}><Trash2 size={14} /> {t('common.delete')}</button>{/if}

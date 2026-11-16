@@ -53,7 +53,11 @@ class ResendEmailBackend(BaseEmailBackend):
             for message in email_messages:
                 try:
                     response = session.post(RESEND_API_URL, headers=headers, json=_payload_for(message), timeout=self.timeout)
-                    response.raise_for_status()
+                    try:
+                        response.raise_for_status()
+                    except requests.HTTPError as exc:
+                        # Resend explains a refusal in the body (an invalid "from", an unverified domain); the status line alone does not.
+                        raise requests.HTTPError(f"{exc} - Resend said: {response.text[:500]}", response=response) from exc
                 except requests.RequestException:
                     if not self.fail_silently:
                         raise

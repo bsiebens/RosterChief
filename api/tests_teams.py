@@ -106,6 +106,29 @@ class TeamsApiTests(TestCase):
         for path in ("", "/numbers/overview", f"/{self.u12.pk}", f"/{self.u12.pk}/numbers"):
             self.assertEqual(self.call("get", path, self.coach_user).status_code, 200, path)
 
+    def test_roster_pdf_has_the_players_and_the_staff(self):
+        from teams.services import teams as svc
+
+        with schema_context(self.club.schema_name):
+            TeamMembership.objects.create(team=self.u12, member=self.kid, season=self.season, position=self.forward, jersey_number=7, is_captain=True)
+            StaffAssignment.objects.create(team=self.u12, member=self.coach, season=self.season, position=self.coach_pos)
+            context = svc.roster_pdf_context(self.u12, self.season)
+        self.assertEqual(context["players"], [{"number": 7, "name": "Kim Kid", "position": "Forward", "captain": True, "alternate": False}])
+        self.assertEqual(context["staff"], [{"name": "Coach Test", "position": "Coach"}])
+        r = self.call("get", f"/{self.u12.pk}/roster.pdf?season={self.season.pk}", self.coach_user)  # everyone who can read a team can print it
+        self.assertIn(r.status_code, (200, 503), r.content)  # 503: no WeasyPrint on this machine
+        if r.status_code == 200:
+            self.assertEqual(r["Content-Type"], "application/pdf")
+            self.assertTrue(r.content.startswith(b"%PDF"))
+            self.assertIn("roster-u12.pdf", r["Content-Disposition"])
+        self.assertEqual(self.call("get", f"/{self.u12.pk}/roster.pdf?season={uuid.uuid4()}", self.coach_user).status_code, 422)
+        self.assertEqual(self.call("get", f"/{uuid.uuid4()}/roster.pdf", self.coach_user).status_code, 404)
+        self.assertIn(self.call("get", f"/{self.u12.pk}/roster.pdf").status_code, (401, 403))
+
+    def test_roster_pdf_of_an_empty_team_still_renders(self):
+        r = self.call("get", f"/{self.loose.pk}/roster.pdf", self.owner)
+        self.assertIn(r.status_code, (200, 503), r.content)
+
     def test_referee_management_is_a_settings_field(self):
         body = self.admin("patch", f"/{self.u12.pk}", {"referee_management": "federation"}).json()
         self.assertEqual((body["referee_management"], body["official_management"]), ("federation", "club"))

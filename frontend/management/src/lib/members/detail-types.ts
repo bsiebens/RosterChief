@@ -32,6 +32,8 @@ export type MemberDetail = {
 	roles: string[];
 	family_ids: string[];
 	has_login: boolean;
+	/** Works for the club without a team (an administrator, a treasurer): counts as staff, never flagged as a member without a team. */
+	club_staff?: boolean;
 	photo_public_consent: boolean;
 	phone: string | null;
 	emergency_phone: string | null;
@@ -74,4 +76,5 @@ export type FormValues = {
 	language: string;
 	license_number: string;
 	photo_public_consent: boolean;
+	club_staff: boolean;
 };

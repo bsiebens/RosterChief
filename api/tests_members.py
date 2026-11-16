@@ -362,6 +362,41 @@ class MembersApiTests(TestCase):
         self.assertEqual(row["roles"], ["member", "guardian"])
         self.assertEqual(self.ids(self.get("?role=staff", self.owner)), {str(self.coach.pk)})
 
+    def test_club_staff_is_staff_not_a_member_and_never_flagged_as_unrostered(self):
+        with schema_context(self.club.schema_name):
+            ada = Member.objects.create(first_name="Ada", last_name="Admin")
+            membership = memberships.create_membership(self.owner, ada, self.season)
+        ada_id = str(ada.pk)
+        self.assertIn(ada_id, self.ids(self.get("?team=none", self.owner)))  # a member on no team: flagged
+        self.assertEqual(self.call("patch", f"/{ada_id}", self.coach_user, {"club_staff": True}).status_code, 403)  # admin only
+        r = self.call("patch", f"/{ada_id}", self.owner, {"club_staff": True})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.json()["club_staff"])
+        self.assertEqual(r.json()["roles"], ["member", "staff"])
+        self.assertNotIn(ada_id, self.ids(self.get("?team=none", self.owner)))  # club staff belong to no team by design
+        self.assertTrue(AuditEntry.objects.filter(member=ada, action="member.updated").exists())
+        with schema_context(self.club.schema_name):
+            memberships.cancel(self.owner, membership)
+        self.assertEqual(self.get(f"/{ada_id}", self.owner).json()["roles"], ["staff"])  # the cancelled membership no longer makes her a member
+        self.assertNotIn(ada_id, self.ids(self.get("?role=member", self.owner)))
+        self.assertIn(ada_id, self.ids(self.get("?role=staff", self.owner)))
+        self.assertNotIn(ada_id, self.ids(self.get("?role=none", self.owner)))
+
+    def test_a_person_can_be_created_as_club_staff(self):
+        r = self.admin_post("", {"first_name": "Tess", "last_name": "Treasurer", "club_staff": True})
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual((r.json()["club_staff"], r.json()["roles"]), (True, ["staff"]))
+
+    def test_a_cancelled_membership_alone_leaves_no_role(self):
+        with schema_context(self.club.schema_name):
+            gone = Member.objects.create(first_name="Gone", last_name="Away")
+            membership = memberships.create_membership(self.owner, gone, self.season)
+            memberships.cancel(self.owner, membership)
+        self.assertEqual(self.get(f"/{gone.pk}", self.owner).json()["roles"], [])
+        self.assertIn(str(gone.pk), self.ids(self.get("?role=none", self.owner)))
+        self.assertNotIn(str(gone.pk), self.ids(self.get("?role=member", self.owner)))
+        self.assertIn(str(gone.pk), self.ids(self.get(f"?season={self.season.pk}&status=cancelled", self.owner)))  # still findable as cancelled
+
     def test_team_filter_none(self):
         none = self.ids(self.get("?team=none", self.owner))
         self.assertIn(str(self.kid.pk), none)  # a member on no team this season

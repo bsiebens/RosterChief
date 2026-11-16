@@ -11,10 +11,11 @@
 	}: { label: string; value?: string; error?: string; help?: string; name?: string; placeholder?: string } = $props();
 
 	const id = $props.id();
-	const HEX = /^#[0-9a-f]{6}$/;
+	// Saved colours come back from the API in capitals (#E11B22), typed ones are lowercased: accept both.
+	const HEX = /^#[0-9a-f]{6}$/i;
 	const valid = $derived(HEX.test(value));
 	// The native colour input cannot be empty: it only opens the picker, the swatch itself shows the real state.
-	const swatch = $derived(valid ? value : '#d4d8de');
+	const swatch = $derived(valid ? value.toLowerCase() : '#d4d8de');
 
 	function onText(e: Event & { currentTarget: HTMLInputElement }) {
 		let v = e.currentTarget.value.trim().toLowerCase();

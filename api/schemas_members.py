@@ -177,6 +177,8 @@ class TeamMembershipOut(Schema):
 
 
 class MemberDetail(MemberSummary):
+    #: Works for the club without a team (an administrator, a treasurer): counts as staff, never flagged as a member without a team.
+    club_staff: bool = False
     photo_public_consent: bool
     profile_photo_url: str | None = None
     player_photo_url: str | None = None  # admins only
@@ -202,6 +204,7 @@ class MemberIn(Schema):
     date_of_birth: datetime.date | None = None
     language: str = ""
     license_number: str | None = None
+    club_staff: bool = False
 
 
 class MembershipPartIn(Schema):
@@ -270,6 +273,7 @@ class MemberPatch(Schema):
     date_of_birth: datetime.date | None = None
     language: str | None = None
     license_number: str | None = None
+    club_staff: bool | None = None  # admin only, like every member edit
 
 
 class GrantLoginIn(Schema):

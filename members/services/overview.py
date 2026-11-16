@@ -3,7 +3,7 @@ summary cards. Read-only; everything is about the current season (the one coveri
 
 Definitions (so the page and the member list agree):
 * a *member this season* holds a non-cancelled club membership in the season;
-* *unrostered* = active or pending members on no team's roster and on no team's staff this season;
+* *unrostered* = active or pending members on no team's roster and on no team's staff this season (club staff are never unrostered);
 * *new* = a member whose first ever membership is this season, *returning* = anyone with an earlier one;
 * a team has *no coach* when nobody on its staff holds a management position this season;
 * *renewal rate* = share of last season's (non-cancelled) members who are members again this season.
@@ -136,7 +136,7 @@ def overview(*, include_fees: bool, today: datetime.date | None = None) -> dict:
         "awaiting_approval": members.filter(status=Status.PENDING).count(),
         "documents_to_review": MemberRequirementStatus.objects.filter(is_pending_review=True, membership__season=season).count() if include_fees else 0,
         "teams_without_coach": Team.objects.exclude(Exists(coaches)).count(),
-        "unrostered_members": open_ms.exclude(Exists(on_roster) | Exists(on_staff)).count(),
+        "unrostered_members": open_ms.exclude(Exists(on_roster) | Exists(on_staff)).exclude(member__club_staff=True).count(),
         "new_members": _new_members(season),
         "previous_new_members": _new_members(previous) if previous_total else None,
     }
@@ -145,7 +145,7 @@ def overview(*, include_fees: bool, today: datetime.date | None = None) -> dict:
     cards = {
         "people": {
             "admins": admin_count(),
-            "staff": StaffAssignment.objects.filter(season=season).values("member").distinct().count(),
+            "staff": Member.objects.staff(season).count(),  # team staff of the season plus club staff
             "members": members.values("member").distinct().count(),
             "guardians": Member.objects.guardians().count(),
         },

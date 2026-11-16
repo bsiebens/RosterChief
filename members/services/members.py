@@ -16,7 +16,7 @@ from . import audit
 from .access import require_admin
 from .errors import Invalid
 
-EDITABLE_FIELDS = ("first_name", "last_name", "email", "phone", "emergency_phone", "photo_public_consent", "date_of_birth", "language", "license_number")
+EDITABLE_FIELDS = ("first_name", "last_name", "email", "phone", "emergency_phone", "photo_public_consent", "date_of_birth", "language", "license_number", "club_staff")
 
 
 MAX_PHOTO_BYTES = 5 * 1024 * 1024
