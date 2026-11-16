@@ -9,8 +9,10 @@ The runner also uses a fast password hasher and empties the in-memory cache befo
 only, so ``--parallel`` falls back to slow club creation and is slower overall: run the suite sequentially.
 """
 
+import logging
 import os
 
+import django_tenants.models as tenant_models
 from django.conf import settings
 from django.core.cache import cache
 from django.core.management import call_command
@@ -26,9 +28,24 @@ class TemplateSchemaRunner(DiscoverRunner):
     _template_settings = None
     _original_pre_setup = None
     _fast_hasher = None
+    _real_call_command = None
+    _null_handler = None
 
     def setup_test_environment(self, **kwargs):
         super().setup_test_environment(**kwargs)
+        # Creating a club runs migrate_schemas, which prints its progress for every club: it buried the dots. Errors still raise and print.
+        real = self._real_call_command = tenant_models.call_command
+
+        def quiet_call_command(name, *args, **options):
+            if name == "migrate_schemas":
+                options["verbosity"] = 0
+            return real(name, *args, **options)
+
+        tenant_models.call_command = quiet_call_command
+        # Tests of failure paths (a down mail server, a broken task, a bad logo) log tracebacks that Python would print to stderr between the dots.
+        # A null handler on the root logger swallows them; assertLogs still sees every record, and a failing test still prints its own traceback.
+        self._null_handler = logging.NullHandler()
+        logging.getLogger().addHandler(self._null_handler)
         # Every test user and every test sign-in would otherwise pay for a full-strength PBKDF2 hash (about 0.1s each, thousands of times).
         self._fast_hasher = override_settings(PASSWORD_HASHERS=["django.contrib.auth.hashers.MD5PasswordHasher"])
         self._fast_hasher.enable()
@@ -45,6 +62,12 @@ class TemplateSchemaRunner(DiscoverRunner):
             SimpleTestCase._pre_setup = classmethod(pre_setup)
 
     def teardown_test_environment(self, **kwargs):
+        if self._null_handler is not None:
+            logging.getLogger().removeHandler(self._null_handler)
+            self._null_handler = None
+        if self._real_call_command is not None:
+            tenant_models.call_command = self._real_call_command
+            self._real_call_command = None
         if self._fast_hasher is not None:
             self._fast_hasher.disable()
             self._fast_hasher = None

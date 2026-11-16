@@ -66,4 +66,5 @@ class MembersAdminSmokeTests(TestCase):
                 for url in urls:
                     r = client.get(url)
                     self.assertEqual(r.status_code, 200, (url, r.status_code))
-            self.assertEqual(client.get(reverse("admin:members_auditentry_add")).status_code, 403)
+            with self.assertLogs("django.request", level="WARNING"):  # the expected 403 is logged: assert it instead of printing it between the dots
+                self.assertEqual(client.get(reverse("admin:members_auditentry_add")).status_code, 403)
