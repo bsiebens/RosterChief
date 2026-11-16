@@ -5,6 +5,7 @@ import uuid
 from decimal import Decimal
 from typing import Annotated, Literal
 
+from django.utils import timezone
 from ninja import Field, Schema
 from pydantic import BeforeValidator
 
@@ -35,6 +36,18 @@ class FamilyRefOut(Schema):
     name: str
 
 
+class RequirementCounts(Schema):
+    """How many of a member's documents/questions need attention this season (see ``members.services.onboarding.item_for``)."""
+
+    missing: int = 0
+    #: Handed in, waiting for staff.
+    pending: int = 0
+    #: Declined or asked for again: the member has to act.
+    declined: int = 0
+    expiring_soon: int = 0
+    expired: int = 0
+
+
 class MemberSummary(Schema):
     id: UID
     first_name: str
@@ -52,6 +65,39 @@ class MemberSummary(Schema):
     #: Membership status in the listed season (None if they hold no membership then). Fee status: admins only.
     status: str | None = None
     fee_status: str | None = None
+    #: Short names of the teams the person plays on in the listed season (at most 3; the list endpoint only).
+    teams: list[str] = []
+    #: The listed season's documents summary; null when they hold no membership then (the list endpoint only).
+    requirements: RequirementCounts | None = None
+
+    @staticmethod
+    def resolve_teams(obj) -> list[str]:
+        if isinstance(obj, dict):
+            return obj.get("teams", [])
+        return [row.team.short_name or row.team.name for row in getattr(obj, "_list_teams", [])][:3]
+
+    @staticmethod
+    def resolve_requirements(obj, context) -> dict | None:
+        if isinstance(obj, dict):
+            return obj.get("requirements")
+        memberships = getattr(obj, "_list_memberships", None)
+        if not memberships:
+            return None
+        from members.services import onboarding
+
+        request = context["request"]
+        active = getattr(request, "_active_requirements", None)
+        if active is None:
+            active = request._active_requirements = list(onboarding.open_requirements())
+        today = timezone.localdate()
+        statuses = {s.requirement_id: s for s in memberships[0].requirement_statuses.all()}
+        counts = {"missing": 0, "pending": 0, "declined": 0, "expiring_soon": 0, "expired": 0}
+        for requirement in active:
+            display = onboarding.item_for(requirement, statuses.get(requirement.pk), today).display
+            display = "declined" if display == "requested" else display
+            if display in counts:
+                counts[display] += 1
+        return counts
 
     @staticmethod
     def resolve_roles(obj) -> list[str]:

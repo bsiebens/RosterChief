@@ -11,7 +11,7 @@ clash with it.
 import uuid
 
 from django.db import transaction
-from django.db.models import Exists, OuterRef, Q, Subquery, Value
+from django.db.models import Exists, F, OuterRef, Prefetch, Q, Subquery, Value
 from django.db.models.functions import Coalesce, Lower, NullIf
 from django.http import HttpResponse
 from ninja import File, Form, Query, Router, UploadedFile
@@ -339,7 +339,13 @@ def list_members(request, filters: Query[MemberFilters]):
     if field != "last_name":
         order.append("last_name")
     order += ["first_name", "pk"]
-    return _annotate_roles(qs).prefetch_related("family_memberships__family__memberships__member").order_by(*order)
+    qs = _annotate_roles(qs).prefetch_related("family_memberships__family__memberships__member")
+    if season is not None:  # the Team and Docs columns: prefetched for the page, never per row
+        qs = qs.prefetch_related(
+            Prefetch("team_memberships", queryset=TeamMembership.objects.filter(season=season).select_related("team").order_by(F("team__ordering").asc(nulls_last=True), "team__name"), to_attr="_list_teams"),
+            Prefetch("club_memberships", queryset=ClubMembership.objects.filter(season=season).prefetch_related("requirement_statuses"), to_attr="_list_memberships"),
+        )
+    return qs.order_by(*order)
 
 
 def _invite(request, member, role_slug: str) -> tuple[dict, tuple]:

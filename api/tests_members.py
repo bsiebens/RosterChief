@@ -109,6 +109,32 @@ class MembersApiTests(TestCase):
         self.assertNotIn(str(self.coach.pk), self.ids(r))
         self.assertIn(str(self.coach.pk), self.ids(self.get("?include_guardians=1", self.owner)))
 
+    def test_list_rows_carry_teams_and_document_counts_without_extra_queries(self):
+        from django.db import connection as conn
+        from django.test.utils import CaptureQueriesContext
+
+        from members.models import MemberRequirementStatus, OnboardingRequirement
+
+        with schema_context(self.club.schema_name):
+            medical = OnboardingRequirement.objects.create(name="Medical", valid_for_months=12)
+            photo = OnboardingRequirement.objects.create(name="Photo")
+            OnboardingRequirement.objects.create(name="Retired", is_active=False)
+            ms = self.player.club_memberships.get(season=self.season)
+            MemberRequirementStatus.objects.create(membership=ms, requirement=medical, is_complete=True, valid_until=timezone.localdate() - datetime.timedelta(days=1))
+            MemberRequirementStatus.objects.create(membership=ms, requirement=photo, is_pending_review=True, review_state="pending")
+        rows = {i["id"]: i for i in self.get("?limit=50", self.owner).json()["items"]}
+        player, elsewhere = rows[str(self.player.pk)], rows[str(self.elsewhere.pk)]
+        self.assertEqual(player["teams"], ["U12"])
+        self.assertEqual(player["requirements"], {"missing": 0, "pending": 1, "declined": 0, "expiring_soon": 0, "expired": 1})
+        self.assertEqual((elsewhere["teams"], elsewhere["requirements"]["missing"]), (["U14"], 2))
+        with CaptureQueriesContext(conn) as many:
+            self.get("?limit=50", self.owner)
+        with CaptureQueriesContext(conn) as one:
+            self.get("?limit=2", self.owner)
+        mine = lambda cap: [q for q in cap.captured_queries if "teams_teammembership" in q["sql"] or "memberrequirementstatus" in q["sql"] or "onboardingrequirement" in q["sql"]]  # noqa: E731
+        self.assertEqual((len(mine(many)), len(mine(one))), (len(mine(one)), len(mine(one))))  # more rows, not more queries
+        self.assertLessEqual(len(mine(one)), 6)
+
     def test_detail_has_spaced_phone_for_display(self):
         data = self.get(f"/{self.coach.pk}", self.owner).json()
         self.assertEqual(data["phone"], "+32470123456")  # compact form stays for forms and tel: links
