@@ -434,6 +434,10 @@ def onboarding_document_path(instance: MemberRequirementStatus, filename: str) -
     return f"onboarding/{instance.membership_id}/{filename}"
 
 
+def onboarding_sent_path(instance: MemberRequirementStatus, filename: str) -> str:
+    return f"onboarding/{instance.membership_id}/sent/{filename}"
+
+
 class OnboardingRequirement(UUIDModel):
     """A club-defined item every member must satisfy after signing up or renewing --
     e.g. "provide a medical certificate", "upload a photo".
@@ -533,6 +537,24 @@ class MemberRequirementStatus(UUIDModel):
     #: Handed in by the member or their guardian and waiting for staff: it does not count as complete (and keeps blocking) until approved.
     is_pending_review = models.BooleanField(_("waiting for review"), default=False)
     submitted_at = models.DateTimeField(_("submitted at"), null=True, blank=True)
+
+    class ReviewState(models.TextChoices):
+        NONE = "none", _("None")
+        PENDING = "pending", _("Waiting for review")
+        APPROVED = "approved", _("Approved")
+        DECLINED = "declined", _("Declined")
+        REQUESTED = "requested", _("Requested")
+
+    #: The latest staff decision on what the member handed in (kept in step with ``is_pending_review``): ``declined`` and ``requested`` mean the
+    #: member has to act; ``review_note`` is the reason / message they see. The full trail is in ``events``.
+    review_state = models.CharField(_("review state"), max_length=10, choices=ReviewState.choices, default=ReviewState.NONE)
+    review_note = models.TextField(_("review note"), blank=True)
+    #: An early renewal (handed in while the current completion is still valid) keeps the old expiry until approved; the new one waits here.
+    submitted_valid_until = models.DateField(_("submitted valid until"), null=True, blank=True)
+    #: A personalised file the club sent to this member for this requirement (e.g. a pre-filled form to fill in and hand back).
+    sent_file = models.FileField(_("sent file"), storage=get_private_storage, upload_to=onboarding_sent_path, blank=True, help_text=_("Stored privately -- downloadable only by this member and their guardians."))
+    sent_at = models.DateTimeField(_("sent at"), null=True, blank=True)
+    sent_note = models.TextField(_("sent note"), blank=True)
     #: The last reminder sent about this item (``expiring`` / ``expired`` / ``missing``), so the daily sweep never repeats itself.
     last_reminder_at = models.DateTimeField(_("last reminder at"), null=True, blank=True)
     last_reminder_kind = models.CharField(_("last reminder kind"), max_length=20, blank=True)
@@ -546,6 +568,35 @@ class MemberRequirementStatus(UUIDModel):
 
     def __str__(self):
         return f"{self.membership} — {self.requirement}"
+
+
+class RequirementEvent(UUIDModel):
+    """Append-only history of one membership's requirement: what happened, who did it and the reason or message that went with it."""
+
+    class Kind(models.TextChoices):
+        SUBMITTED = "submitted", _("Handed in")
+        APPROVED = "approved", _("Approved")
+        DECLINED = "declined", _("Declined")
+        REQUESTED = "requested", _("Requested")
+        REOPENED = "reopened", _("Reopened")
+        BYPASSED = "bypassed", _("Not needed")
+        SENT_FILE = "sent_file", _("Document sent")
+        COMPLETED = "completed", _("Completed")
+
+    status = models.ForeignKey(MemberRequirementStatus, on_delete=models.CASCADE, related_name="events", verbose_name=_("status"))
+    kind = models.CharField(_("kind"), max_length=12, choices=Kind.choices)
+    actor = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("actor"))
+    #: The actor's name when the event was written (they may have no member record, or be deleted later).
+    actor_name = models.CharField(_("actor name"), max_length=200, blank=True)
+    note = models.TextField(_("note"), blank=True)
+
+    class Meta:
+        verbose_name = _("requirement event")
+        verbose_name_plural = _("requirement events")
+        ordering = ["created", "pk"]
+
+    def __str__(self):
+        return f"{self.status_id} {self.kind}"
 
 
 class AuditEntry(UUIDModel):

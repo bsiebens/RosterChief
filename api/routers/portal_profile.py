@@ -14,7 +14,8 @@ from api.routers.portal import _people, _viewer
 from events.models import Event
 from formbuilder.models import FormSend
 from formbuilder.services import audience
-from members.models import ClubMembership, Member
+from api.routers.requirements import private_download
+from members.models import ClubMembership, Member, MemberRequirementStatus
 from members.services import memberships as membership_services, onboarding
 from shop.models import Voucher
 from members.services import members as member_services
@@ -202,6 +203,10 @@ def unfollow_game(request, event_id: UUID):
     return _follows(request, _people(viewer))
 
 
+#: What a member may read of a requirement's history: decisions and messages from the club (never who in the club did it).
+MEMBER_VISIBLE_EVENTS = ("approved", "declined", "requested", "sent_file")
+
+
 def _requirement_item(item):
     requirement, status = item.requirement, item.status
     return {
@@ -210,12 +215,15 @@ def _requirement_item(item):
         "valid_for_months": requirement.valid_for_months,
         "state": item.display, "valid_until": item.valid_until, "answer": item.answer,
         "has_document": bool(status and status.document), "completed_at": status.completed_at if status else None,
-        "submitted_at": status.submitted_at if status else None, "locked": item.display in ("complete", "expiring_soon", "bypassed"),
+        "submitted_at": status.submitted_at if status else None, "locked": item.display in ("complete", "bypassed"),
+        "review_note": status.review_note if status else "",
+        "has_sent_file": bool(status and status.sent_file), "sent_at": status.sent_at if status else None, "sent_note": status.sent_note if status else "",
+        "history": [{"kind": e.kind, "note": e.note, "created": e.created} for e in status.events.all() if e.kind in MEMBER_VISIBLE_EVENTS] if status else [],
     }
 
 
 def _membership_rows(people):
-    rows = ClubMembership.objects.filter(member_id__in=people, season__end_date__gte=timezone.localdate()).select_related("season", "registration_details__batch").prefetch_related("requirement_statuses", "payments").order_by("season__start_date")
+    rows = ClubMembership.objects.filter(member_id__in=people, season__end_date__gte=timezone.localdate()).select_related("season", "registration_details__batch").prefetch_related("requirement_statuses__events", "payments").order_by("season__start_date")
     out = []
     for row in rows:
         batch = getattr(getattr(row, "registration_details", None), "batch", None)
@@ -277,6 +285,18 @@ def hand_in(request, member_id: UUID, requirement_id: UUID, answer: str | None =
     except Invalid as error:
         raise HttpError(409 if getattr(error, "code", "") == "locked" else 422, str(error)) from None
     return {"memberships": _membership_rows(_people(viewer))}
+
+
+@router.get("/requirements/{member_id}/{requirement_id}/sent-file", response={200: None}, summary="Download the document the club sent me (or my child) for a requirement")
+def sent_file(request, member_id: UUID, requirement_id: UUID):
+    viewer = _viewer(request)
+    member = _people(viewer).get(member_id)
+    status = None
+    if member is not None:
+        status = MemberRequirementStatus.objects.filter(membership__member=member, requirement_id=requirement_id).exclude(sent_file="").order_by("-membership__season__start_date").first()
+    if status is None:
+        raise HttpError(404, "Not found.")
+    return private_download(status.sent_file)
 
 
 # --- personal statistics and their public link -----------------------------------------------------------------------------

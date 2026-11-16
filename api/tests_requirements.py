@@ -69,6 +69,7 @@ class RequirementsApiTests(TestCase):
         self._ctx = schema_context(self.club.schema_name)
         self._ctx.__enter__()
         self.addCleanup(self._ctx.__exit__, None, None, None)
+        Member.objects.filter(pk=self.alice.pk).update(language="en")
 
     # -- helpers --
     def call(self, method, path, data=None, *, user=None, multipart=False):
@@ -256,3 +257,110 @@ class RequirementsApiTests(TestCase):
         self.reminders()
         titles = list(InboxNotification.objects.filter(user=self.alice_user).values_list("body", flat=True))
         self.assertTrue(any("Kid" in body for body in titles), titles)  # "Kid: ..." on the child's behalf
+
+    # -- review: decline / request / history / sent file / early renewal --
+    def submit(self, req, *, ms=None, name="cert.pdf", **kwargs):
+        from members.models import OnboardingRequirement
+        from members.services import onboarding
+
+        requirement = OnboardingRequirement.objects.get(pk=req["id"])
+        return onboarding.submit_as(self.alice_user, ms or self.alice_ms, requirement, document=SimpleUploadedFile(name, b"%PDF-1.4 x", "application/pdf"), **kwargs)
+
+    def action(self, req, name, data=None, **kw):
+        return self.call("post", f"/memberships/{self.alice_ms.pk}/{req['id']}/{name}", data if data is not None else {}, **kw)
+
+    def item(self, req):
+        return next(i for i in self.checklist()["items"] if i["requirement"]["id"] == req["id"])
+
+    def test_decline_needs_a_reason_tells_the_member_and_allows_a_new_version(self):
+        req = self.requirement(requires_document=True)
+        self.assertEqual(self.action(req, "decline", {"note": "x"}).status_code, 422)  # nothing waiting
+        self.submit(req)
+        self.assertEqual(self.action(req, "decline", {"note": "  "}).status_code, 422)
+        self.assertEqual(self.action(req, "decline", {"note": "Blurry"}, user=self.bob_user).status_code, 403)
+        done = self.action(req, "decline", {"note": "Photo is blurry"})
+        self.assertEqual(done.status_code, 200, done.content)
+        item = done.json()
+        self.assertEqual((item["display"], item["state"], item["review_note"]), ("declined", "open", "Photo is blurry"))
+        self.assertEqual([e["kind"] for e in item["history"]], ["submitted", "declined"])
+        self.assertEqual(item["history"][1]["note"], "Photo is blurry")
+        note = InboxNotification.objects.get(user=self.alice_user, title__contains="Declined")
+        self.assertEqual((note.href, "Photo is blurry" in note.body), ("/parent?tab=payments", True))
+        self.submit(req, name="again.pdf")  # a new version goes back to review
+        self.assertEqual(self.item(req)["display"], "pending")
+        self.assertEqual(self.item(req)["review_note"], "")
+        self.assertEqual(self.action(req, "approve").status_code, 200)
+        item = self.item(req)
+        self.assertEqual((item["display"], [e["kind"] for e in item["history"]]), ("complete", ["submitted", "declined", "submitted", "approved"]))
+        self.assertTrue(InboxNotification.objects.filter(user=self.alice_user, title__contains="Approved").exists())
+        self.assertTrue(MemberRequirementStatus.objects.filter(is_pending_review=False, review_state="approved").exists())
+
+    def test_request_a_message_at_any_time(self):
+        req = self.requirement()
+        self.assertEqual(self.action(req, "request", {"note": ""}).status_code, 422)
+        item = self.action(req, "request", {"note": "Please send the new form"}).json()
+        self.assertEqual((item["display"], item["review_note"]), ("requested", "Please send the new form"))
+        self.assertTrue(InboxNotification.objects.filter(user=self.alice_user, body__contains="Please send the new form").exists())
+        self.assertEqual(self.item(req)["history"][-1]["kind"], "requested")
+        self.complete(req)  # completing resolves it
+        self.assertEqual(self.item(req)["display"], "complete")
+        item = self.action(req, "request", {"note": "Update please"}).json()  # still valid, but the club asks for an update
+        self.assertEqual((item["display"], item["state"]), ("requested", "complete"))
+        self.assertEqual(self.action(req, "reopen").status_code, 200)
+        self.assertEqual(self.item(req)["display"], "missing")
+        self.assertEqual(self.item(req)["review_note"], "")
+
+    def test_early_renewal_keeps_the_old_completion_until_approved(self):
+        req = self.requirement(valid_for_months=12, reminder_days_before=30)
+        soon = timezone.localdate() + datetime.timedelta(days=10)
+        self.complete(req, valid_until=soon.isoformat())
+        self.assertEqual(self.item(req)["display"], "expiring_soon")
+        new_expiry = timezone.localdate() + datetime.timedelta(days=400)
+        self.submit(req, valid_until=new_expiry)
+        item = self.item(req)
+        self.assertEqual((item["display"], item["state"], item["valid_until"]), ("pending", "complete", soon.isoformat()))  # old one still valid
+        self.assertEqual(self.action(req, "approve").status_code, 200)
+        item = self.item(req)
+        self.assertEqual((item["display"], item["valid_until"]), ("complete", new_expiry.isoformat()))
+        # a plain valid completion is still locked
+        from members.models import OnboardingRequirement
+        from members.services import onboarding
+        from members.services.errors import Invalid
+
+        with self.assertRaises(Invalid):
+            onboarding.submit_as(self.alice_user, self.alice_ms, OnboardingRequirement.objects.get(pk=req["id"]), document=SimpleUploadedFile("x.pdf", b"%PDF x"))
+
+    def test_declined_renewal_leaves_the_old_completion_in_force(self):
+        req = self.requirement(valid_for_months=12)
+        self.complete(req, valid_until=(timezone.localdate() + datetime.timedelta(days=5)).isoformat())
+        self.submit(req)
+        item = self.action(req, "decline", {"note": "Wrong year"}).json()
+        self.assertEqual((item["display"], item["state"]), ("declined", "complete"))
+
+    def test_send_a_document_to_one_member(self):
+        req = self.requirement()
+        files = {"document": SimpleUploadedFile("prefilled.pdf", b"%PDF-1.4 form", "application/pdf"), "note": "Fill in page 2"}
+        self.assertEqual(self.call("post", f"/memberships/{self.alice_ms.pk}/{req['id']}/sent-file", files, multipart=True, user=self.bob_user).status_code, 403)
+        done = self.call("post", f"/memberships/{self.alice_ms.pk}/{req['id']}/sent-file", {"document": SimpleUploadedFile("prefilled.pdf", b"%PDF-1.4 form", "application/pdf"), "note": "Fill in page 2"}, multipart=True)
+        self.assertEqual(done.status_code, 200, done.content)
+        item = done.json()
+        self.assertEqual((item["has_sent_file"], item["sent_note"], item["history"][-1]["kind"]), (True, "Fill in page 2", "sent_file"))
+        self.assertTrue(InboxNotification.objects.filter(user=self.alice_user, title__contains="sent you a document").exists())
+        got = self.call("get", f"/memberships/{self.alice_ms.pk}/{req['id']}/sent-file")
+        self.assertEqual((got.status_code, b"".join(got.streaming_content)), (200, b"%PDF-1.4 form"))
+        self.assertEqual(self.call("get", f"/memberships/{self.alice_ms.pk}/{req['id']}/sent-file", user=self.bob_user).status_code, 404)
+        bad = self.call("post", f"/memberships/{self.alice_ms.pk}/{req['id']}/sent-file", {"document": SimpleUploadedFile("x.exe", b"MZ")}, multipart=True)
+        self.assertEqual(bad.status_code, 422)
+        self.submit(req)  # the member hands the filled-in version back
+        self.assertEqual(self.item(req)["display"], "pending")
+        self.assertEqual(self.action(req, "approve").status_code, 200)
+        locked = self.call("delete", f"/memberships/{self.alice_ms.pk}/{req['id']}/sent-file")
+        self.assertEqual(locked.status_code, 422)  # approved: no changes
+        self.assertEqual(self.call("post", f"/memberships/{self.alice_ms.pk}/{req['id']}/sent-file", {"document": SimpleUploadedFile("b.pdf", b"%PDF x")}, multipart=True).status_code, 422)
+
+    def test_remove_the_sent_document_before_approval(self):
+        req = self.requirement()
+        self.call("post", f"/memberships/{self.alice_ms.pk}/{req['id']}/sent-file", {"document": SimpleUploadedFile("a.pdf", b"%PDF x")}, multipart=True)
+        gone = self.call("delete", f"/memberships/{self.alice_ms.pk}/{req['id']}/sent-file")
+        self.assertEqual((gone.status_code, gone.json()["has_sent_file"]), (200, False))
+        self.assertEqual(self.call("get", f"/memberships/{self.alice_ms.pk}/{req['id']}/sent-file").status_code, 404)

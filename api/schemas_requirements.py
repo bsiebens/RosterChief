@@ -62,12 +62,32 @@ class RequirementPatch(Schema):
     reminder_days_before: int | None = None
 
 
+class EventOut(Schema):
+    """One step in a requirement's history."""
+
+    id: UUID
+    kind: Literal["submitted", "approved", "declined", "requested", "reopened", "bypassed", "sent_file", "completed"]
+    actor_name: str = ""
+    note: str = ""
+    created: datetime.datetime
+
+
 class ItemOut(Schema):
     requirement: RequirementOut
     #: open / complete / bypassed (an expired completion is open again)
     state: Literal["open", "complete", "bypassed"]
-    #: missing / pending (handed in by the member, waiting for approval) / complete / expiring_soon / expired / bypassed
-    display: Literal["missing", "pending", "complete", "expiring_soon", "expired", "bypassed"]
+    #: missing / pending (handed in by the member, waiting for approval) / declined (member has to hand in a new version) / requested (staff asked
+    #: for something) / complete / expiring_soon / expired / bypassed
+    display: Literal["missing", "pending", "declined", "requested", "complete", "expiring_soon", "expired", "bypassed"]
+    #: The latest reason (declined) or message (requested) the member sees.
+    review_note: str = ""
+    #: A personalised file the club sent this member (download through ``.../sent-file``), with the note that came with it.
+    has_sent_file: bool = False
+    sent_at: datetime.datetime | None = None
+    sent_note: str = ""
+    submitted_at: datetime.datetime | None = None
+    #: Everything that happened to this requirement, oldest first.
+    history: list[EventOut] = Field(default_factory=list)
     note: str = ""
     completed_at: datetime.datetime | None = None
     completed_by: str | None = None
@@ -93,6 +113,30 @@ class ItemOut(Schema):
     @staticmethod
     def resolve_has_document(obj):
         return bool(obj.status and obj.status.document)
+
+    @staticmethod
+    def resolve_review_note(obj):
+        return obj.status.review_note if obj.status else ""
+
+    @staticmethod
+    def resolve_has_sent_file(obj):
+        return bool(obj.status and obj.status.sent_file)
+
+    @staticmethod
+    def resolve_sent_at(obj):
+        return obj.status.sent_at if obj.status else None
+
+    @staticmethod
+    def resolve_sent_note(obj):
+        return obj.status.sent_note if obj.status else ""
+
+    @staticmethod
+    def resolve_submitted_at(obj):
+        return obj.status.submitted_at if obj.status else None
+
+    @staticmethod
+    def resolve_history(obj):
+        return list(obj.status.events.all()) if obj.status else []
 
 
 class SeasonRef(Schema):
@@ -121,6 +165,12 @@ class ChecklistOut(Schema):
 
 class BypassIn(Schema):
     note: str
+
+
+class ReasonIn(Schema):
+    """Decline: ``note`` is the reason the member sees (required)."""
+
+    note: str = ""
 
 
 class AnswerIn(Schema):

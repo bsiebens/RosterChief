@@ -356,3 +356,43 @@ class PortalProfileTests(ParentPortalTests):
         self.assertEqual((item["state"], item["answer"], item["locked"]), ("complete", "Nuts", True))
         # approved: no more changes from the member
         self.assertEqual(Client().post(url + "Other", HTTP_X_SESSION_TOKEN=token, HTTP_HOST=self.host).status_code, 409)
+
+    def test_member_sees_review_messages_and_downloads_the_file_the_club_sent(self):
+        import shutil
+        import tempfile
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django.test import override_settings
+
+        from events.models import Season
+        from members.models import ClubMembership, OnboardingRequirement
+        from members.services import onboarding
+
+        tmp = tempfile.mkdtemp(prefix="rc-private-portal-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        with override_settings(PRIVATE_MEDIA_ROOT=tmp):
+            token = self.token()
+            with schema_context(self.club.schema_name):
+                today = timezone.localdate()
+                season = Season.objects.create(start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+                membership = ClubMembership.objects.create(member=self.child, season=season)
+                other_ms = ClubMembership.objects.create(member=self.other, season=season)
+                requirement = OnboardingRequirement.objects.create(name="Consent form", valid_for_months=12, reminder_days_before=30)
+                onboarding.send_file(self.club.owner, membership, requirement, SimpleUploadedFile("form.pdf", b"%PDF-1.4 mine"), note="Sign page 2")
+                onboarding.send_file(self.club.owner, other_ms, requirement, SimpleUploadedFile("other.pdf", b"%PDF-1.4 other"))
+                onboarding.log_event(membership.requirement_statuses.get(), "submitted", self.club.owner)  # staff-only entry
+            item = self.call("get", "/portal/me/overview", token).json()["memberships"][0]["requirements"][0]
+            self.assertEqual((item["has_sent_file"], item["sent_note"], [e["kind"] for e in item["history"]]), (True, "Sign page 2", ["sent_file"]))
+            self.assertTrue(all("actor_name" not in e for e in item["history"]))
+            url = f"/portal/me/requirements/{self.child.pk}/{requirement.pk}/sent-file"
+            got = self.call("get", url, token)
+            self.assertEqual((got.status_code, b"".join(got.streaming_content)), (200, b"%PDF-1.4 mine"))
+            self.assertEqual(self.call("get", f"/portal/me/requirements/{self.other.pk}/{requirement.pk}/sent-file", token).status_code, 404)  # not my child
+            # hand in, get declined with a reason, see it
+            response = Client().post(f"/api/v1/portal/me/requirements/{self.child.pk}/{requirement.pk}", data={"document": SimpleUploadedFile("filled.pdf", b"%PDF-1.4 filled")}, HTTP_X_SESSION_TOKEN=token, HTTP_HOST=self.host)
+            self.assertEqual(response.status_code, 200, response.content)
+            with schema_context(self.club.schema_name):
+                onboarding.decline(self.club.owner, membership, requirement, reason="Unsigned")
+            item = self.call("get", "/portal/me/overview", token).json()["memberships"][0]["requirements"][0]
+            self.assertEqual((item["state"], item["review_note"], item["locked"]), ("declined", "Unsigned", False))
+            self.assertEqual([e["kind"] for e in item["history"]], ["sent_file", "declined"])

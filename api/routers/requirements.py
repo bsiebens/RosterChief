@@ -12,13 +12,21 @@ from django.shortcuts import get_object_or_404
 from ninja import File, Form, Router, UploadedFile
 
 from api.auth import AUTHENTICATORS
-from api.schemas_requirements import AnswerIn, BypassIn, ChecklistOut, ItemOut, RequirementIn, RequirementListItem, RequirementOut, RequirementPatch
+from api.schemas_requirements import AnswerIn, BypassIn, ChecklistOut, ItemOut, ReasonIn, RequirementIn, RequirementListItem, RequirementOut, RequirementPatch
 from events.models import Season
 from members.models import ClubMembership, Member, MemberRequirementStatus, OnboardingRequirement
 from members.services import access, onboarding
 from members.services.errors import Invalid
 
 router = Router(auth=AUTHENTICATORS)
+
+
+def private_download(file) -> FileResponse:
+    """Stream a private stored file as an attachment (never cached, never sniffed)."""
+    response = FileResponse(file.open("rb"), as_attachment=True, filename=file.name.rsplit("/", 1)[-1])
+    response["Cache-Control"] = "private, no-store"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 def _requirement(requirement_id) -> OnboardingRequirement:
@@ -66,7 +74,7 @@ def delete_requirement(request, requirement_id: UUID):
 @router.get("/members/{uuid:member_id}/checklist", response=ChecklistOut, summary="A member's documents for a season", operation_id="member_checklist")
 def member_checklist(request, member_id: UUID, season_id: UUID | None = None):
     """The season's membership (default: the current season, else the most recent one) with every active requirement:
-    ``display`` is missing / complete / expiring_soon / expired / bypassed. 404 when the caller may not see the member."""
+    ``display`` is missing / pending / declined / requested / complete / expiring_soon / expired / bypassed; every item carries its ``history``. 404 when the caller may not see the member."""
     member = Member.objects.filter(pk=member_id).first()
     if member is None or not access.can_view_member(request.user, member):
         raise Http404
@@ -124,10 +132,53 @@ def bypass(request, membership_id: UUID, requirement_id: UUID, payload: BypassIn
 
 @router.post("/memberships/{uuid:membership_id}/{uuid:requirement_id}/approve", response=ItemOut, summary="Approve what the member handed in", operation_id="approve_requirement")
 def approve(request, membership_id: UUID, requirement_id: UUID):
-    """Accepts a member's submission (document or answer): it now counts as complete. 422 when nothing is waiting. To reject it, reopen it."""
+    """Accepts a member's submission (document or answer): it now counts as complete; the member is told. 422 when nothing is waiting. To refuse it, decline it with a reason."""
     membership, requirement = _membership(membership_id), _requirement(requirement_id)
     onboarding.approve(request.user, membership, requirement)
     return _item(membership, requirement)
+
+
+@router.post("/memberships/{uuid:membership_id}/{uuid:requirement_id}/decline", response=ItemOut, summary="Decline what the member handed in, with a reason", operation_id="decline_requirement")
+def decline(request, membership_id: UUID, requirement_id: UUID, payload: ReasonIn):
+    """The reason (``note``, required) is shown to the member, who is told and can hand in a new version. 422 when nothing is waiting."""
+    membership, requirement = _membership(membership_id), _requirement(requirement_id)
+    onboarding.decline(request.user, membership, requirement, reason=payload.note)
+    return _item(membership, requirement)
+
+
+@router.post("/memberships/{uuid:membership_id}/{uuid:requirement_id}/request", response=ItemOut, summary="Ask the member to provide or update something", operation_id="request_requirement")
+def request_update(request, membership_id: UUID, requirement_id: UUID, payload: ReasonIn):
+    """A free message (``note``, required) at any time; the member sees it on the requirement and in a notification."""
+    membership, requirement = _membership(membership_id), _requirement(requirement_id)
+    onboarding.request_update(request.user, membership, requirement, message=payload.note)
+    return _item(membership, requirement)
+
+
+@router.post("/memberships/{uuid:membership_id}/{uuid:requirement_id}/sent-file", response=ItemOut, summary="Send this member a personalised document", operation_id="send_requirement_file")
+def send_file(request, membership_id: UUID, requirement_id: UUID, document: File[UploadedFile], note: Form[str] = ""):
+    """Multipart: ``document`` (documents and pictures, up to 10 MB) and an optional ``note``. Replaces an earlier one; the member is told.
+    422 once the item is approved."""
+    membership, requirement = _membership(membership_id), _requirement(requirement_id)
+    onboarding.send_file(request.user, membership, requirement, document, note=note)
+    return _item(membership, requirement)
+
+
+@router.delete("/memberships/{uuid:membership_id}/{uuid:requirement_id}/sent-file", response=ItemOut, summary="Take back the document sent to this member", operation_id="remove_requirement_sent_file")
+def remove_sent_file(request, membership_id: UUID, requirement_id: UUID):
+    membership, requirement = _membership(membership_id), _requirement(requirement_id)
+    onboarding.remove_sent_file(request.user, membership, requirement)
+    return _item(membership, requirement)
+
+
+@router.get("/memberships/{uuid:membership_id}/{uuid:requirement_id}/sent-file", response={200: None}, summary="Download the document sent to this member", operation_id="download_requirement_sent_file")
+def sent_file(request, membership_id: UUID, requirement_id: UUID):
+    """404 (never 403) when the caller may not manage members or nothing was sent."""
+    if not access.can_manage_members(request.user):
+        raise Http404
+    status = MemberRequirementStatus.objects.filter(membership_id=membership_id, requirement_id=requirement_id).first()
+    if status is None or not status.sent_file:
+        raise Http404
+    return private_download(status.sent_file)
 
 
 @router.post("/memberships/{uuid:membership_id}/{uuid:requirement_id}/reopen", response=ItemOut, summary="Undo a completion or bypass (removes the document)", operation_id="reopen_requirement")
@@ -146,7 +197,4 @@ def document(request, membership_id: UUID, requirement_id: UUID):
     status = MemberRequirementStatus.objects.filter(membership_id=membership_id, requirement_id=requirement_id).first()
     if status is None or not status.document:
         raise Http404
-    response = FileResponse(status.document.open("rb"), as_attachment=True, filename=status.document.name.rsplit("/", 1)[-1])
-    response["Cache-Control"] = "private, no-store"
-    response["X-Content-Type-Options"] = "nosniff"
-    return response
+    return private_download(status.document)
