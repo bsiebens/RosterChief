@@ -9,7 +9,7 @@
 	 */
 	type Props = { icon: Component<{ size?: number; class?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>; href?: string; download?: string; danger?: boolean; chevron?: boolean; children: Snippet } & HTMLButtonAttributes;
 	let { icon: Icon, href, download, danger = false, chevron = false, children, type = 'button', ...rest }: Props = $props();
-	const cls = $derived(`flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-sm font-semibold transition-colors hover:bg-surface disabled:opacity-50 ${danger ? 'text-danger' : 'text-ink'}`);
+	const cls = $derived(`flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-sm font-semibold cursor-pointer transition-colors hover:bg-surface disabled:cursor-not-allowed disabled:opacity-50 ${danger ? 'text-danger' : 'text-ink'}`);
 </script>
 
 {#snippet inner()}
