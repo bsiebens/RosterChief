@@ -30,7 +30,13 @@ export type Requirement = QuestionShape & {
 };
 export type RequirementListItem = Requirement & { usage_count: number };
 
-export type DocDisplay = 'missing' | 'pending' | 'complete' | 'expiring_soon' | 'expired' | 'bypassed';
+export type DocDisplay = 'missing' | 'pending' | 'declined' | 'requested' | 'complete' | 'expiring_soon' | 'expired' | 'bypassed';
+export type HistoryKind = 'submitted' | 'approved' | 'declined' | 'requested' | 'reopened' | 'bypassed' | 'sent_file' | 'completed';
+/** One step in a requirement's history (staff see everything; the member only decisions and messages from the club). */
+export type RequirementEvent = { id: string; kind: HistoryKind; actor_name: string; note: string; created: string };
+
+/** Needs the member to act (hand something in, again): used for the tone of the member's own screen and the counts. */
+export const needsMemberAction = (display: string) => display === 'missing' || display === 'expired' || display === 'declined' || display === 'requested';
 export type ChecklistItem = {
 	requirement: Requirement;
 	/** An expired completion is `open` again. */
@@ -44,6 +50,14 @@ export type ChecklistItem = {
 	answer: unknown;
 	valid_until: string | null;
 	days_left: number | null;
+	/** The latest reason (declined) or message (requested) the member sees. */
+	review_note: string;
+	/** A personalised file the club sent this member, with the note that came with it. */
+	has_sent_file: boolean;
+	sent_at: string | null;
+	sent_note: string;
+	submitted_at: string | null;
+	history: RequirementEvent[];
 };
 export type Checklist = {
 	membership: { id: string; season: { id: string; name: string }; status: string; fee_status: string } | null;
@@ -56,6 +70,8 @@ export type Checklist = {
 };
 
 export const documentHref = (membershipId: string, requirementId: string) => `/api/v1/requirements/memberships/${membershipId}/${requirementId}/document`;
+
+export const sentFileHref = (membershipId: string, requirementId: string) => `/api/v1/requirements/memberships/${membershipId}/${requirementId}/sent-file`;
 
 export const choicesOf = (q: Pick<QuestionShape, 'options'>): { value: string; label: string }[] => (q.options ?? []).map((o) => (typeof o === 'string' ? { value: o, label: o } : o));
 

@@ -31,7 +31,10 @@
 		complete: { icon: FileCheck2, badge: 'badge-success', tint: 'text-ok-text' },
 		expiring_soon: { icon: FileClock, badge: 'badge-warning', tint: 'text-warn-text' },
 		expired: { icon: FileWarning, badge: 'badge-error', tint: 'text-danger' },
-		bypassed: { icon: UserCheck, badge: '', tint: 'text-muted' }
+		bypassed: { icon: UserCheck, badge: '', tint: 'text-muted' },
+		pending: { icon: FileClock, badge: 'badge-info', tint: 'text-info-text' },
+		declined: { icon: FileWarning, badge: 'badge-error', tint: 'text-danger' },
+		requested: { icon: FileWarning, badge: 'badge-warning', tint: 'text-warn-text' }
 	};
 
 	const errorFor = (code: string | undefined, status: number, message?: string) => {
@@ -95,7 +98,7 @@
 		if (p.membership_status === 'lapsed') return { label: t('regs.membership.lapsed'), cls: 'badge-warning' };
 		if (reg.status === 'awaiting') return { label: t('regs.pill.review'), cls: 'badge-warning' };
 		if (p.fee && Number(p.fee.amount_due) > 0 && !p.fee.payment_allows_activation) return { label: t('regs.pill.payment'), cls: 'badge-warning' };
-		if (p.checklist.some((c) => c.display === 'missing' || c.display === 'expired')) return { label: t('regs.pill.documents'), cls: 'badge-warning' };
+		if (p.checklist.some((c) => c.display === 'missing' || c.display === 'expired' || c.display === 'declined' || c.display === 'requested')) return { label: t('regs.pill.documents'), cls: 'badge-warning' };
 		return { label: t('regs.pill.activation'), cls: 'badge-info' };
 	}
 </script>

@@ -310,7 +310,7 @@ def _expiry(requirement: OnboardingRequirement, on: datetime.date, valid_until: 
 _UNSET: Any = object()
 
 
-def _resolve(actor, membership, requirement, action: str, *, event: str, complete: bool, document: File | None, note: str, valid_until: datetime.date | None = None, answer: Any = _UNSET) -> MemberRequirementStatus:
+def _resolve(actor, membership, requirement, action: str, *, complete: bool, document: File | None, note: str, valid_until: datetime.date | None = None, answer: Any = _UNSET, event: str = Ev.COMPLETED) -> MemberRequirementStatus:
     status = _status(membership, requirement)
     before = {"is_complete": status.is_complete, "is_bypassed": status.is_bypassed, "note": status.note, "document": status.document.name or "", "valid_until": str(status.valid_until or ""), "answer": status.answer}
     today = timezone.localdate()

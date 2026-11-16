@@ -35,7 +35,7 @@ export type ChecklistItem = {
 	kind: 'document' | 'question';
 	requires_document: boolean;
 	state: string;
-	display: 'missing' | 'complete' | 'expiring_soon' | 'expired' | 'bypassed';
+	display: 'missing' | 'pending' | 'declined' | 'requested' | 'complete' | 'expiring_soon' | 'expired' | 'bypassed';
 	valid_until: string | null;
 	has_document: boolean;
 	can_upload: boolean;

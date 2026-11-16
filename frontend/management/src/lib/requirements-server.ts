@@ -11,7 +11,7 @@ function docResult(action: string, res: { ok: boolean; status: number; message?:
 
 const target = (f: FormData) => `/requirements/memberships/${String(f.get('membership_id') ?? '')}/${String(f.get('requirement_id') ?? '')}`;
 
-/** The form actions behind `DocumentsCard` (receive a document, answer a question, waive, reopen). Spread them into a page's `actions`. */
+/** The form actions behind `DocumentsCard` (receive a document, answer a question, waive, approve / decline / request, send a document, reopen). Spread them into a page's `actions`. */
 export const requirementActions: Actions = {
 	completeRequirement: async ({ request, fetch }) => {
 		const f = await request.formData();
@@ -37,6 +37,26 @@ export const requirementActions: Actions = {
 	approveRequirement: async ({ request, fetch }) => {
 		const f = await request.formData();
 		return docResult('approve', await api('POST', `${target(f)}/approve`, { f: fetch }));
+	},
+	declineRequirement: async ({ request, fetch }) => {
+		const f = await request.formData();
+		return docResult('decline', await api('POST', `${target(f)}/decline`, { body: { note: String(f.get('note') ?? '').trim() }, f: fetch }));
+	},
+	requestRequirement: async ({ request, fetch }) => {
+		const f = await request.formData();
+		return docResult('request', await api('POST', `${target(f)}/request`, { body: { note: String(f.get('note') ?? '').trim() }, f: fetch }));
+	},
+	sendRequirementFile: async ({ request, fetch }) => {
+		const f = await request.formData();
+		const out = new FormData();
+		out.set('note', String(f.get('note') ?? '').trim());
+		const file = f.get('document');
+		if (file instanceof File && file.size > 0) out.set('document', file);
+		return docResult('send', await api('POST', `${target(f)}/sent-file`, { form: out, f: fetch }));
+	},
+	removeSentFile: async ({ request, fetch }) => {
+		const f = await request.formData();
+		return docResult('remove_sent', await api('DELETE', `${target(f)}/sent-file`, { f: fetch }));
 	},
 	reopenRequirement: async ({ request, fetch }) => {
 		const f = await request.formData();

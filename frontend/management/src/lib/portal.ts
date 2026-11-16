@@ -150,14 +150,23 @@ export type RequirementItem = {
 	options: (string | { value: string; label: string })[] | null;
 	requires_document: boolean;
 	valid_for_months: number | null;
-	state: 'missing' | 'pending' | 'complete' | 'expiring_soon' | 'expired' | 'bypassed';
+	state: 'missing' | 'pending' | 'declined' | 'requested' | 'complete' | 'expiring_soon' | 'expired' | 'bypassed';
 	valid_until: string | null;
 	answer: unknown;
 	locked: boolean;
 	submitted_at: string | null;
 	has_document: boolean;
 	completed_at: string | null;
+	/** The reason (declined) or message (requested) from the club. */
+	review_note: string;
+	/** A personalised file the club sent for this person (download through `sentFileHref`). */
+	has_sent_file: boolean;
+	sent_at: string | null;
+	sent_note: string;
+	/** What the member may read of the history: decisions and messages from the club. */
+	history: { kind: 'approved' | 'declined' | 'requested' | 'sent_file'; note: string; created: string }[];
 };
+export const sentFileHref = (memberId: string, requirementId: string) => `/api/v1/portal/me/requirements/${memberId}/${requirementId}/sent-file`;
 export type MembershipRow = {
 	member_id: string;
 	season: string;

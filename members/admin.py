@@ -14,6 +14,7 @@ from members.models import (
     Member,
     MemberRequirementStatus,
     OnboardingRequirement,
+    RequirementEvent,
 )
 from rosterchief.admin import ClubAdminMixin
 
@@ -160,6 +161,14 @@ class MemberRequirementStatusAdmin(ClubAdminMixin, admin.ModelAdmin):
     list_select_related = ["membership__member", "membership__season", "requirement", "completed_by"]
     search_fields = ["membership__member__first_name", "membership__member__last_name", "requirement__name"]
     raw_id_fields = ["membership", "completed_by"]
+
+
+@admin.register(RequirementEvent)
+class RequirementEventAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["created", "status", "kind", "actor_name"]
+    list_filter = ["kind"]
+    list_select_related = ["status__membership__member", "status__requirement"]
+    raw_id_fields = ["status", "actor"]
 
 
 @admin.register(AuditEntry)
