@@ -28,7 +28,7 @@
     "@fontsource/barlow-condensed": "^5.3.0",
     "@fontsource/ibm-plex-mono": "^5.3.0",
     "@fontsource/ubuntu": "^5.3.0",
-    "@tailwindcss/cli": "^4.3.3",
+    "@tailwindcss/cli": "^4.3.5",
     "daisyui": "^5.7.50",
     "tailwindcss": "^4.1.0"
   },
