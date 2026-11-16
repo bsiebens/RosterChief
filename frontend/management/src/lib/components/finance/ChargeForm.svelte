@@ -23,9 +23,10 @@
 		lines = $bindable(),
 		dueDate = $bindable(''),
 		notes = $bindable(''),
+		invoiceText = $bindable(''),
 		errors = {},
 		tried = false
-	}: { memberId?: string; memberName?: string; lines: LineDraft[]; dueDate?: string; notes?: string; errors?: Record<string, string>; tried?: boolean } = $props();
+	}: { memberId?: string; memberName?: string; lines: LineDraft[]; dueDate?: string; notes?: string; invoiceText?: string; errors?: Record<string, string>; tried?: boolean } = $props();
 
 	let changing = $state(false);
 	const showName = $derived(!!memberName && !!memberId && !changing);
@@ -88,6 +89,11 @@
 		<h2 id="chg-details" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><NotebookPen size={16} aria-hidden="true" /> {t('chg.form.details')}</h2>
 		<div class="grid gap-3 sm:grid-cols-2">
 			<Field label={t('chg.form.due_date')} name="due_date" type="date" bind:value={dueDate} error={errors.due_date} help={t('chg.form.due_help')} />
+			<label class="form-control w-full sm:col-span-2">
+				<span class="label"><span class="label-text">{t('chg.form.invoice_text')}</span></span>
+				<textarea class="textarea textarea-bordered w-full {errors.invoice_text ? 'textarea-error' : ''}" rows="3" maxlength="2000" bind:value={invoiceText}></textarea>
+				<span class="label-text-alt mt-1 block">{t('chg.form.invoice_text_help')}</span>
+			</label>
 			<label class="form-control w-full sm:col-span-2">
 				<span class="label"><span class="label-text">{t('chg.form.notes')}</span></span>
 				<textarea class="textarea textarea-bordered w-full" rows="3" maxlength="2000" bind:value={notes}></textarea>

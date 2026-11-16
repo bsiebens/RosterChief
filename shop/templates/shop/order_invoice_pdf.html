@@ -68,6 +68,7 @@ td { padding: 2mm 0; border-bottom: 1px solid #eee; }
 {% endfor %}
 </tbody>
 </table>
+{% if order.invoice_text %}<p style="white-space: pre-line; margin: 14px 0 0;">{{ order.invoice_text }}</p>{% endif %}
 {% if payments %}
 <table class="payments">
 <thead><tr><th>Payments received</th><th>Reference</th><th class="right">Date</th><th class="right">Amount</th></tr></thead>

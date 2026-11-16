@@ -54,6 +54,8 @@ class ChargeIn(Schema):
     #: The due date the invoice gets when it is sent; empty means the shop's default terms.
     due_date: datetime.date | None = None
     notes: str = Field("", max_length=2000)
+    #: Printed on the invoice and repeated in the email to the member. The ``notes`` are internal.
+    invoice_text: str = Field("", max_length=2000)
 
 
 class ChargePatch(Schema):
@@ -61,6 +63,7 @@ class ChargePatch(Schema):
     lines: list[ChargeLineIn] | None = Field(None, min_length=1, max_length=svc.MAX_LINES)
     due_date: datetime.date | None = None  # null clears it
     notes: str | None = Field(None, max_length=2000)
+    invoice_text: str | None = Field(None, max_length=2000)
 
 
 class SendIn(Schema):
@@ -110,6 +113,7 @@ class ChargeLineOut(Schema):
 class ChargeDetailOut(ChargeItemOut):
     lines: list[ChargeLineOut]
     notes: str
+    invoice_text: str
     payments: list[PaymentOut]
     last_reminder_at: datetime.datetime | None
     #: Draft: lines, member, due date and note can change; it can be sent or deleted.
@@ -182,6 +186,7 @@ def _detail(order_id) -> dict:
         **item,
         "lines": [{"id": ln.pk, "description": ln.description, "quantity": ln.quantity, "unit_price": ln.unit_price, "line_total": ln.line_total} for ln in order.lines.order_by("created")],
         "notes": order.notes,
+        "invoice_text": order.invoice_text,
         "payments": [payment_out(p) for p in order.payments.select_related("voucher", "recorded_by").order_by("created")],
         "last_reminder_at": invoice.last_reminder_at if invoice else None,
         "is_draft": draft,
@@ -285,7 +290,7 @@ def list_charges(request, status: Status = "all", q: str = "", member_id: uuid.U
 @router.post("", response={201: ChargeDetailOut}, summary="Write a charge invoice (a draft)", operation_id="create_charge")
 def create(request, payload: ChargeIn):
     _gate(request)
-    order = svc.create_draft(request.user, member=_member(payload.member_id), lines=_lines(payload.lines), due_date=payload.due_date, notes=payload.notes)
+    order = svc.create_draft(request.user, member=_member(payload.member_id), lines=_lines(payload.lines), due_date=payload.due_date, notes=payload.notes, invoice_text=payload.invoice_text)
     return 201, _detail(order.pk)
 
 
@@ -303,7 +308,7 @@ def update(request, charge_id: uuid.UUID, payload: ChargePatch):
     data = payload.dict(exclude_unset=True)
     svc.update_draft(
         request.user, order, member=_member(data["member_id"]) if data.get("member_id") else None,
-        lines=_lines(payload.lines) if payload.lines is not None else None, due_date=data["due_date"] if "due_date" in data else "keep", notes=data.get("notes"),
+        lines=_lines(payload.lines) if payload.lines is not None else None, due_date=data["due_date"] if "due_date" in data else "keep", notes=data.get("notes"), invoice_text=data.get("invoice_text"),
     )  # fmt: skip
     return _detail(charge_id)
 

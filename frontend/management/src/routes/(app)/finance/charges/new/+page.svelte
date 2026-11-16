@@ -15,17 +15,19 @@
 	let lines = $state<LineDraft[]>([newLine()]);
 	let dueDate = $state('');
 	let notes = $state('');
+	let invoiceText = $state('');
 	let tried = $state(false);
 	let busy = $state(false);
 	let leaving = $state(false);
 
-	const dirty = $derived(!!memberId || !!notes || !!dueDate || lines.some((l) => l.description || l.unit_price));
+	const dirty = $derived(!!memberId || !!notes || !!invoiceText || !!dueDate || lines.some((l) => l.description || l.unit_price));
 	const payload = $derived(
 		JSON.stringify({
 			member_id: memberId,
 			lines: lines.map((l) => ({ description: l.description.trim(), quantity: Number(l.quantity) || 0, unit_price: String(l.unit_price) })),
 			due_date: dueDate || null,
-			notes
+			notes,
+			invoice_text: invoiceText
 		})
 	);
 	const complete = $derived(!!memberId && lines.every((l) => l.description.trim() && lineTotal(l) > 0));
@@ -75,7 +77,7 @@
 	{#if failure}<Alert kind="error" title={t('chg.d.failed')}>{failure}</Alert>{/if}
 	<div class="grid items-start gap-5 xl:grid-cols-3">
 		<div class="xl:col-span-2">
-			<ChargeForm bind:memberId bind:lines bind:dueDate bind:notes {errors} {tried} />
+			<ChargeForm bind:memberId bind:lines bind:dueDate bind:notes bind:invoiceText {errors} {tried} />
 		</div>
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20">
 			<section class="card card-body card-hl gap-3">

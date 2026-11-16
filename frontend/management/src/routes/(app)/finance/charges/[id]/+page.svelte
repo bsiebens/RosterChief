@@ -19,6 +19,7 @@
 	let lines = $state<LineDraft[]>([]);
 	let dueDate = $state('');
 	let notes = $state('');
+	let invoiceText = $state('');
 	$effect(() => {
 		const saved = data.charge;
 		untrack(() => {
@@ -26,6 +27,7 @@
 			lines = saved.lines.map((l) => newLine({ description: l.description, quantity: l.quantity, unit_price: l.unit_price }));
 			dueDate = saved.due_date ?? '';
 			notes = saved.notes;
+			invoiceText = saved.invoice_text;
 		});
 	});
 
@@ -44,7 +46,8 @@
 			member_id: memberId,
 			lines: lines.map((l) => ({ description: l.description.trim(), quantity: Number(l.quantity) || 0, unit_price: String(l.unit_price) })),
 			due_date: dueDate || null,
-			notes
+			notes,
+			invoice_text: invoiceText
 		})
 	);
 	const complete = $derived(!!memberId && lines.length > 0 && lines.every((l) => l.description.trim() && lineTotal(l) > 0));
@@ -103,7 +106,7 @@
 			<input type="hidden" name="payload" value={payload} />
 			<div class="grid items-start gap-5 xl:grid-cols-3">
 				<div class="xl:col-span-2">
-					<ChargeForm bind:memberId bind:lines bind:dueDate bind:notes memberName={c.member.name} {errors} />
+					<ChargeForm bind:memberId bind:lines bind:dueDate bind:notes bind:invoiceText memberName={c.member.name} {errors} />
 				</div>
 				<aside class="grid content-start gap-5 xl:sticky xl:top-20">
 					<section class="card card-body card-hl gap-3">
@@ -144,6 +147,7 @@
 						</tbody>
 					</table>
 				</div>
+				{#if c.invoice_text}<div><h3 class="text-xs font-semibold tracking-wide text-muted uppercase">{t('chg.d.invoice_text')}</h3><p class="mt-1 text-sm whitespace-pre-line">{c.invoice_text}</p></div>{/if}
 				{#if c.notes}<div><h3 class="text-xs font-semibold tracking-wide text-muted uppercase">{t('chg.d.notes')}</h3><p class="mt-1 text-sm whitespace-pre-line">{c.notes}</p></div>{/if}
 				{#if c.status !== 'cancelled'}<p class="text-sm text-muted">{reminderLine}</p>{/if}
 				<p class="text-xs text-muted">{t('chg.d.fixed')}</p>

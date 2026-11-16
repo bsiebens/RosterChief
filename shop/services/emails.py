@@ -229,6 +229,7 @@ def build_context(
     on_behalf_of: str = "",
     has_invoice: bool = False,
     due_date: str = "",
+    message: str = "",
     logo_url: str | None = None,
 ) -> dict:
     lang = lang if lang in TEXTS else "en"
@@ -254,6 +255,7 @@ def build_context(
         "how_to_pay": how_to_pay if not is_paid else "",
         "pickup_instructions": pickup_instructions if kind == "ready" else "",
         "has_invoice": has_invoice,
+        "message": message,
     }
 
 
@@ -288,6 +290,7 @@ def _order_data(order) -> dict:
         "paid": paid,
         "due": payments.amount_due(order),
         "is_paid": order.payment_status == "paid",
+        "message": (order.invoice_text or "").strip(),
     }
 
 

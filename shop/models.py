@@ -279,6 +279,8 @@ class Order(UUIDModel):
     kind = models.CharField(_("kind"), max_length=20, choices=Kind.choices, default=Kind.SHOP, db_index=True)
     #: Charges only: the due date the invoice will get when it is sent.
     due_date = models.DateField(_("due date"), blank=True, null=True)
+    #: Charges only: a message printed on the invoice and repeated in the email (the reason, a match, a reference). ``notes`` stays internal.
+    invoice_text = models.TextField(_("text on the invoice"), blank=True, max_length=2000)
     purchaser = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="shop_orders", verbose_name=_("purchaser"))
     payment_status = models.CharField(_("payment status"), max_length=255, choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
     fulfillment_status = models.CharField(_("fulfillment status"), max_length=255, choices=FulfillmentStatus.choices, default=FulfillmentStatus.NOT_READY)

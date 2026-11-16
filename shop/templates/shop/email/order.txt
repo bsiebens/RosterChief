@@ -10,6 +10,8 @@
 {% if show_paid %}{{ t.paid }}: {{ paid }}
 {% endif %}{% if is_paid %}{{ t.paid_in_full }}
 {% else %}{{ t.due }}: {{ due }}
+{% endif %}{% if message %}
+{{ message }}
 {% endif %}{% if how_to_pay %}
 {{ t.how_to_pay }}:
 {{ how_to_pay }}

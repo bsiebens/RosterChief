@@ -84,14 +84,15 @@ class ChargeApiTests(ChargesBase):
         self.assertFalse(self.call("get", "/me", who="plain").json()["can_manage_charges"])
 
     def test_a_draft_can_be_written_changed_and_deleted_and_nothing_is_sent(self):
-        charge = self.draft(lines=[FINE, {"description": "Late registration", "quantity": 2, "unit_price": "7.50"}], notes="Match of 3 Nov")
+        charge = self.draft(lines=[FINE, {"description": "Late registration", "quantity": 2, "unit_price": "7.50"}], notes="Match of 3 Nov", invoice_text="Match against HYC on 3 November")
+        self.assertEqual((charge["invoice_text"], charge["notes"]), ("Match against HYC on 3 November", "Match of 3 Nov"))  # the text is for the member, the note stays internal
         self.assertEqual((charge["status"], charge["number"], charge["is_draft"]), ("draft", None, True))
         self.assertEqual((charge["total"], charge["summary"]), ("40.00", "Fine: unsportsmanlike conduct +1"))
         self.assertEqual([ln["line_total"] for ln in charge["lines"]], ["25.00", "15.00"])
         self.assertFalse(Invoice.objects.exists())
         self.dispatch.assert_not_called()
-        r = self.call("put", f"/finance/charges/{charge['id']}", data={"lines": [{"description": "Lost jersey", "quantity": 1, "unit_price": "60.00"}], "notes": "Replaced"})
-        self.assertEqual((r.status_code, r.json()["total"], r.json()["notes"]), (200, "60.00", "Replaced"))
+        r = self.call("put", f"/finance/charges/{charge['id']}", data={"lines": [{"description": "Lost jersey", "quantity": 1, "unit_price": "60.00"}], "notes": "Replaced", "invoice_text": "Replacement of the jersey"})
+        self.assertEqual((r.status_code, r.json()["total"], r.json()["notes"], r.json()["invoice_text"]), (200, "60.00", "Replaced", "Replacement of the jersey"))
         self.assertEqual(Order.objects.get(pk=charge["id"]).lines.count(), 1)
         self.assertEqual(self.call("delete", f"/finance/charges/{charge['id']}").status_code, 204)
         self.assertFalse(Order.objects.filter(pk=charge["id"]).exists())
@@ -263,7 +264,7 @@ class ChargeReminderTests(ChargesBase):
 
 class ChargeEmailTests(ChargesBase):
     def test_the_member_gets_a_branded_email_with_the_invoice_and_a_reminder_later(self):
-        order = charges.create_draft(self.owner, member=self.buyer, lines=[charges.ChargeLine("Fine: late for the bus", 1, Decimal("15.00"))])
+        order = charges.create_draft(self.owner, member=self.buyer, lines=[charges.ChargeLine("Fine: late for the bus", 1, Decimal("15.00"))], invoice_text="Bus to Heist on 3 November", notes="internal only")
         invoice = charges.send(self.owner, order, due_date=timezone.localdate() + datetime.timedelta(days=14))
         self.dispatch.reset_mock()
         with mock.patch.object(emails, "_invoice_attachment", return_value=(f"{invoice.number}.pdf", b"%PDF-1.4")):
@@ -274,6 +275,8 @@ class ChargeEmailTests(ChargesBase):
         self.assertEqual(first.to, ["bea@shop.test"])
         self.assertIn(invoice.number, first.subject)
         self.assertIn("Fine: late for the bus", first.body)
+        self.assertIn("Bus to Heist on 3 November", first.body)  # the text on the invoice is repeated in the email
+        self.assertNotIn("internal only", first.body)
         self.assertIn(invoice.due_date.strftime("%d/%m/%Y"), first.body)
         self.assertEqual([a[0] for a in first.attachments], [f"{invoice.number}.pdf"])
         self.assertIn("vervallen", reminder.subject)
