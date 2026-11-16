@@ -10,7 +10,7 @@
 	// in the season (guardians, staff) get a dash.
 	const showStatus = true;
 	const feeColumn = $derived(showFees);
-	const cols = $derived(5 + 1 + (feeColumn ? 1 : 0) + (canManage ? 1 : 0) + 1);
+	const cols = $derived(5 + 2 + 1 + (feeColumn ? 1 : 0) + (canManage ? 1 : 0) + 1);
 </script>
 
 {#snippet sortable(field: OrderField, label: string)}
@@ -38,7 +38,9 @@
 				{@render sortable('email', t('members.list.col.email'))}
 				{@render sortable('license_number', t('members.list.col.licence'))}
 				<th>{t('members.list.col.family')}</th>
+				<th class="hidden xl:table-cell">{t('members.list.col.team')}</th>
 				{#if showStatus}<th>{t('members.list.col.status')}</th>{/if}
+				<th>{t('members.list.col.docs')}</th>
 				{#if feeColumn}<th>{t('members.list.col.fee')}</th>{/if}
 				<th class="text-right"><span class="sr-only">{t('members.list.col.actions')}</span></th>
 			</tr>

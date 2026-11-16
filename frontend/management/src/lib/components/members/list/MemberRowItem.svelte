@@ -3,11 +3,13 @@
 	import Avatar from '#lib/components/Avatar.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { formatDate } from '#lib/members/detail-helpers.ts';
-	import { feeVariant, statusVariant, type MemberRow } from '#lib/members/list.ts';
+	import { DOC_URGENCY, docsPill, feeVariant, statusVariant, type MemberRow } from '#lib/members/list.ts';
 
 	let { member, canManage, showFees, showStatus }: { member: MemberRow; canManage: boolean; showFees: boolean; showStatus: boolean } = $props();
 	const name = $derived(`${member.last_name}, ${member.first_name}`);
 	const n = $derived(member.family_ids.length);
+	const docs = $derived(docsPill(member.requirements));
+	const docsTitle = $derived(member.requirements ? DOC_URGENCY.filter((k) => member.requirements![k] > 0).map((k) => t(`members.list.docs.${k}`, { n: member.requirements![k] })).join(' · ') : '');
 </script>
 
 <tr class="hover:bg-paper">
@@ -57,6 +59,13 @@
 			<span class="text-dim">—</span>
 		{/if}
 	</td>
+	<td class="hidden xl:table-cell">
+		{#if member.teams?.length}
+			<div class="flex flex-wrap gap-1">{#each member.teams as team (team)}<span class="badge badge-outline badge-sm">{team}</span>{/each}</div>
+		{:else}
+			<span class="text-dim">—</span>
+		{/if}
+	</td>
 	{#if showStatus}
 		<td>
 			{#if member.status}
@@ -66,6 +75,13 @@
 			{/if}
 		</td>
 	{/if}
+	<td>
+		{#if docs}
+			<a class="badge badge-sm whitespace-nowrap {docs.tone}" href="/members/{member.id}?tab=documents" title={docsTitle || t('members.list.docs.ok')}>{docs.key === 'ok' ? t('members.list.docs.ok') : t(`members.list.docs.${docs.key}`, { n: docs.n })}</a>
+		{:else}
+			<span class="text-dim">—</span>
+		{/if}
+	</td>
 	{#if showFees}
 		<td>
 			{#if member.fee_status}

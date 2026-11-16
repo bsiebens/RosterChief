@@ -25,10 +25,27 @@ export type MemberRow = {
 	family_ids: string[];
 	has_login?: boolean;
 	families?: { id: string; name: string }[];
-	/** Not provided by the list endpoint today; rendered when a future API version adds them. */
+	/** The listed season's membership status; fee status for admins only. */
 	status?: string | null;
 	fee_status?: string | null;
+	/** Short names of the teams the person plays on this season (at most 3). */
+	teams?: string[];
+	/** The season's documents summary; null when they hold no membership then. */
+	requirements?: DocCounts | null;
 };
+export type DocCounts = { missing: number; pending: number; declined: number; expiring_soon: number; expired: number };
+export type DocKey = keyof DocCounts;
+
+/** Most urgent first: what the Docs pill shows when something is open. */
+export const DOC_URGENCY: DocKey[] = ['expired', 'declined', 'missing', 'pending', 'expiring_soon'];
+const DOC_TONE: Record<DocKey, string> = { expired: 'badge-error', declined: 'badge-error', missing: 'badge-warning', pending: 'badge-info', expiring_soon: 'badge-warning' };
+
+/** The compact Docs pill: `ok` when nothing is open, else the most urgent kind with its count. Null without a membership. */
+export function docsPill(counts: DocCounts | null | undefined): { key: DocKey | 'ok'; n: number; tone: string } | null {
+	if (!counts) return null;
+	const key = DOC_URGENCY.find((k) => counts[k] > 0);
+	return key ? { key, n: counts[key], tone: DOC_TONE[key] } : { key: 'ok', n: 0, tone: 'badge-success' };
+}
 export type TeamOption = { id: string; name: string };
 export type SeasonOption = { id: string; name: string; is_current: boolean };
 
