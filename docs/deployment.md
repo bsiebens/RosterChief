@@ -124,9 +124,110 @@ deploy/rc status production
 
 This switches code only. If the release you left ran migrations the previous code cannot work with, restore the pre-migration checkpoint into a new database (see "Rollback and recovery" in `deploy/README.md`).
 
-## Backups
+## Backups and the offsite copy (reusing the old setup)
 
-Not automated yet. Back up `/var/lib/rosterchief/checkpoints` (a `pg_dump` before every release), `/var/lib/rosterchief/media` and `/var/lib/rosterchief/private_media` off the host, and snapshot the EBS volume. Test a restore once.
+The old version took an encrypted backup every night and copied it to a **second server** over SFTP, in a way that a break-in on the production server cannot wipe. The full write-up is `DEPLOYMENT.md`, section "Backups", in the old repository (the checkout next to this one), with the scripts `deploy/backup.sh`, `deploy/restore-check.sh` and `deploy/backup-server/archive-incoming.sh`. Most of it carries over. Only the part that runs on the production server has to change.
+
+**How the old setup works, in short.** Each night `backup.sh` dumps the database and tars the uploads, encrypts each file with [age](https://age-encryption.org) to a **public** key (the server cannot decrypt its own backups), keeps 14 days locally, and uploads new `*.age` files with `rclone` to the backup server. The upload key can only create files: its `sftp-server` refuses remove, rename and setstat. A root job on the backup server moves finished uploads every 15 minutes into a root-only archive and prunes it after 60 days. Restores use your own admin login on the backup server and the age **private** key, which never lives on a server.
+
+### What you can keep as it is
+
+| Piece | Reuse |
+| --- | --- |
+| The backup server, its `rosterchief-backup` upload account, the root-only archive and the archive job (`archive-incoming.sh`, cron every 15 minutes) | **Unchanged.** It simply receives files from one more host. |
+| The age key pair | **The same one.** Put the same public key (`age1…`) on the new host. The private key you already hold then opens old and new backups alike. |
+| The rclone remote called `offsite` and its settings (`shell_type none`, `set_modtime false`) | The same definition, created again on the new host. |
+| The restricted SSH key line in `authorized_keys` | The same line, with a **new key per production host**, so each can be revoked on its own. Old and new hosts' keys sit side by side. |
+
+### What changes
+
+The old `backup.sh` runs `docker compose exec db pg_dump` and `docker compose exec web tar`. The new hosts have no Docker, so those lines become native commands. Start from a copy of the old `deploy/backup.sh` and change these parts:
+
+| In the old script | In the new one |
+| --- | --- |
+| `COMPOSE=…`, and reading `POSTGRES_USER`, `POSTGRES_DB`, `AWS_STORAGE_BUCKET_NAME` from `./.env` | Remove. Read `BACKUP_AGE_RECIPIENT` from `/etc/rosterchief/backup.env` (`from_env_file BACKUP_AGE_RECIPIENT /etc/rosterchief/backup.env`) and the database name from `/etc/rosterchief/site.env` (`ROSTERCHIEF_DATABASE_NAME`, default `rosterchief`). `BACKUP_REMOTE` stays on the cron line or in `backup.env`. |
+| `$COMPOSE exec -T db pg_dump --clean --if-exists … \| gzip > "$DB_TMP"` | `runuser -u rosterchief -- pg_dump --format=custom --no-password --dbname "${ROSTERCHIEF_DATABASE_NAME:-rosterchief}" > "$DB_TMP"`. This is the same dump the deploy takes before migrating, and it covers every club's schema. Name it `db-$STAMP.dump` (the custom format is already compressed). Replace `gzip -t` with `pg_restore --list "$DB_TMP" > /dev/null`, and the retention pattern `db-*.sql.gz` with `db-*.dump`. |
+| `$COMPOSE exec -T web tar -cz -C /app media \| cat > …` (and `private_media`) | `tar -cz -C /var/lib/rosterchief media > "$MEDIA_OUT.part"`, and the same for `private_media`. Drop the `AWS_STORAGE_BUCKET_NAME` condition: uploads are on local disk here. |
+
+Everything else (writing to `.part` and renaming, `seal()` with age, refusing to upload without an age key, the `.offsite-sent` list that makes a failed night catch up the next one, the rclone flags) is independent of Docker and stays. Run it as **root** on the `backend` or `full` host only; frontend hosts hold no data. Optionally add a distinct filename prefix, such as `v2-`, so old and new files are easy to tell apart in the shared archive. The archive job accepts any `*.age` file.
+
+The adapted script has not been run on a new host yet. Test it with step 4 below before you trust it. If you want it committed here as `deploy/host/backup.sh` with a systemd timer, ask for it.
+
+### Setting it up on the new host
+
+Do these as root on the new backend/full host, in order.
+
+1. **Install the tools.** Amazon Linux 2023 packages neither `age` nor `rclone`, and ships without cron:
+   ```bash
+   ARCH=amd64          # arm64 on Graviton (check: uname -m)
+   AGE_VERSION=v1.3.2  # latest from https://github.com/FiloSottile/age/releases
+   curl -fsSL -o /tmp/age.tar.gz "https://github.com/FiloSottile/age/releases/download/${AGE_VERSION}/age-${AGE_VERSION}-linux-${ARCH}.tar.gz"
+   tar -xzf /tmp/age.tar.gz -C /tmp && install -m 0755 /tmp/age/age /tmp/age/age-keygen /usr/local/bin/ && rm -rf /tmp/age /tmp/age.tar.gz
+   dnf install -y "https://downloads.rclone.org/rclone-current-linux-${ARCH}.rpm" cronie
+   systemctl enable --now crond
+   age --version && rclone version | head -1
+   ```
+2. **Configuration.** The public key is the one printed when the key pair was made (`age-keygen -o …`). Do not create a new pair unless you want one.
+   ```bash
+   install -d -m 700 /var/backups/rosterchief
+   install -m 600 /dev/null /etc/rosterchief/backup.env
+   printf 'BACKUP_AGE_RECIPIENT=age1…your public key…\nBACKUP_REMOTE=offsite:rosterchief/incoming\n' > /etc/rosterchief/backup.env
+   ```
+3. **An upload key for this host**, allowed on the backup server for uploading only:
+   ```bash
+   ssh-keygen -t ed25519 -N "" -C "rosterchief backups $(hostname)" -f /root/.ssh/rosterchief_backup
+   cat /root/.ssh/rosterchief_backup.pub
+   ```
+   On the backup server, append this line to `~rosterchief-backup/.ssh/authorized_keys` (it stays root-owned, mode 644, as the old guide sets up). Use `/usr/libexec/openssh/sftp-server` on Amazon Linux or `/usr/lib/openssh/sftp-server` on Debian/Ubuntu, whichever `ls` shows there:
+   ```
+   restrict,command="/usr/libexec/openssh/sftp-server -P remove,rmdir,rename,posix-rename,setstat,fsetstat,lsetstat,symlink,hardlink,copy-data" ssh-ed25519 AAAA…the new key… rosterchief backups <hostname>
+   ```
+   Then, as root on the new host, check it and accept the server's host key after comparing the fingerprint with `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the backup server:
+   ```bash
+   sftp -i /root/.ssh/rosterchief_backup rosterchief-backup@<backup-host>
+   #   ls rosterchief        -> shows "incoming"
+   #   rmdir rosterchief/incoming   -> must say "Permission denied"
+   rclone config create offsite sftp host <backup-host> user rosterchief-backup \
+     key_file /root/.ssh/rosterchief_backup known_hosts_file /root/.ssh/known_hosts shell_type none set_modtime false
+   rclone lsd offsite:rosterchief      # lists "incoming"
+   ```
+4. **Install the adapted script** as `/usr/local/sbin/rosterchief-backup` (mode 700) and run it once by hand:
+   ```bash
+   BACKUP_REMOTE=offsite:rosterchief/incoming /usr/local/sbin/rosterchief-backup /var/backups/rosterchief
+   ls -l /var/backups/rosterchief           # db-….dump.age, media-….tar.gz.age, private-media-….tar.gz.age
+   rclone ls offsite:rosterchief/incoming   # the same files, on the backup server
+   rclone deletefile offsite:rosterchief/incoming/<one of them>   # must fail with "permission denied"
+   ```
+   On the backup server, `sudo MIN_AGE_MINUTES=0 /usr/local/sbin/rosterchief-archive-incoming` archives them immediately; they appear in `/var/lib/rosterchief-backups/archive`, owned by root.
+5. **Schedule it.** root's crontab on the new host (keep the `PATH` line, which lets cron find age in `/usr/local/bin`):
+   ```cron
+   MAILTO=you@example.com
+   PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+   30 2 * * *  /usr/local/sbin/rosterchief-backup /var/backups/rosterchief >> /var/log/rosterchief-backup.log 2>&1
+   ```
+   Check `/var/backups/rosterchief` for fresh files after the first night. A backup that fails silently is worse than none, so make sure mail works, or look at the log.
+
+### Prove a backup restores (monthly, on your own computer)
+
+Fetch last night's file from the **archive** on the backup server with your own admin login. The upload key cannot see the archive. Then decrypt it with the private key and restore it into a scratch database (PostgreSQL 16 locally):
+
+```bash
+ssh <you>@<backup-host> 'sudo ls -lt /var/lib/rosterchief-backups/archive | head'
+ssh <you>@<backup-host> 'sudo cat /var/lib/rosterchief-backups/archive/db-2026-11-17-0230.dump.age' > db.dump.age
+age -d -i rosterchief-backup-key.txt db.dump.age > db.dump
+createdb restore_check && pg_restore --no-owner --dbname restore_check db.dump
+psql restore_check -c 'select count(*) from club_club' -c 'select count(*) from club_user'   # not zero
+dropdb restore_check && rm db.dump
+```
+
+Restoring onto a server is described under "Rollback and recovery" in `deploy/README.md` (restore into a **new** database, then point `app.env` and `site.env` at it).
+
+### Things to remember
+
+- **Pruning.** The archive job deletes files after 60 days (`ARCHIVE_KEEP_DAYS`). Before you switch the old production off, copy its last backups out of the archive, or set `ARCHIVE_KEEP_DAYS=0` on the backup server's cron line until you have.
+- **What is not in the backups:** `/etc/rosterchief/app.env` (the Django secret key, VAPID private key and mail keys), `caddy.env` and `deploy.env`. Keep a copy of `app.env` in your password manager, next to the age private key. Losing the private key means the backups can never be opened.
+- **The deploy's own checkpoint** (`/var/lib/rosterchief/checkpoints`, a plain `pg_dump` taken before each migration) stays on the host unencrypted and is not copied offsite. It is for rollback, not for backup. The nightly job covers offsite.
+- **Frontend hosts** need no backup.
 
 ## Secret scanning (gitleaks)
 
