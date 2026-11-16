@@ -74,7 +74,7 @@
 	</div>
 {/if}
 {#if shown.length}
-	<div class={home ? '' : 'grid items-start gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]'}>
+	<div class={home ? 'min-w-0' : 'grid min-w-0 grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]'}>
 		{#if featured}
 			{@const lead = photo(featured)}
 			<a class="card group block overflow-hidden hover:border-club" href={path + '?tab=news&article=' + featured.id} data-sveltekit-reset="false">
@@ -87,10 +87,10 @@
 				</div>
 			</a>
 		{/if}
-		<div class={home ? 'grid gap-3 md:grid-cols-2' : 'grid gap-3'}>
+		<div class={home ? 'grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2' : 'grid min-w-0 grid-cols-1 gap-3'}>
 			{#each rest as article (article.id)}
 				{@const lead = photo(article)}
-				<a class="card group flex gap-3 p-3 hover:border-club" href={path + (home ? '?' : '?tab=news&') + 'article=' + article.id} data-sveltekit-reset="false">
+				<a class="card group flex min-w-0 gap-3 p-3 hover:border-club" href={path + (home ? '?' : '?tab=news&') + 'article=' + article.id} data-sveltekit-reset="false">
 					{#if lead}
 						<img class="h-[4.5rem] w-24 shrink-0 rounded object-cover" src={mediaPath(lead.url)} style:object-position={lead.object_position} alt="" loading="lazy" />
 					{:else}

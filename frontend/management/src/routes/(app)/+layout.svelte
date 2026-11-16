@@ -29,7 +29,7 @@
 	const management = $derived(clubShell && !portal);
 	const home = $derived(parent ? '/parent' : coach ? '/coach' : '/');
 	const season = $derived(parent ? page.data.home?.season : page.data.coach?.season);
-	const shopEnabled = $derived(parent && (data.me?.features?.includes('shop') || (a.status === 'authenticated' && a.memberShopEnabled === true)));
+	const shopEnabled = $derived(parent && (data.me ? data.shopOpen === true : a.status === 'authenticated' && a.memberShopEnabled === true));
 	let navOpen = $state(false);
 	afterNavigate(() => { navOpen = false; });
 	// People with both a member side and a staff side land in the app they used last (see lib/landing.ts).
@@ -124,7 +124,7 @@
 			{#if !clubShell}<LangSwitcher /><AccountMenu {email} />{/if}
 		</header>
 
-		<main class="flex-1">
+		<main class="flex-1 {portal ? 'overflow-x-clip' : ''}">
 			<div class="flex min-w-0 flex-col gap-4 px-3 py-4 sm:px-5 sm:py-5 {portal ? 'md:px-7 md:py-6' : 'lg:px-7 lg:py-6'}">
 				<!-- Keyed by path: on navigation the old page is torn down before it can be handed the next page's data (that
 				     briefly happens otherwise and crashes pages that read fields only their own data has: the 500 on going back). -->

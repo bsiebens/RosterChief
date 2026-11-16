@@ -1,11 +1,12 @@
 import base64
 import datetime
+from types import SimpleNamespace
 from unittest import mock
 
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from django.db import connection
-from django.test import Client, TestCase
+from django.test import Client, SimpleTestCase, TestCase
 from django.utils import timezone
 from django_tenants.utils import schema_context
 
@@ -16,6 +17,23 @@ from events.models import Attendance, Event
 from members.models import Family, FamilyMembership, Member
 from notifications.models import WebPushSubscription
 from sponsoring.models import Sponsor
+
+
+class ShopVisibilityTests(SimpleTestCase):
+    """The member app hides the shop while it is closed, and when the club has no shop at all."""
+
+    @staticmethod
+    def request(has_shop):
+        return SimpleNamespace(features=SimpleNamespace(has=lambda key: has_shop and key == "shop"))
+
+    def test_visible_only_when_the_club_has_a_shop_and_it_is_open(self):
+        from api.routers import portal
+
+        with mock.patch("api.routers.portal.is_shop_open", return_value=True):
+            self.assertTrue(portal._shop_visible(self.request(True)))
+            self.assertFalse(portal._shop_visible(self.request(False)))
+        with mock.patch("api.routers.portal.is_shop_open", return_value=False):
+            self.assertFalse(portal._shop_visible(self.request(True)))
 
 
 class ParentPortalTests(TestCase):
@@ -230,6 +248,84 @@ class PortalProfileTests(ParentPortalTests):
             stranger = Event.objects.create(title="Other", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=3))
         self.assertEqual(self.call("get", f"/portal/events/{stranger.pk}", token).status_code, 404)
 
+
+    def test_an_event_shows_the_family_everyone_invited_and_whether_they_come_but_never_why(self):
+        token = self.token()
+        with schema_context(self.club.schema_name):
+            event = self.child_reply.event
+            Event.objects.filter(pk=event.pk).update(kind=Event.EventKind.GAME)
+            Attendance.objects.filter(pk=self.child_reply.pk).update(status="present", note="Dentist")
+            Attendance.objects.filter(pk=self.other_reply.pk).update(status="absent", note="Sick with flu")
+        extras = self.call("get", f"/portal/events/{event.pk}", token).json()
+        roster = extras["roster"]
+        self.assertEqual([(row["state"], row["mine"]) for row in roster], [("going", True), ("out", False)])  # coming first, then the others
+        self.assertEqual(set(roster[0]), {"id", "name", "number", "position", "position_order", "extra", "team", "state", "mine"})  # no note, reason or status detail
+        for secret in ("Dentist", "Sick with flu", "Private"):
+            self.assertNotIn(secret, str(extras))
+        with schema_context(self.club.schema_name):
+            Event.objects.filter(pk=event.pk).update(kind=Event.EventKind.TRAINING)
+        self.assertEqual(len(self.call("get", f"/portal/events/{event.pk}", token).json()["roster"]), 2)  # every kind of event, not only games
+
+    def test_roster_follows_the_audience_extras_included_and_dropped_players_gone(self):
+        from events.models import Season
+        from events.services import attendance as attendance_svc
+        from teams.models import Position, Team, TeamMembership
+
+        token = self.token()
+        today = timezone.localdate()
+        with schema_context(self.club.schema_name):
+            season = Season.objects.create(start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+            defence = Position.objects.create(name="Defense", short_name="D", ordering=1)
+            forward = Position.objects.create(name="Forward", short_name="F", ordering=2)
+            u14, u16 = Team.objects.create(name="U14"), Team.objects.create(name="U16")
+            mate = Member.objects.create(first_name="Mate", last_name="Dropped")
+            guest = Member.objects.create(first_name="Guest", last_name="FromU16")
+            TeamMembership.objects.create(team=u14, member=self.child, season=season, position=forward, jersey_number=9)
+            TeamMembership.objects.create(team=u14, member=mate, season=season, position=defence, jersey_number=4)
+            TeamMembership.objects.create(team=u16, member=guest, season=season, position=defence, jersey_number=77)
+            event = Event.objects.create(title="Game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=2), season=season)
+            event.teams.add(u14)
+            event.invited_members.add(guest)  # an extra player from another team
+            attendance_svc.sync_event_attendances(event)
+        roster = lambda: self.call("get", f"/portal/events/{event.pk}", token).json()["roster"]  # noqa: E731
+        by_name = lambda: {row["name"]: row for row in roster()}  # noqa: E731
+        rows = by_name()
+        self.assertEqual(set(rows), {"My Child", "Mate Dropped", "Guest FromU16"}, "the team's players and the extra invitee")
+        self.assertEqual((rows["Mate Dropped"]["position"], rows["Mate Dropped"]["number"], rows["Mate Dropped"]["extra"]), ("Defense", 4, False))
+        # an extra slots in under the position they play on their own team, labelled with that team, and without its shirt number
+        self.assertEqual((rows["Guest FromU16"]["position"], rows["Guest FromU16"]["extra"], rows["Guest FromU16"]["team"], rows["Guest FromU16"]["number"]), ("Defense", True, "U16", None))
+        defence_order = [row["name"] for row in roster() if row["position"] == "Defense"]
+        self.assertEqual(defence_order, ["Mate Dropped", "Guest FromU16"])  # regulars before extras within the position
+        # an extra who plays nowhere has no position at all: the app puts those under "Invited players"
+        with schema_context(self.club.schema_name):
+            walkon = Member.objects.create(first_name="Walk", last_name="On")
+            event.invited_members.add(walkon)
+            attendance_svc.sync_event_attendances(event)
+        self.assertEqual((by_name()["Walk On"]["position"], by_name()["Walk On"]["extra"]), (None, True))
+        self.assertEqual(roster()[-1]["name"], "Walk On")  # after everyone who has a position
+        # a player taken off the team's roster leaves the audience, and so the roster
+        with schema_context(self.club.schema_name):
+            TeamMembership.objects.filter(team=u14, member=mate).delete()
+            attendance_svc.sync_event_attendances(event)
+        self.assertNotIn("Mate Dropped", by_name())
+        self.assertIn("Guest FromU16", by_name())
+        # an extra who is un-invited leaves too
+        with schema_context(self.club.schema_name):
+            event.invited_members.remove(guest)
+            attendance_svc.sync_event_attendances(event)
+        self.assertNotIn("Guest FromU16", by_name())
+
+    def test_a_whole_club_event_gives_families_totals_but_no_names(self):
+        token = self.token()
+        with schema_context(self.club.schema_name):
+            event = self.child_reply.event
+            Event.objects.filter(pk=event.pk).update(club_wide=True)
+            Attendance.objects.filter(pk=self.child_reply.pk).update(status="present")
+            Attendance.objects.filter(pk=self.other_reply.pk).update(status="absent")
+        extras = self.call("get", f"/portal/events/{event.pk}", token).json()
+        self.assertIsNone(extras["roster"])
+        self.assertEqual(extras["totals"], {"going": 1, "maybe": 0, "waiting": 0, "out": 1, "total": 2})
+        self.assertNotIn("Other Child", str(extras))
 
     def test_event_extras_give_the_captured_game_sheet(self):
         from events.models import GameTimeline

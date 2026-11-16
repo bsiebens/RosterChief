@@ -110,6 +110,10 @@ export type EventExtras = {
 	lineup: { players: { id: string; name: string; number: number | null; mine: boolean }[]; going: number; out: number; waiting: number } | null;
 	/** The game as the competition's page captured it (played games only): lineup and timeline by period. */
 	game: GameSheet | null;
+	/** Everyone invited and whether they come. Never a reason or note; those are for the coaching app. */
+	roster?: { id: string; name: string; number: number | null; position: string | null; extra: boolean; team: string | null; state: 'going' | 'out' | 'maybe' | 'waiting'; mine: boolean }[] | null;
+	/** Whole-club events only: the counts instead of a list of names (too many people). */
+	totals?: { going: number; maybe: number; waiting: number; out: number; total: number } | null;
 	tasks: PortalTask[];
 	/** Only for games: whether the person follows it, directly or through a team. */
 	follow?: FollowState | null;

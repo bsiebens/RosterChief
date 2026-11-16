@@ -29,6 +29,7 @@ from news.services import member_news
 from registration.models import RegistrationBatch, RegistrationSettings
 from registration.services import installments, notifications
 from shop.services.invoices import PDFUnavailable
+from shop.services.orders import is_shop_open
 from sponsoring.models import Sponsor
 from teams.models import Team, TeamMembership
 
@@ -142,10 +143,15 @@ def _home_branding(request, today):
     return {"season": season.name if season else None, "event_background": background.url if background else None}
 
 
+def _shop_visible(request) -> bool:
+    """The member app shows the shop only while the club has it and has it open; a closed shop disappears from the navigation."""
+    return request.features.has("shop") and is_shop_open()
+
+
 @router.get("/access")
 def portal_access(request):
     _viewer(request)
-    return {"can_manage": access.can_access_management(request.user), "shop_enabled": request.features.has("shop")}
+    return {"can_manage": access.can_access_management(request.user), "shop_enabled": _shop_visible(request)}
 
 
 @router.get("/home")
@@ -172,7 +178,7 @@ def portal_home(request):
     return {
         "viewer": viewer.pk,
         **_home_branding(request, timezone.localdate(now)),
-        "shop_enabled": request.features.has("shop"),
+        "shop_enabled": _shop_visible(request),
         "people": [{"id": member.pk, "name": str(member), "first_name": member.first_name, "photo_url": member.photo_url} for member in people.values()],
         "events": sorted(
             [_attendance(row, blockers.get(row.pk)) for row in events] + _requirement_rows(people, events, now),
@@ -366,7 +372,7 @@ def _visible_event(request, event_id):
 def event_extras(request, event_id: UUID):
     viewer, people, event, in_audience = _visible_event(request, event_id)
     if not in_audience:
-        return {"lineup": None, "game": None, "tasks": [], "attachments": [], "follow": follows.follow_state(request.user, event) if event.kind == Event.EventKind.GAME else None}
+        return {"lineup": None, "game": None, "roster": None, "totals": None, "tasks": [], "attachments": [], "follow": follows.follow_state(request.user, event) if event.kind == Event.EventKind.GAME else None}
     lineup = Lineup.objects.filter(event=event, published_at__isnull=False).select_related("team").first()
     lineup_out = None
     if lineup is not None:
@@ -384,9 +390,66 @@ def event_extras(request, event_id: UUID):
             **counts,
         }
     game = _game_sheet(event)
+    roster = None if event.club_wide else _roster(event, people)
+    totals = _attendance_totals(event) if event.club_wide else None  # a whole-club event has too many people to list: families see only the totals
     tasks = [_task_out(task, viewer.pk) for task in task_svc.list_tasks(request.user, event)]
     files = [{"id": a.pk, "name": a.name, "size": a.size, "download_url": f"/api/v1/portal/events/{event.pk}/attachments/{a.pk}/download"} for a in attachment_svc.list_attachments(request.user, event)]
-    return {"lineup": lineup_out, "game": game, "tasks": tasks, "attachments": files, "follow": follows.follow_state(request.user, event) if event.kind == Event.EventKind.GAME else None}
+    return {"lineup": lineup_out, "game": game, "roster": roster, "totals": totals, "tasks": tasks, "attachments": files, "follow": follows.follow_state(request.user, event) if event.kind == Event.EventKind.GAME else None}
+
+
+_ROSTER_STATES = {"present": "going", "selected": "going", "absent": "out", "excused": "out", "not_selected": "out", "maybe": "maybe", "no_response": "waiting"}
+
+
+def _attendance_totals(event) -> dict:
+    """How many invited people are going / maybe / waiting / out, and no names: for events too big to list (the whole club)."""
+    totals = {"going": 0, "maybe": 0, "waiting": 0, "out": 0}
+    for status, before in Attendance.objects.filter(event=event).values_list("status", "status_before_lineup"):
+        answer = before if status in ("selected", "not_selected") and before else status
+        totals[_ROSTER_STATES.get(answer, "waiting")] += 1
+    return {**totals, "total": sum(totals.values())}
+
+
+def _roster(event, people):
+    """Everyone invited to an event and whether they are coming, for the families: a name, a shirt number, a position and one of going / out /
+    maybe / waiting. Never the reason or the coach's note: those are for the coaching app. A line-up that was published over an answer shows the
+    answer it replaced, so this stays "who said they can come" rather than "who was picked".
+
+    Players of the event's teams carry their number and position. An extra invitee (from another team, a group, or invited by name) gets the
+    position they play on their own team that season, marked ``extra`` with that team's name, and no number (it is another team's). Ordered by the
+    club's position order, then coming before not coming, then shirt number; people without any position come last, regulars before extras."""
+    rows = list(Attendance.objects.filter(event=event).select_related("member"))
+    own, other = {}, {}
+    if rows:
+        season = attendance.resolve_season(event)
+        team_ids = set(event.teams.values_list("pk", flat=True))
+        for membership in TeamMembership.objects.filter(season=season, member_id__in=[row.member_id for row in rows]).select_related("position", "team").order_by("team__name"):
+            if membership.team_id in team_ids:
+                own[membership.member_id] = membership
+            elif membership.position_id and membership.position and not membership.position.staff_position:
+                other.setdefault(membership.member_id, membership)
+    states = _ROSTER_STATES
+    out = []
+    for row in rows:
+        answer = row.status_before_lineup if row.status in ("selected", "not_selected") and row.status_before_lineup else row.status
+        regular = own.get(row.member_id)
+        guest = None if regular else other.get(row.member_id)
+        place = regular or guest
+        position = place.position if place else None
+        out.append(
+            {
+                "id": row.member_id,
+                "name": f"{row.member.first_name} {row.member.last_name}".strip(),
+                "number": regular.jersey_number if regular else None,
+                "position": position.name if position else None,
+                "position_order": position.ordering if position else None,
+                "extra": regular is None,
+                "team": guest.team.name if guest else None,
+                "state": states.get(answer, "waiting"),
+                "mine": row.member_id in people,
+            }
+        )
+    order = {"going": 0, "maybe": 1, "waiting": 2, "out": 3}
+    return sorted(out, key=lambda p: (p["position_order"] is None, p["position_order"] or 0, p["position"] or "", p["extra"], order[p["state"]], p["number"] is None, p["number"] or 0, p["name"].lower()))
 
 
 def _game_sheet(event):

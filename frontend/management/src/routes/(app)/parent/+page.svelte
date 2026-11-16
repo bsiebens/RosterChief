@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { ArrowLeft, Bell, CalendarDays, ChartColumn, Shirt, Info, ListChecks, MapPin, Users, ChevronRight, CircleCheck, ClipboardList, FileText, Handshake, KeyRound, List, UserRound, UsersRound, Wallet, Whistle } from '@lucide/svelte';
+	import { ArrowLeft, Bell, CalendarDays, ChartColumn, Check, CircleQuestionMark, Clock, X, Shirt, Info, ListChecks, MapPin, Users, ChevronRight, CircleCheck, ClipboardList, FileText, Handshake, KeyRound, List, UserRound, UsersRound, Wallet, Whistle } from '@lucide/svelte';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { formatDateTime, formatLongDay, formatTime, kindLabelKey, kindStyle, statusLabelKey, statusStyle } from '#lib/events/types.ts';
@@ -102,6 +102,44 @@
 			seen.add(event.event_id);
 			return true;
 		});
+	});
+
+	/** What "Next 14 days" lists: the family's games and practices, plus the officiating duties someone signed up for or was assigned (open invitations have their own card). */
+	const weekItems = $derived.by(() => {
+		const items: { key: string; event: PortalEventDisplay; badges: { text: string; cls: string }[] }[] = upcomingTwoWeeks.map((event) => ({
+			key: event.event_id,
+			event,
+			badges: events.filter((row) => row.event_id === event.event_id).map((row) => ({ text: `${people.length > 1 ? `${firstName(row.member_id)} · ` : ''}${t(statusLabelKey(row.status))}`, cls: statusStyle(row.status) }))
+		}));
+		const now = new Date();
+		const end = new Date(now);
+		end.setDate(end.getDate() + 14);
+		for (const offer of offers) {
+			if (offer.status !== 'signed_up' && offer.status !== 'assigned') continue;
+			const start = new Date(offer.start);
+			if (offer.cancelled || start <= now || start >= end) continue;
+			items.push({ key: `duty-${offer.event_id}-${offer.member_id}`, event: offer, badges: [{ text: `${people.length > 1 ? `${firstName(offer.member_id)} · ` : ''}${t(`portal.crew_${offer.role}`)} · ${t(`portal.week_duty_${offer.status}`)}`, cls: 'border-line bg-subhead text-ink' }] });
+		}
+		return items.sort((a, b) => Date.parse(a.event.start) - Date.parse(b.event.start));
+	});
+
+	const rosterStatus = {
+		going: { code: 'present', icon: Check },
+		maybe: { code: 'maybe', icon: CircleQuestionMark },
+		waiting: { code: 'no_response', icon: Clock },
+		out: { code: 'absent', icon: X }
+	} as const;
+	/** The roster arrives ordered by position, so players of one position sit together. */
+	const rosterGroups = $derived.by(() => {
+		const groups: { key: string; name: string; players: NonNullable<EventExtras['roster']> }[] = [];
+		for (const player of extras?.roster ?? []) {
+			// Extras play a position on their own team and slot in with it; only those without any position fall under "Invited players".
+			const key = player.position ?? (player.extra ? '\0invited' : '\0other');
+			const last = groups[groups.length - 1];
+			if (last && last.key === key) last.players.push(player);
+			else groups.push({ key, name: player.position ?? t(player.extra ? 'portal.roster_invited' : 'portal.roster_no_position'), players: [player] });
+		}
+		return groups;
 	});
 
 	const monthKey = $derived(dateKey(month).slice(0, 7));
@@ -355,17 +393,17 @@
 {/snippet}
 
 {#snippet week()}
-	{#if upcomingTwoWeeks.length}
+	{#if weekItems.length}
 		<section class="card card-body" aria-label={t('portal.next_fourteen_days')}>
 			<h2 class="card-title"><CalendarDays size={16} aria-hidden="true" />{t('portal.next_fourteen_days')}<a class="link ml-auto text-sm font-semibold" href="/parent?tab=calendar">{calendarLabel} →</a></h2>
 			<div class="divide-y divide-rule">
-				{#each upcomingTwoWeeks as event (event.event_id)}
+				{#each weekItems as { key, event, badges } (key)}
 					<a class="flex items-center gap-3 border-l-4 py-2 pr-1 pl-3 hover:bg-subhead {kindStyle(event.kind).bar}" href={eventLink(event.event_id)} data-sveltekit-reset="false">
 						<PortalEventDate start={event.start} compact />
 						<span class="min-w-0 flex-1"><span class="block font-semibold text-ink">{event.title}</span><span class="block text-xs text-muted">{formatTime(event.start)}{event.location ? ' · ' + event.location : ''}</span></span>
 						<span class="flex flex-wrap justify-end gap-1">
-							{#each events.filter((row) => row.event_id === event.event_id) as row (row.id)}
-								<span class="badge badge-sm border {statusStyle(row.status)}">{people.length > 1 ? `${firstName(row.member_id)} · ` : ''}{t(statusLabelKey(row.status))}</span>
+							{#each badges as badge, i (i)}
+								<span class="badge badge-sm border {badge.cls}">{badge.text}</span>
 							{/each}
 						</span>
 						<ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" />
@@ -446,18 +484,32 @@
 	{/if}
 {/snippet}
 
+{#snippet sponsorLogo(sponsor: { id: string; name: string; url?: string | null; logo_url?: string | null }, hidden = false)}
+	{#snippet logo()}
+		{#if sponsor.logo_url}<img class="h-12 w-full object-contain" src={sponsor.logo_url} alt={hidden ? '' : sponsor.name} loading="lazy" />{:else}<span class="line-clamp-2 text-center text-xs leading-tight font-semibold text-muted">{sponsor.name}</span>{/if}
+	{/snippet}
+	{#if sponsor.url && /^https?:\/\//i.test(sponsor.url)}<a class="grid size-full place-items-center p-2 hover:bg-subhead" href={sponsor.url} target="_blank" rel="noopener noreferrer" tabindex={hidden ? -1 : undefined}>{@render logo()}</a>{:else}<div class="grid size-full place-items-center p-2">{@render logo()}</div>{/if}
+{/snippet}
+
 {#snippet sponsors()}
 	{#if data.home.sponsors?.length}
+		{@const all = data.home.sponsors}
 		<section class="grid min-w-0 gap-2">
 			<h2 class="font-mono text-[11px] tracking-[.14em] text-muted uppercase">{t('portal.partners')}</h2>
-			<ul class="grid grid-cols-3 gap-2" aria-label={t('sponsors.title')}>
-				{#each data.home.sponsors.slice(0, 6) as sponsor (sponsor.id)}
-					<li class="card h-14 overflow-hidden">
-						{#snippet logo()}
-							{#if sponsor.logo_url}<img class="max-h-full max-w-full object-contain" src={sponsor.logo_url} alt={sponsor.name} loading="lazy" />{:else}<span class="text-xs font-semibold text-muted">{sponsor.name}</span>{/if}
-						{/snippet}
-						{#if sponsor.url && /^https?:\/\//i.test(sponsor.url)}<a class="grid size-full place-items-center p-2 hover:bg-subhead" href={sponsor.url} target="_blank" rel="noopener noreferrer">{@render logo()}</a>{:else}<div class="grid size-full place-items-center p-2">{@render logo()}</div>{/if}
-					</li>
+			<!-- Phones: every sponsor scrolls past in a loop (pauses on touch/hover; plain swipeable row when motion is reduced). -->
+			<div class="sponsor-carousel -mx-3 overflow-x-auto md:hidden" aria-label={t('sponsors.title')} role="group">
+				<ul class="sponsor-track flex w-max gap-2 px-3" style="--sponsor-duration: {Math.max(all.length * 4, 16)}s">
+					{#each all as sponsor (sponsor.id)}
+						<li class="card h-16 w-28 shrink-0 overflow-hidden">{@render sponsorLogo(sponsor)}</li>
+					{/each}
+					{#each all as sponsor (sponsor.id)}
+						<li class="card sponsor-dup h-16 w-28 shrink-0 overflow-hidden" aria-hidden="true">{@render sponsorLogo(sponsor, true)}</li>
+					{/each}
+				</ul>
+			</div>
+			<ul class="hidden grid-cols-3 gap-2 md:grid" aria-label={t('sponsors.title')}>
+				{#each all.slice(0, 6) as sponsor (sponsor.id)}
+					<li class="card h-16 overflow-hidden">{@render sponsorLogo(sponsor)}</li>
 				{/each}
 			</ul>
 		</section>
@@ -565,14 +617,14 @@
 		<p class="text-sm text-muted">{formatLongDay(new Date())}</p>
 	</div>
 	<FollowedGames games={data.followed ?? []} crest={data.branding?.logo_url} clubName={data.branding?.name ?? ''} />
-	<div class="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] xl:items-start xl:gap-5">
-		<div class="grid min-w-0 content-start gap-4">
+	<div class="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] xl:items-start xl:gap-5">
+		<div class="grid min-w-0 grid-cols-1 content-start gap-4">
 			<div class="xl:hidden">{@render peoplePicker()}</div>
-			<section class="grid min-w-0 gap-3" aria-label={t('portal.next_up')}>
+			<section class="grid min-w-0 grid-cols-1 gap-3" aria-label={t('portal.next_up')}>
 				{#each nextEvents as rows (rows[0].event_id)}
 					{@const event = rows[0]}
 					<article class="card overflow-hidden">
-						<div class="grid xl:grid-cols-[1.1fr_1fr]">
+						<div class="grid grid-cols-1 xl:grid-cols-[1.1fr_1fr]">
 							<a class="flex" href={eventLink(event.event_id)} data-sveltekit-reset="false" aria-label={event.title}><EventHero {event} {background} {crest} /></a>
 							<div class="grid content-center gap-1 border-t border-sidebar-hairline bg-sidebar-hairline px-4 py-3 text-sidebar-fg xl:border-t-0 xl:border-l xl:px-5">
 								<p class="font-mono text-[11px] tracking-[.14em] text-sidebar-fg-dim uppercase">{t('portal.who_coming')}</p>
@@ -587,7 +639,7 @@
 					<div class="card card-body flex-row items-center gap-3"><CircleCheck size={20} class="text-ok" aria-hidden="true" /><p class="text-sm text-muted">{t('portal.no_events')}</p></div>
 				{/each}
 			</section>
-			<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
+			<div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-1">
 				{#if hasAttention}<div class="xl:hidden">{@render attention()}</div>{/if}
 				{@render week()}
 			</div>
@@ -643,6 +695,52 @@
 				</section>
 			{/if}
 			<!-- A request to referee or officiate is only that: line-up, tasks and files are for the people invited to play. -->
+			{#if audience && extras?.roster?.length}
+				{@const roster = extras.roster}
+				<section class="card card-body">
+					<h2 class="card-title"><Users size={16} aria-hidden="true" />{t('portal.roster_title')}</h2>
+					<div class="grid gap-4">
+						{#each rosterGroups as group (group.key)}
+							<div>
+								<h3 class="mb-1 flex items-baseline gap-2 font-mono text-[11px] tracking-[.14em] text-muted uppercase">{group.name}<span class="text-dim">{group.players.filter((p) => p.state === 'going').length}/{group.players.length}</span></h3>
+								<ul class="grid gap-x-4 sm:grid-cols-2">
+									{#each group.players as player (player.id)}
+										{@const status = rosterStatus[player.state]}
+										<li class="flex min-h-10 items-center gap-2 border-b border-rule py-1.5">
+											<span class="w-7 shrink-0 text-right font-mono text-xs text-muted">{player.number !== null ? `#${player.number}` : ''}</span>
+											<span class="min-w-0 flex-1 leading-tight {player.mine ? 'font-semibold text-club-dark' : 'text-ink'}">{player.name}{#if player.extra && player.position}<span class="block text-xs font-normal text-muted">{player.team ? t('portal.roster_extra_from', { team: player.team }) : t('portal.roster_extra')}</span>{/if}</span>
+											<span class="grid size-6 shrink-0 place-items-center rounded-full border {statusStyle(status.code)}" title={t(statusLabelKey(status.code))} role="img" aria-label={t(statusLabelKey(status.code))}><status.icon size={13} aria-hidden="true" /></span>
+										</li>
+									{/each}
+								</ul>
+							</div>
+						{/each}
+					</div>
+					<p class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+						{#each Object.values(rosterStatus) as status (status.code)}
+							<span class="inline-flex items-center gap-1.5"><span class="grid size-5 place-items-center rounded-full border {statusStyle(status.code)}"><status.icon size={11} aria-hidden="true" /></span>{t(statusLabelKey(status.code))}</span>
+						{/each}
+					</p>
+				</section>
+			{/if}
+			{#if audience && extras?.totals?.total}
+				{@const totals = extras.totals}
+				{@const parts = [
+					{ key: 'going', code: 'present', bar: 'bg-ok', n: totals.going },
+					{ key: 'maybe', code: 'maybe', bar: 'bg-warn', n: totals.maybe },
+					{ key: 'waiting', code: 'no_response', bar: 'bg-dim', n: totals.waiting },
+					{ key: 'out', code: 'absent', bar: 'bg-danger', n: totals.out }
+				]}
+				<section class="card card-body">
+					<h2 class="card-title"><Users size={16} aria-hidden="true" />{t('portal.roster_title')}<span class="ml-auto font-mono text-xs font-normal text-muted">{totals.total}</span></h2>
+					<div class="flex h-3 overflow-hidden rounded-full bg-subhead" role="img" aria-label={parts.map((part) => `${part.n} ${t(statusLabelKey(part.code))}`).join(', ')}>
+						{#each parts as part (part.key)}{#if part.n}<span class="{part.bar} h-full" style="width: {(part.n / totals.total) * 100}%"></span>{/if}{/each}
+					</div>
+					<p class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+						{#each parts as part (part.key)}<span class="inline-flex items-center gap-1.5"><span class="size-2.5 rounded-full {part.bar}"></span><b class="text-ink">{part.n}</b>{t(statusLabelKey(part.code))}</span>{/each}
+					</p>
+				</section>
+			{/if}
 			{#if audience && extras?.game}
 				{@const game = extras.game}
 				{@const mine = new Set(people.map((person) => person.id))}
@@ -705,3 +803,34 @@
 		</div>
 	{/if}
 </Sheet>
+
+<style>
+	.sponsor-carousel {
+		scrollbar-width: none;
+	}
+	.sponsor-carousel::-webkit-scrollbar {
+		display: none;
+	}
+	.sponsor-track {
+		animation: sponsor-scroll var(--sponsor-duration, 30s) linear infinite;
+	}
+	.sponsor-carousel:hover .sponsor-track,
+	.sponsor-carousel:active .sponsor-track,
+	.sponsor-carousel:focus-within .sponsor-track {
+		animation-play-state: paused;
+	}
+	/* The track holds two copies of the list: moving it half its width loops seamlessly. */
+	@keyframes sponsor-scroll {
+		to {
+			transform: translateX(calc(-50% - 0.25rem));
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.sponsor-track {
+			animation: none;
+		}
+		.sponsor-dup {
+			display: none;
+		}
+	}
+</style>

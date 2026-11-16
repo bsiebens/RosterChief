@@ -131,5 +131,6 @@
 	{/each}
 		{#if data.stats?.available}{@const mine = data.stats.people.find((candidate) => candidate.id === who)}{#if mine}<StatsShare person={mine} />{/if}{/if}
 	</div>
-	<div class="grid min-w-0 gap-4">{#if data.overview}<ProfileOverview overview={data.overview} people={data.people} />{/if}{#if data.follows}<FollowTeams initial={data.follows} />{/if}</div>
+	<div class="grid min-w-0 gap-4">{#if data.overview}<ProfileOverview overview={data.overview} people={data.people} />{/if}</div>
 </div>
+{#if data.follows}<div class="mt-4"><FollowTeams initial={data.follows} /></div>{/if}

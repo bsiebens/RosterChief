@@ -35,15 +35,15 @@
 	<div class="card-h"><Radio size={17} aria-hidden="true" /><h2 id="follow-title">{t('portal.follow_title')}</h2></div>
 	<p class="px-5 pt-4 text-sm text-muted">{t('portal.follow_teams_help')}</p>
 	{#if status === 'error'}<div class="p-5 pb-0"><Alert kind="error">{t('portal.save_failed')}</Alert></div>{/if}
-	<ul class="divide-y divide-rule">
+	<ul class="grid px-5 pb-2 sm:grid-cols-2 sm:gap-x-10">
 		{#each follows.teams as team (team.id)}
-			<li class="flex min-h-12 items-center gap-3 px-5 py-2">
+			<li class="flex min-h-12 items-center gap-3 border-b border-rule py-2">
 				<Shirt size={16} class="shrink-0 text-muted" aria-hidden="true" />
 				<span class="min-w-0 flex-1 font-semibold text-ink">{team.name}{#if team.mine}<span class="badge badge-sm badge-outline ml-2">{t('portal.follow_mine')}</span>{/if}</span>
 				<input type="checkbox" class="toggle" aria-label={team.name} checked={team.followed} onchange={(e) => toggleTeam(team.id, e.currentTarget.checked)} />
 			</li>
 		{:else}
-			<li class="px-5 py-3 text-sm text-muted">{t('portal.follow_none')}</li>
+			<li class="py-3 text-sm text-muted sm:col-span-2">{t('portal.follow_none')}</li>
 		{/each}
 	</ul>
 	{#if follows.games.length}
