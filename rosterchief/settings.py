@@ -151,6 +151,8 @@ CACHES = {
 if config("TEST_DB_NAME", default=""):
     DATABASES["default"]["TEST"] = {"NAME": config("TEST_DB_NAME")}
 DATABASE_ROUTERS = ["django_tenants.routers.TenantSyncRouter"]
+# Club creation in tests clones a pre-migrated template schema instead of re-running every migration (see rosterchief/testing.py).
+TEST_RUNNER = "rosterchief.testing.TemplateSchemaRunner"
 
 
 # Password validation

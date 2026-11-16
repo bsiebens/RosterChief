@@ -5,6 +5,7 @@ from rosterchief.admin import ClubAdminMixin
 from .models import (
     Attendance,
     AttendanceChange,
+    CalendarFeed,
     Event,
     EventAttachment,
     EventFollow,
@@ -23,6 +24,7 @@ from .models import (
     LineupSlotAssignment,
     Location,
     OfficialSignup,
+    OfficiatingInvitation,
     Opponent,
     RefereeSignup,
     Season,
@@ -273,3 +275,22 @@ class RefereeSignupAdmin(_SignupAdmin):
 @admin.register(OfficialSignup)
 class OfficialSignupAdmin(_SignupAdmin):
     pass
+
+
+@admin.register(OfficiatingInvitation)
+class OfficiatingInvitationAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["event", "member", "kind", "declined", "notified"]
+    list_filter = ["kind", "declined", "notified"]
+    search_fields = ["event__title", "member__first_name", "member__last_name"]
+    list_select_related = ["event", "member"]
+    raw_id_fields = ["event", "member"]
+
+
+@admin.register(CalendarFeed)
+class CalendarFeedAdmin(ClubAdminMixin, admin.ModelAdmin):
+    """The token is the secret in the subscription link, so it is never shown or editable here."""
+
+    list_display = ["user", "created"]
+    search_fields = ["user__email"]
+    raw_id_fields = ["user"]
+    exclude = ["token"]
