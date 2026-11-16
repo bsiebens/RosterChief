@@ -128,6 +128,35 @@ This switches code only. If the release you left ran migrations the previous cod
 
 Not automated yet. Back up `/var/lib/rosterchief/checkpoints` (a `pg_dump` before every release), `/var/lib/rosterchief/media` and `/var/lib/rosterchief/private_media` off the host, and snapshot the EBS volume. Test a restore once.
 
+## Secret scanning (gitleaks)
+
+The repository is public, and a secret that reaches it must be treated as leaked for good: deleting the file later does not remove it from the history, which anyone can read. [gitleaks](https://github.com/gitleaks/gitleaks) looks for credentials in every commit. It is built into three places.
+
+**1. On your machine.** Install it once (`brew install gitleaks`) and scan before you publish:
+
+```bash
+gitleaks git --no-banner --redact -v .                          # the whole history
+gitleaks git --no-banner --redact -v --log-opts development .   # only what is on a branch
+gitleaks dir --no-banner --redact -v .                          # the files in the working tree, committed or not
+```
+
+Optionally stop a secret before it is ever committed, with a pre-commit hook (`.git/hooks/pre-commit`, executable): `gitleaks git --pre-commit --staged --no-banner --redact -v`.
+
+**2. In the repository cutover** (`docs/repo-cutover.md`). `deploy/cutover/cutover.sh prepare` runs gitleaks on the history it is about to publish, plus a built-in check, and records the result. `push` **refuses** unless that scan was clean. If gitleaks is not installed the result is "unscanned" and `push` refuses too. `--allow-unscanned` overrides it, knowingly. `cutover.sh scan --new . --new-branch development` runs the same scan on its own.
+
+**3. In CI.** The `secrets` job in `.github/workflows/ci.yml` runs gitleaks on every push and pull request over the full history. It uses `gitleaks/gitleaks-action`, which is free for repositories owned by a personal account; for an organisation-owned repository it needs a `GITLEAKS_LICENSE` secret (check the current terms before relying on it).
+
+**Configuration.** `.gitleaks.toml` starts from gitleaks' default rules and allowlists only the example environment files (`deploy/environments/*.example`, `deploy/host/app.env.example`), whose values are placeholders. Add other false positives there as narrowly as you can (a path, or a regex for one value), or list a single finding's fingerprint in `.gitleaksignore`. Never allowlist a real secret.
+
+**If it finds something real:**
+1. **Revoke and rotate it first**, whatever it is: a GitHub token, the Cloudflare API token, a Resend key, `DJANGO_SECRET_KEY` (this logs everyone out), the VAPID private key (existing push subscriptions stop working, so only rotate it if it really leaked).
+2. If nothing has been published yet, remove it from the history (for example with `git filter-repo`) and run `prepare` again. If it was already published, rotating is the fix; rewriting a public history does not undo the exposure.
+3. Put it where secrets belong: `deploy/environments/*.secrets` (git-ignored), `/etc/rosterchief/*.env` on the servers, or GitHub Actions secrets. Never in a file that is committed.
+
+**Without installing it**, Docker works too: `docker run --rm -v "$PWD:/repo:ro" ghcr.io/gitleaks/gitleaks:latest git --no-banner --redact -v --config /repo/.gitleaks.toml /repo`. (`cutover.sh` itself looks for a `gitleaks` binary, or `GITLEAKS_BIN`.)
+
+**Status.** The scanner was run for real (the official image) over this repository's history: 246 commits, one finding, a made-up key in a test fixture (`events/tests_imports.py`), which is now allowlisted by path and value; after that the scan is clean. A secret planted in a throwaway repository was caught with the same config. The cutover gate is tested with a stand-in scanner, and the CI job has not yet run on GitHub.
+
 ## When something is wrong
 
 | Symptom | First look |

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Replaces the code of an existing GitHub repository with a new codebase while keeping BOTH histories.
 #
-#   cutover.sh scan    --new PATH [--new-branch B]            look for secrets and private files in the history about to be published
+#   cutover.sh scan    --new PATH [--new-branch B]            scan the history about to be published for secrets (gitleaks, plus a built-in check)
 #   cutover.sh prepare --old URL --new PATH [options]         back up the old repo and build the cutover branches locally (pushes nothing)
-#   cutover.sh push    --out DIR [--yes]                      publish the legacy refs and the cutover branch (never forced)
+#   cutover.sh push    --out DIR [--yes] [--allow-unscanned]  publish the legacy refs and the cutover branch (never forced; needs a clean gitleaks scan)
 #   cutover.sh finish  --out DIR [--yes]                      after the cutover PR is merged: bring the old development branch across
 #
 # How it keeps the old code: the new tree arrives as a MERGE COMMIT on top of the old main (parents: old main, new history), so every
@@ -25,6 +25,9 @@ Options:
   --cutover NAME       name of the branch to push for the pull request (default: v2-cutover)
   --out DIR            where the backup, state file and working clone live (default: ./repo-cutover-<timestamp>)
   --yes                do not ask for confirmation
+  --allow-unscanned    push although gitleaks was missing or reported findings in 'prepare' (you take responsibility)
+
+Set GITLEAKS_BIN to use a gitleaks binary that is not on the PATH. Install it with: brew install gitleaks
 USAGE
     exit 2
 }
@@ -35,7 +38,8 @@ info() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 cmd=${1:-}
 [[ -n $cmd ]] || usage
 shift
-old='' new='' new_branch=development main=main dev=development cutover=v2-cutover out='' assume_yes=0
+old='' new='' new_branch=development main=main dev=development cutover=v2-cutover out='' assume_yes=0 allow_unscanned=0
+gitleaks_bin=${GITLEAKS_BIN:-gitleaks}
 while [[ $# -gt 0 ]]; do
     case $1 in
         --old) old=${2:?}; shift ;;
@@ -46,6 +50,7 @@ while [[ $# -gt 0 ]]; do
         --cutover) cutover=${2:?}; shift ;;
         --out) out=${2:?}; shift ;;
         --yes) assume_yes=1 ;;
+        --allow-unscanned) allow_unscanned=1 ;;
         *) usage ;;
     esac
     shift
@@ -60,9 +65,32 @@ confirm() {
 }
 
 # ------------------------------------------------------------------------------------------------- scan
+# scan_gitleaks REPO BRANCH: 0 = clean, 1 = findings, 2 = gitleaks missing or failed to run. Scans only the history of BRANCH (what is published).
+scan_gitleaks() {
+    local repo=$1 branch=$2 rc=0 args
+    if ! command -v "$gitleaks_bin" > /dev/null 2>&1; then
+        echo "  gitleaks is not installed (brew install gitleaks, or https://github.com/gitleaks/gitleaks): only the weaker built-in check ran."
+        return 2
+    fi
+    info "Scanning the history of $branch with gitleaks"
+    args=(--no-banner --redact --verbose --log-opts "$branch")
+    [[ -f $repo/.gitleaks.toml ]] && args+=(--config "$repo/.gitleaks.toml")
+    # gitleaks 8.19+ has `git`; older versions have `detect`.
+    if "$gitleaks_bin" git --help > /dev/null 2>&1; then
+        "$gitleaks_bin" git "${args[@]}" "$repo" || rc=$?
+    else
+        "$gitleaks_bin" detect --source "$repo" "${args[@]}" || rc=$?
+    fi
+    case $rc in
+        0) echo "  gitleaks: no leaks found." ; return 0 ;;
+        1) echo "  gitleaks reported findings (above). Revoke and rotate anything real before publishing: removing it from the files does not remove it from the history." ; return 1 ;;
+        *) echo "  gitleaks failed to run (exit $rc)." ; return 2 ;;
+    esac
+}
+
 scan() {
     local repo=$1 ref=$2 files hits status=0
-    info "Scanning $ref for private files and secrets (heuristic: not a substitute for a real scanner such as gitleaks)"
+    info "Built-in check of $ref for private files and credential-looking lines (heuristic, runs in addition to gitleaks)"
     files=$(git -C "$repo" log "$ref" --diff-filter=A --name-only --format= | sort -u |
         grep -E '(^|/)(\.env(\..*)?|[^/]*\.pem|[^/]*\.key|id_rsa[^/]*|[^/]*\.sqlite3(-journal)?|[^/]*\.bak[^/]*|[^/]*\.p12|[^/]*\.pfx)$' |
         grep -vE '\.(example|sample)$' || true)
@@ -133,7 +161,12 @@ prepare() {
 
     info "Looking at what will be published"
     git -C "$new" ls-tree -r --name-only "$new_branch" | grep -E '^\.github/' | sed 's/^/  workflow or GitHub config: /' || echo "  (no .github files)"
-    scan "$new" "$new_branch" || echo "  Review the findings above before running 'push'."
+    scan_result=clean
+    leaks_rc=0
+    scan_gitleaks "$new" "$new_branch" || leaks_rc=$?
+    case $leaks_rc in 0) ;; 1) scan_result=findings ;; *) scan_result=unscanned ;; esac
+    scan "$new" "$new_branch" || { [[ $scan_result != clean ]] || scan_result=findings; }
+    [[ $scan_result == clean ]] || echo "  Scan result: $scan_result. 'push' will refuse until a scan is clean (or you pass --allow-unscanned)."
 
     info "Building the cutover branches (nothing is pushed)"
     git clone -q "$out/backup.git" "$work"
@@ -160,7 +193,7 @@ The old code remains at legacy/$main, legacy/$dev and the legacy-final-* tags."
     cutover_sha=$(git -C "$work" rev-parse HEAD)
     {
         printf 'old=%q\nmain=%q\ndev=%q\nnew_branch=%q\ncutover=%q\n' "$old" "$main" "$dev" "$new_branch" "$cutover"
-        printf 'old_main_sha=%q\nold_dev_sha=%q\nnew_sha=%q\ncutover_sha=%q\n' "$old_main_sha" "$old_dev_sha" "$new_sha" "$cutover_sha"
+        printf 'old_main_sha=%q\nold_dev_sha=%q\nnew_sha=%q\ncutover_sha=%q\nscan_result=%q\n' "$old_main_sha" "$old_dev_sha" "$new_sha" "$cutover_sha" "$scan_result"
     } > "$out/state.env"
     git -C "$work" checkout -q "$cutover"
     echo
@@ -171,6 +204,9 @@ The old code remains at legacy/$main, legacy/$dev and the legacy-final-* tags."
 # ------------------------------------------------------------------------------------------------- push
 push() {
     load_state
+    if [[ ${scan_result:-unscanned} != clean && $allow_unscanned == 0 ]]; then
+        die "The secret scan in 'prepare' was '${scan_result:-unscanned}'. Fix that and run 'prepare' again (install gitleaks if it was missing), or pass --allow-unscanned to publish anyway."
+    fi
     echo "About to push to: $old"
     echo "  branches legacy/$main, legacy/$dev; tags legacy-final-$main, legacy-final-$dev; branch $cutover"
     echo "  (none of this touches $main or $dev, and nothing is forced)"
@@ -206,7 +242,13 @@ First parent: the old $dev, second parent: $main after the cutover."
 }
 
 case $cmd in
-    scan) require_new; scan "$new" "$new_branch" ;;
+    scan)
+        require_new
+        status=0
+        scan_gitleaks "$new" "$new_branch" || status=$?
+        scan "$new" "$new_branch" || [[ $status != 0 ]] || status=1
+        exit "$status"
+        ;;
     prepare) prepare ;;
     push) push ;;
     finish) finish ;;

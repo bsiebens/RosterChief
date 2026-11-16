@@ -63,6 +63,17 @@ jobs:
         working-directory: frontend/${{ matrix.app }}
       - run: npm run build
         working-directory: frontend/${{ matrix.app }}
+  secrets:
+    # Scans every commit of the push or pull request (full history is fetched) with gitleaks, using .gitleaks.toml.
+    # Free for repositories owned by a personal account; a repository owned by an organisation needs a GITLEAKS_LICENSE secret.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   deploy-scripts:
     runs-on: ubuntu-latest
     steps:

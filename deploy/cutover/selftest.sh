@@ -10,6 +10,11 @@ export GIT_AUTHOR_NAME=selftest GIT_AUTHOR_EMAIL=selftest@example.com GIT_COMMIT
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+# A stand-in for gitleaks whose exit status the test chooses (0 clean, 1 findings), so the self-test needs no real scanner.
+mkdir -p "$tmp/bin"
+printf '#!/bin/sh\nexit "${STUB_GITLEAKS_RC:-0}"\n' > "$tmp/bin/gitleaks"
+chmod +x "$tmp/bin/gitleaks"
+export GITLEAKS_BIN=$tmp/bin/gitleaks
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 ok() { printf '  ok: %s\n' "$*"; }
@@ -127,6 +132,28 @@ echo "Scenario 2c: pointing --new at the old repository itself is refused"
 if bash "$here/cutover.sh" prepare --old "$github" --new "$old" --new-branch development --out "$tmp/out2c" > "$tmp/last.log" 2>&1; then fail "prepare accepted the old codebase as the new one"; fi
 grep -q "already part of" "$tmp/last.log" || fail "refused for the wrong reason: $(tail -1 "$tmp/last.log")"
 ok "refused"
+
+echo "Scenario 2d: push needs a clean gitleaks scan"
+github=$tmp/github2d.git
+fresh_github "$github"
+out=$tmp/out2d
+GITLEAKS_BIN=$tmp/no-such-gitleaks cutover prepare --old "$github" --new "$new" --out "$out"
+grep -q '^scan_result=unscanned' "$out/state.env" || fail "a missing gitleaks was not recorded as unscanned"
+if bash "$here/cutover.sh" push --out "$out" --yes > "$tmp/last.log" 2>&1; then fail "push went ahead without a scan"; fi
+grep -q "secret scan" "$tmp/last.log" || fail "push refused for the wrong reason: $(tail -1 "$tmp/last.log")"
+git -C "$github" rev-parse --verify --quiet refs/heads/v2-cutover > /dev/null && fail "the refused push still pushed"
+ok "a missing gitleaks blocks push"
+out=$tmp/out2d-leaky
+STUB_GITLEAKS_RC=1 cutover prepare --old "$github" --new "$new" --out "$out"
+grep -q '^scan_result=findings' "$out/state.env" || fail "findings were not recorded"
+if bash "$here/cutover.sh" push --out "$out" --yes > "$tmp/last.log" 2>&1; then fail "push went ahead with findings"; fi
+ok "gitleaks findings block push"
+cutover push --out "$out" --yes --allow-unscanned
+git -C "$github" rev-parse --verify --quiet refs/heads/v2-cutover > /dev/null || fail "--allow-unscanned did not push"
+ok "--allow-unscanned overrides, explicitly"
+if STUB_GITLEAKS_RC=1 bash "$here/cutover.sh" scan --new "$new" > "$tmp/last.log" 2>&1; then fail "scan passed although gitleaks reported findings"; fi
+GITLEAKS_BIN=$tmp/no-such-gitleaks bash "$here/cutover.sh" scan --new "$new" > "$tmp/last.log" 2>&1 && fail "scan passed without gitleaks"
+ok "scan fails on findings and when gitleaks is missing"
 
 echo "Scenario 3: prepare refuses uncommitted work in the new codebase"
 echo dirty >> "$new/manage.py"

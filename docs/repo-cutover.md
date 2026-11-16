@@ -14,7 +14,7 @@ Goal: the existing GitHub repository (the old RosterChief) carries the new code 
 1. **Old production**: pin it to an immutable image tag (`IMAGE_TAG=v0.13.3` in its `.env`) instead of the floating `:main`, so nothing that happens to the repository can change what it pulls. Keep it running (frozen or read-only) until the new system is proven: rolling back *code* does not roll back *data* entered in the new system, because the import from the old one is one-way.
 2. Make sure the new codebase's `development` branch is **committed** and the checkout is clean. Only committed work is published.
 3. Use the **GitHub URL** as `--old`, not a local checkout: a local clone can be stale. The old checkout on this machine has its local `main` 129 commits behind `origin/main`, and the tag `v0.13.3` is only on `origin/main`.
-4. The repository is **public**. Run the scan and read it: `deploy/cutover/cutover.sh scan --new . --new-branch development`. It is a heuristic; run a real scanner such as gitleaks too.
+4. The repository is **public**. Install gitleaks (`brew install gitleaks`) and read its findings: `deploy/cutover/cutover.sh scan --new . --new-branch development`. `prepare` runs the same scan and `push` refuses unless it was clean (see "Secret scanning" in `docs/deployment.md`).
 5. Note down GitHub settings the scripts cannot change: branch protection on `main`, and its **required status checks** (they name the old CI jobs and would block the PR forever).
 
 ## Steps
@@ -23,7 +23,7 @@ Goal: the existing GitHub repository (the old RosterChief) carries the new code 
 # 1. Back up and build locally. Pushes nothing. Writes ./repo-cutover-<time>/ (mirror, bundle, state.env, working clone).
 deploy/cutover/cutover.sh prepare --old git@github.com:bsiebens/RosterChief.git --new . --new-branch development
 
-# 2. Copy <out>/old-repo.bundle somewhere off this machine. Then publish the legacy refs and the cutover branch (never forced).
+# 2. Copy <out>/old-repo.bundle somewhere off this machine. Then publish the legacy refs and the cutover branch (never forced; needs a clean gitleaks scan).
 deploy/cutover/cutover.sh push --out <out>
 ```
 
