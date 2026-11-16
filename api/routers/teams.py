@@ -5,6 +5,7 @@ violations. Writes go through ``teams.services.teams``. Static routes are declar
 import uuid
 from typing import Literal
 
+from django.http import HttpResponse
 from ninja import File, Form, Router, UploadedFile
 from ninja.errors import HttpError
 
@@ -32,6 +33,7 @@ from api.schemas_teams import (
 from events.services import attendance_report
 from members.services import access
 from members.services.errors import Invalid
+from shop.services.invoices import PDFUnavailable
 from teams.services import teams as svc
 
 router = Router()
@@ -89,6 +91,23 @@ def numbers_overview(request, season: uuid.UUID | None = None, pool: uuid.UUID |
 def get_team(request, team_id: uuid.UUID, season: uuid.UUID | None = None):
     team = _team(team_id)
     return _detail(request, team, _season(season))
+
+
+@router.get("/{team_id}/roster.pdf", summary="The roster of a season as a PDF: players and staff", operation_id="team_roster_pdf")
+def team_roster_pdf(request, team_id: uuid.UUID, season: uuid.UUID | None = None):
+    """Club and team header, the season, the players (number, name, position, captain marks) and the staff (name, position). Names and roles only.
+    Same visibility as the team itself (``GET /teams/{id}``)."""
+    team = _team(team_id)
+    season_obj = _season(season)
+    try:
+        pdf = svc.render_roster_pdf(team, season_obj)
+    except PDFUnavailable:
+        raise HttpError(503, "PDF rendering is not available on this server.") from None
+    slug = "".join(ch if ch.isalnum() else "-" for ch in team.name.lower()).strip("-") or "team"
+    response = HttpResponse(pdf, content_type="application/pdf")
+    response["Content-Disposition"] = f'inline; filename="roster-{slug}.pdf"'
+    response["Cache-Control"] = "private, no-store"
+    return response
 
 
 @router.patch("/{team_id}", response=TeamBase, summary="Edit a team (team manager)", operation_id="update_team")

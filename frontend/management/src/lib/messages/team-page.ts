@@ -2,6 +2,7 @@ export default {
     en: {
         'teampage.add.title': 'Add multiple people',
         'teampage.add.button': 'Add multiple',
+        'teampage.roster_pdf': 'Download roster',
         'teampage.add.back': 'Back to the team',
         'teampage.add.intro': 'Only members who are active (paid up) for this club this season can be added. The position you pick decides the role: a staff position adds them to the staff, any other position adds them to the roster. To add someone as both a player and staff, give them two rows.',
         'teampage.add.col.member': 'Member',
@@ -69,6 +70,7 @@ export default {
     nl: {
         'teampage.add.title': 'Meerdere personen toevoegen',
         'teampage.add.button': 'Meerdere toevoegen',
+        'teampage.roster_pdf': 'Spelerslijst downloaden',
         'teampage.add.back': 'Terug naar de ploeg',
         'teampage.add.intro': 'Enkel leden die dit seizoen actief (betaald) zijn bij de club kunnen worden toegevoegd. De gekozen positie bepaalt de rol: een staffunctie voegt hen toe aan de staf, elke andere positie aan de selectie. Wil je iemand als speler én staf toevoegen, geef hem of haar dan twee rijen.',
         'teampage.add.col.member': 'Lid',
@@ -136,6 +138,7 @@ export default {
     fr: {
         'teampage.add.title': 'Ajouter plusieurs personnes',
         'teampage.add.button': 'Ajouter plusieurs',
+        'teampage.roster_pdf': 'Télécharger la liste',
         'teampage.add.back': 'Retour à l’équipe',
         'teampage.add.intro': 'Seuls les membres actifs (à jour de cotisation) du club cette saison peuvent être ajoutés. La position choisie détermine le rôle : une fonction de staff ajoute la personne au staff, toute autre position à l’effectif. Pour ajouter quelqu’un comme joueur et comme staff, donnez-lui deux lignes.',
         'teampage.add.col.member': 'Membre',
