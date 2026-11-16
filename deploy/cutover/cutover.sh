@@ -138,6 +138,14 @@ load_state() {
 }
 
 # ------------------------------------------------------------------------------------------------- prepare
+# legacy_ref_ok REF TIP NAME: fine when REF does not exist yet, or already points at TIP's commit; otherwise stop.
+legacy_ref_ok() {
+    local ref=$1 tip=$2 name=$3 have
+    have=$(git -C "$work" rev-parse -q --verify "$ref^{commit}") || return 0
+    [[ $have == "$(git -C "$work" rev-parse "$tip^{commit}")" ]] ||
+        die "$name already exists on the old repository but no longer points at the old tip ($tip). Has the cutover pull request been merged already? Then do not run 'prepare' again; see docs/repo-cutover.md."
+}
+
 prepare() {
     require_new
     [[ -n $old ]] || usage
@@ -182,10 +190,15 @@ prepare() {
         fi
     done
     echo "  new codebase: $new_branch at $new_sha ($(git -C "$work" rev-list --count "$new_sha") commits)"
-    git -C "$work" branch --no-track "legacy/$main" "origin/$main"
-    git -C "$work" branch --no-track "legacy/$dev" "origin/$dev"
-    git -C "$work" tag -a "legacy-final-$main" -m "Last state of $main before the new codebase replaced it" "origin/$main"
-    git -C "$work" tag -a "legacy-final-$dev" -m "Last state of $dev before the new codebase replaced it" "origin/$dev"
+    # The legacy refs may already exist on the old repository from an earlier run (for example when the cutover
+    # branch is rebuilt after a fix). They are kept as they are, and only when they still point at the old tips.
+    for old_branch in "$main" "$dev"; do
+        legacy_ref_ok "refs/remotes/origin/legacy/$old_branch" "origin/$old_branch" "legacy/$old_branch"
+        legacy_ref_ok "refs/tags/legacy-final-$old_branch" "origin/$old_branch" "legacy-final-$old_branch"
+        git -C "$work" branch --no-track "legacy/$old_branch" "origin/$old_branch"
+        git -C "$work" rev-parse -q --verify "refs/tags/legacy-final-$old_branch" > /dev/null ||
+            git -C "$work" tag -a "legacy-final-$old_branch" -m "Last state of $old_branch before the new codebase replaced it" "origin/$old_branch"
+    done
     graft "$cutover" "origin/$main" "refs/remotes/v2/$new_branch" "refs/remotes/v2/$new_branch" "Replace the codebase with the new RosterChief
 
 The tree is the new codebase's $new_branch; both histories are kept (first parent: the old $main, second parent: the new history).

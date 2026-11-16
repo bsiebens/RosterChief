@@ -388,3 +388,6 @@ deploy/environments/*.env
 deploy/environments/*.secrets
 !deploy/environments/*.example
 !deploy/lib/
+
+# Output of deploy/cutover/cutover.sh (a full copy of the old repository)
+/repo-cutover-*/

@@ -117,6 +117,31 @@ if bash "$here/cutover.sh" finish --out "$out" --yes > "$tmp/last.log" 2>&1; the
 grep -q "squashed or rebased" "$tmp/last.log" || fail "finish refused for the wrong reason: $(tail -1 "$tmp/last.log")"
 ok "finish refuses a squash merge and explains why"
 
+echo "Scenario 2a: rebuilding the cutover branch after a fix (the legacy refs already exist on the old repository)"
+github=$tmp/github2a.git
+fresh_github "$github"
+new2=$tmp/new2
+git clone -q "$new" "$new2"
+git -C "$new2" checkout -q development
+out=$tmp/out2a1
+cutover prepare --old "$github" --new "$new2" --out "$out"
+cutover push --out "$out" --yes
+commit_file "$new2" fix.txt "the fix" "new: fix after the first push"
+out=$tmp/out2a2
+cutover prepare --old "$github" --new "$new2" --cutover v2-cutover-2 --out "$out"
+cutover push --out "$out" --yes
+git -C "$github" rev-parse --verify --quiet refs/heads/v2-cutover-2 > /dev/null || fail "the rebuilt cutover branch was not pushed"
+pr=$tmp/pr2a
+git clone -q "$github" "$pr"
+git -C "$pr" checkout -q main
+git -C "$pr" merge -q --no-ff origin/v2-cutover-2 -m "Merge pull request #2 from v2-cutover-2" > /dev/null
+git -C "$pr" push -q origin main
+cutover finish --out "$out" --yes
+for branch in main development; do
+    [[ $(tree "$github" "refs/heads/$branch") == "$(tree "$new2" development)" ]] || fail "$branch lacks the fix after the rebuilt cutover"
+done
+ok "a rebuilt cutover branch reuses the legacy refs and finishes with the fixed tree"
+
 echo "Scenario 2b: a relative --new path (as in --new .) means the new checkout, not the working clone"
 github=$tmp/github2b.git
 fresh_github "$github"
