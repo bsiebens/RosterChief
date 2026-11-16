@@ -340,7 +340,7 @@ def send_order_emails(kind: str, order, extra: dict | None, entries: list[tuple[
         return 0
     member = order.purchaser
     data = _order_data(order)
-    how_to_pay = notifications._how_to_pay(extra) if not data["is_paid"] else ""
+    how_to_pay = ((order.payment_instructions or "").strip() or notifications._how_to_pay(extra)) if not data["is_paid"] else ""
     attachment = _invoice_attachment(order) if kind in INVOICE_KINDS else None
     due_date = _due_date(order)
     seen, sent = set(), 0

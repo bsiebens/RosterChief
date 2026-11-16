@@ -81,6 +81,6 @@ td { padding: 2mm 0; border-bottom: 1px solid #eee; }
 </table>
 {% endif %}
 {% if order.payment_status == "paid" %}<p class="paid"><strong>Paid in full.</strong> Thank you.</p>{% else %}<p class="muted">Please pay before the due date{% if invoice.due_date %} ({{ invoice.due_date|date:"j F Y" }}){% endif %}, quoting {{ invoice.number }}.</p>{% endif %}
-{% if order.payment_status != "paid" %}{% with instructions=snapshot.club.payment_instructions|default:club.payment_instructions %}{% if instructions %}<div class="muted" style="margin-top:8px"><strong>How to pay</strong><div style="white-space:pre-line">{{ instructions }}</div></div>{% endif %}{% endwith %}{% endif %}
+{% if order.payment_status != "paid" %}{% with instructions=order.payment_instructions|default:snapshot.club.payment_instructions|default:club.payment_instructions %}{% if instructions %}<div class="muted" style="margin-top:8px"><strong>How to pay</strong><div style="white-space:pre-line">{{ instructions }}</div></div>{% endif %}{% endwith %}{% endif %}
 </body>
 </html>

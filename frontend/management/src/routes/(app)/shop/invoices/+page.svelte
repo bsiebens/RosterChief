@@ -65,7 +65,7 @@
 					</thead>
 					<tbody>
 						{#each data.rows as i (i.id)}
-							<tr class="hover:bg-paper">
+							<tr class="hover:bg-paper {data.canOrders ? 'cursor-pointer' : ''}" onclick={(e) => { if (data.canOrders && !(e.target as HTMLElement).closest('a, button, input, label, select')) goto(orderHref(i.order.id)); }}>
 								<td class="font-mono text-xs font-semibold">{i.number}</td>
 								<td class="hidden lg:table-cell">{#if data.canOrders}<a class="link font-mono text-xs" href={orderHref(i.order.id)}>{i.order.number}</a>{:else}<span class="font-mono text-xs">{i.order.number}</span>{/if}</td>
 								<td class="font-semibold">{i.purchaser.name}</td>
@@ -79,7 +79,7 @@
 								</td>
 								<td class="text-right whitespace-nowrap">
 									<div class="flex flex-wrap justify-end gap-1">
-										<a class="btn btn-outline btn-xs gap-1" href={invoicePdfHref(i.id)} target="_blank" rel="noopener"><FileDown size={13} /> {t('shop.invc.pdf')}</a>
+										<a class="btn btn-outline btn-xs gap-1" href={invoicePdfHref(i.id)} download="{i.number}.pdf" target="_blank" rel="noopener"><FileDown size={13} /> {t('shop.invc.pdf')}</a>
 										<InvoiceRecreate invoiceId={i.id} size="xs" onoutcome={(o) => (outcomes[i.id] = o)} />
 										{#if data.canOrders}<a class="btn btn-outline btn-xs" href={orderHref(i.order.id)}>{t('shop.invc.open_order')}</a>{/if}
 									</div>

@@ -117,12 +117,9 @@ def _detail(b: RegistrationBatch, numbers_dropped=(), *, vouchers_enabled=False)
     }  # fmt: skip
 
 
-@router.get("", response=RegistrationListOut, summary="Registrations (admin)", operation_id="list_registrations")
-def list_registrations(request, status: str = "awaiting", q: str = "", payment: str = "all", limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
-    """``status``: ``awaiting`` (billing review, the default), ``confirmed``, ``cancelled`` or ``all``. ``q`` searches the contact and the invoice
-    number. ``payment`` narrows to confirmed registrations by how far they are paid: ``unpaid``, ``partial``, ``open`` (unpaid + partial),
-    ``paid``, ``installments`` or ``overdue`` (open and past the due date); ``all`` (the default) does not narrow."""
-    _gate(request)
+def filtered_batches(status: str = "awaiting", q: str = "", payment: str = "all"):
+    """The registrations list's filters as a queryset (also used by the central invoices list): ``status`` awaiting / confirmed / cancelled / all,
+    ``q`` the contact or invoice number, ``payment`` unpaid / partial / open / paid / installments / overdue (confirmed registrations only)."""
     qs = RegistrationBatch.objects.select_related("contact", "season").prefetch_related("details__membership__payments")
     if status == "awaiting":
         qs = qs.filter(confirmed_at__isnull=True, cancelled_at__isnull=True)
@@ -157,6 +154,16 @@ def list_registrations(request, status: str = "awaiting", q: str = "", payment: 
                     if any(row["late"] for row in installments.batch_schedule(batch, today=today)[0])
                 ]
                 qs = candidates.filter(Q(installment_offsets=[]) | Q(pk__in=late_batches))
+    return qs
+
+
+@router.get("", response=RegistrationListOut, summary="Registrations (admin)", operation_id="list_registrations")
+def list_registrations(request, status: str = "awaiting", q: str = "", payment: str = "all", limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
+    """``status``: ``awaiting`` (billing review, the default), ``confirmed``, ``cancelled`` or ``all``. ``q`` searches the contact and the invoice
+    number. ``payment`` narrows to confirmed registrations by how far they are paid: ``unpaid``, ``partial``, ``open`` (unpaid + partial),
+    ``paid``, ``installments`` or ``overdue`` (open and past the due date); ``all`` (the default) does not narrow."""
+    _gate(request)
+    qs = filtered_batches(status, q, payment)
     awaiting = RegistrationBatch.objects.filter(confirmed_at__isnull=True, cancelled_at__isnull=True).count()
     return {"count": qs.count(), "awaiting_count": awaiting, "results": [_item(b) for b in qs[offset : offset + limit]]}
 

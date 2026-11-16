@@ -192,6 +192,11 @@
 	const filteredFees = $derived(data.home.fees.filter((fee) => !selected || fee.member_id === selected));
 	const openFees = $derived(filteredFees.filter((fee) => Number(fee.balance) > 0));
 	const filteredForms = $derived(data.home.forms.filter((form) => !selected || form.member_id === selected));
+	// Money that is still owed, shown on its own card at the top of Home: charge invoices (a fine, a late fee) not yet paid, and open registration balances.
+	const openCharges = $derived((data.home.charges ?? []).filter((charge) => charge.status !== 'paid' && (!selected || charge.member_id === selected)));
+	const overdueCharges = $derived(openCharges.filter((charge) => charge.status === 'overdue').length);
+	const openInvoiceTotal = $derived(openCharges.reduce((sum, charge) => sum + Number(charge.due), 0) + openFees.reduce((sum, fee) => sum + Number(fee.next_installment?.remaining ?? fee.balance), 0));
+	const hasOpenInvoices = $derived(openCharges.length > 0 || openFees.length > 0);
 	const calendarLabel = $derived(people.length > 1 ? t('portal.calendar') : t('shell.nav.calendar'));
 	async function toggleFollow(eventId: string, on: boolean) {
 		const result = await api<FollowState>(on ? 'PUT' : 'DELETE', `/portal/events/${eventId}/follow`);
@@ -212,8 +217,8 @@
 		if (tab === 'me' && typeof matchMedia === 'function' && matchMedia('(min-width: 48rem)').matches) void goto('/parent/profile', { replaceState: true });
 	});
 	const openTasks = $derived<OpenTask[]>(data.home?.tasks ?? []);
-	const hasAttention = $derived(!!(needsReply.length || filteredForms.length || openFees.length || officiatingInvites.length || openTasks.length));
-	const attentionCount = $derived(needsReply.length + filteredForms.length + openFees.length + officiatingInvites.length + openTasks.length);
+	const hasAttention = $derived(!!(needsReply.length || filteredForms.length || officiatingInvites.length || openTasks.length));
+	const attentionCount = $derived(needsReply.length + filteredForms.length + officiatingInvites.length + openTasks.length);
 	const viewLink = (v: string) => `/parent?tab=calendar&view=${v}`;
 	const calendarLink = $derived(crewOnly ? '/parent?tab=calendar&crew=1' : viewLink(view));
 	const eventLink = (id: string) => tab === 'calendar' ? `${calendarLink}&event=${id}` : `/parent?event=${id}`;
@@ -334,7 +339,7 @@
 							<p class="text-xs text-muted">{charge.number}{people.length > 1 ? ` · ${memberName(charge.member_id)}` : ''}{charge.due_date ? ` · ${t('portal.due_by', { when: day(charge.due_date) })}` : ''}</p>
 						</div>
 						<span class="badge badge-sm {charge.status === 'paid' ? 'badge-success' : charge.status === 'overdue' ? 'badge-error' : 'badge-warn'}">{charge.status === 'paid' ? t('portal.charge_paid') : charge.status === 'overdue' ? t('portal.charge_overdue') : t('portal.fee_open', { amount: money(charge.due) })}</span>
-						<a class="btn btn-outline btn-sm md:h-8" href="/api/v1/portal/charges/{charge.id}.pdf" target="_blank" rel="noreferrer" aria-label={t('portal.invoice', { number: charge.number })}>PDF</a>
+						<a class="btn btn-outline btn-sm md:h-8" href="/api/v1/portal/charges/{charge.id}.pdf" download="{charge.number}.pdf" target="_blank" rel="noreferrer" aria-label={t('portal.invoice', { number: charge.number })}>PDF</a>
 					</div>
 				{/each}
 			</div>
@@ -346,7 +351,7 @@
 			<div class="card-h"><FileText size={17} aria-hidden="true" /><h2 id="invoices-title">{t('portal.pay_invoices')}</h2></div>
 			<div class="divide-y divide-rule">
 				{#each data.home.invoices as invoice (invoice.id)}
-					<a class="flex min-h-12 items-center gap-3 px-4 py-2 hover:bg-subhead" href="/api/v1/portal/invoices/{invoice.id}.pdf" target="_blank" rel="noreferrer"><FileText size={18} class="shrink-0 text-muted" aria-hidden="true" /><span class="min-w-0 flex-1 font-semibold text-ink">{t('portal.invoice', { number: invoice.number })}{#if invoice.due}<span class="block text-xs font-normal text-muted">{t('portal.due_by', { when: day(invoice.due) })}</span>{/if}</span><span class="btn btn-outline btn-sm md:h-8">PDF</span></a>
+					<a class="flex min-h-12 items-center gap-3 px-4 py-2 hover:bg-subhead" href="/api/v1/portal/invoices/{invoice.id}.pdf" download="{invoice.number}.pdf" target="_blank" rel="noreferrer"><FileText size={18} class="shrink-0 text-muted" aria-hidden="true" /><span class="min-w-0 flex-1 font-semibold text-ink">{t('portal.invoice', { number: invoice.number })}{#if invoice.due}<span class="block text-xs font-normal text-muted">{t('portal.due_by', { when: day(invoice.due) })}</span>{/if}</span><span class="btn btn-outline btn-sm md:h-8">PDF</span></a>
 				{/each}
 				{#each (data.home.payments ?? []).filter((payment) => !selected || payment.member_id === selected) as payment (payment.id)}
 					<div class="flex min-h-12 items-center gap-3 px-4 py-2"><Wallet size={18} class="shrink-0 text-ok" aria-hidden="true" /><span class="min-w-0 flex-1"><span class="block font-semibold text-ink">{t('portal.payment_received')}</span><span class="block text-xs text-muted">{memberName(payment.member_id)} · {payment.season} · {formatDateTime(payment.paid_at)}</span></span><b class="font-mono text-ink">{money(payment.amount)}</b></div>
@@ -432,6 +437,32 @@
 	{/if}
 {/snippet}
 
+{#snippet openInvoices()}
+	<section class="card card-body gap-2 border-l-4 {overdueCharges ? 'border-l-danger' : 'border-l-warn'}" aria-labelledby="open-invoices-title">
+		<h2 id="open-invoices-title" class="card-title"><Wallet size={16} aria-hidden="true" />{t('portal.open_invoices')}<span class="ml-auto font-display text-2xl leading-none font-extrabold tabular-nums {overdueCharges ? 'text-danger' : 'text-ink'}">{money(String(openInvoiceTotal))}</span></h2>
+		<div class="divide-y divide-rule">
+			{#each openCharges as charge (charge.id)}
+				<div class="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
+					<div class="min-w-0 flex-1">
+						<p class="font-semibold text-ink">{charge.summary}</p>
+						<p class="text-xs {charge.status === 'overdue' ? 'font-semibold text-danger' : 'text-muted'}">{charge.number}{people.length > 1 ? ` · ${memberName(charge.member_id)}` : ''}{charge.due_date ? ` · ${charge.status === 'overdue' ? t('portal.charge_overdue') + ' · ' : ''}${t('portal.due_by', { when: day(charge.due_date) })}` : ''}</p>
+					</div>
+					<span class="shrink-0 font-semibold tabular-nums">{money(charge.due)}</span>
+					<a class="btn btn-outline btn-sm min-h-11 shrink-0 md:h-8 md:min-h-0" href="/api/v1/portal/charges/{charge.id}.pdf" download="{charge.number}.pdf" target="_blank" rel="noreferrer" aria-label={t('portal.invoice', { number: charge.number })}>PDF</a>
+				</div>
+			{/each}
+			{#each openFees as fee (`${fee.member_id}-${fee.season}`)}
+				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href="/parent?tab=payments">
+					<Wallet size={18} class="shrink-0 text-muted" aria-hidden="true" />
+					<span class="min-w-0 flex-1"><span class="block font-semibold">{t(fee.next_installment ? 'portal.membership_installment' : 'portal.payments')}</span><span class="block text-xs {fee.next_installment?.late ? 'text-danger' : 'text-muted'}">{memberName(fee.member_id)}{fee.next_installment ? ' · ' + t('portal.due_by', { when: day(fee.next_installment.due_date) }) : ' · ' + fee.season}</span></span>
+					<span class="shrink-0 font-semibold">{money(fee.next_installment?.remaining ?? fee.balance)}</span>
+				</a>
+			{/each}
+		</div>
+		<a class="link-more self-end" href="/parent?tab=payments">{t('portal.pay_how')} →</a>
+	</section>
+{/snippet}
+
 {#snippet attention()}
 	<section class="card card-body">
 		<h2 class="card-title"><ClipboardList size={16} aria-hidden="true" />{t('portal.attention')}<span class="badge badge-sm badge-error ml-auto">{attentionCount}</span></h2>
@@ -463,13 +494,6 @@
 					<ClipboardList size={18} class="shrink-0 text-muted" aria-hidden="true" />
 					<span class="min-w-0 flex-1"><span class="block font-semibold">{form.title}</span><span class="block text-xs text-muted">{memberName(form.member_id)}{form.closes_at ? ' · ' + t('pubform.closes', { date: formatDateTime(form.closes_at) }) : ''}</span></span>
 					<span class="badge badge-warn">{t('portal.forms')}</span>
-				</a>
-			{/each}
-			{#each openFees as fee (`${fee.member_id}-${fee.season}`)}
-				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href="/parent?tab=payments">
-					<Wallet size={18} class="shrink-0 text-muted" aria-hidden="true" />
-					<span class="min-w-0 flex-1"><span class="block font-semibold">{t(fee.next_installment ? 'portal.membership_installment' : 'portal.payments')}</span><span class="block text-xs {fee.next_installment?.late ? 'text-danger' : 'text-muted'}">{memberName(fee.member_id)}{fee.next_installment ? ' · ' + t('portal.due_by', { when: day(fee.next_installment.due_date) }) : ' · ' + fee.season}</span></span>
-					<span class="shrink-0 font-semibold">{money(fee.next_installment?.remaining ?? fee.balance)}</span>
 				</a>
 			{/each}
 		</div>
@@ -638,6 +662,7 @@
 	<div class="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] xl:items-start xl:gap-5">
 		<div class="grid min-w-0 grid-cols-1 content-start gap-4">
 			<div class="xl:hidden">{@render peoplePicker()}</div>
+			{#if hasOpenInvoices}{@render openInvoices()}{/if}
 			<section class="grid min-w-0 grid-cols-1 gap-3" aria-label={t('portal.next_up')}>
 				{#each nextEvents as rows (rows[0].event_id)}
 					{@const event = rows[0]}

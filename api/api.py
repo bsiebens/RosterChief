@@ -22,6 +22,7 @@ from .routers import event_subtypes as event_subtypes_router
 from .routers import events as events_router
 from .routers import finance as finance_router
 from .routers import finance_charges as finance_charges_router
+from .routers import finance_invoices as finance_invoices_router
 from .routers import fixture_imports as fixture_imports_router
 from .routers import forms as forms_router
 from .routers import member_stats as member_stats_router
@@ -120,6 +121,7 @@ api.add_router("/public/registration", public_registration_router.router, tags=[
 api.add_router("/registrations", registrations_router.router, tags=["registrations"])
 api.add_router("/finance", finance_router.router, tags=["finance"])
 api.add_router("/finance/charges", finance_charges_router.router, tags=["finance"])
+api.add_router("/finance/invoices", finance_invoices_router.router, tags=["finance"])
 api.add_router("/sponsor-management", sponsors_router.router, tags=["sponsor management"])
 api.add_router("/registration", registrations_router.settings_router, tags=["registrations"])
 api.add_router("/events", analytics_router.events_router, tags=["analytics"])

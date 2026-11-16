@@ -33,6 +33,9 @@ export type ChargeDetail = ChargeItem & {
 	notes: string;
 	/** Printed on the invoice and repeated in the email. */
 	invoice_text: string;
+	/** This invoice's own payment instructions (empty: the club's standard ones, `default_payment_instructions`). */
+	payment_instructions: string;
+	default_payment_instructions: string;
 	payments: Payment[];
 	last_reminder_at: string | null;
 	is_draft: boolean;
@@ -41,10 +44,10 @@ export type ChargeDetail = ChargeItem & {
 	can_record_payment: boolean;
 	recipient_email: string;
 };
-export type ChargeSettings = { reminders_enabled: boolean; after_days: number; repeat_days: number; max_reminders: number; invoice_due_days: number };
+export type ChargeSettings = { reminders_enabled: boolean; after_days: number; repeat_days: number; max_reminders: number; invoice_due_days: number; default_payment_instructions?: string };
 
 export type LineIn = { description: string; quantity: number; unit_price: string };
-export type ChargeIn = { member_id: string; lines: LineIn[]; due_date: string | null; notes: string; invoice_text: string };
+export type ChargeIn = { member_id: string; lines: LineIn[]; due_date: string | null; notes: string; invoice_text: string; payment_instructions: string };
 
 export const chargeHref = (id: string) => `/finance/charges/${id}`;
 export const chargePdfHref = (id: string) => `/api/v1/finance/charges/${id}/pdf`;

@@ -22,7 +22,7 @@ from members.services import access
 from members.services.errors import Invalid
 from shop.models import Invoice, Order, Payment
 from shop.services import charges as svc
-from shop.services import invoices, payments
+from shop.services import defaults, invoices, payments
 from shop.settings_models import ShopSettings
 
 router = Router(auth=AUTHENTICATORS)
@@ -56,6 +56,8 @@ class ChargeIn(Schema):
     notes: str = Field("", max_length=2000)
     #: Printed on the invoice and repeated in the email to the member. The ``notes`` are internal.
     invoice_text: str = Field("", max_length=2000)
+    #: How to pay this invoice; empty uses the club's standard payment instructions.
+    payment_instructions: str = Field("", max_length=2000)
 
 
 class ChargePatch(Schema):
@@ -64,6 +66,7 @@ class ChargePatch(Schema):
     due_date: datetime.date | None = None  # null clears it
     notes: str | None = Field(None, max_length=2000)
     invoice_text: str | None = Field(None, max_length=2000)
+    payment_instructions: str | None = Field(None, max_length=2000)
 
 
 class SendIn(Schema):
@@ -114,6 +117,9 @@ class ChargeDetailOut(ChargeItemOut):
     lines: list[ChargeLineOut]
     notes: str
     invoice_text: str
+    #: This invoice's own payment instructions (empty: the club's standard ones, ``default_payment_instructions``).
+    payment_instructions: str
+    default_payment_instructions: str
     payments: list[PaymentOut]
     last_reminder_at: datetime.datetime | None
     #: Draft: lines, member, due date and note can change; it can be sent or deleted.
@@ -133,6 +139,8 @@ class ChargeSettingsOut(Schema):
     max_reminders: int
     #: Default payment term (days after sending) for an invoice without its own due date.
     invoice_due_days: int
+    #: The club's standard payment instructions (set in the club settings): used on every invoice that has none of its own.
+    default_payment_instructions: str = ""
 
 
 class ChargeSettingsIn(Schema):
@@ -141,6 +149,33 @@ class ChargeSettingsIn(Schema):
     repeat_days: int | None = Field(None, ge=1, le=90)
     max_reminders: int | None = Field(None, ge=0, le=20)
     invoice_due_days: int | None = Field(None, ge=0, le=365)
+
+
+def open_filters(today: datetime.date):
+    """(open, overdue) filters on orders that have an invoice: not paid, not cancelled; overdue is open and past the invoice's due date."""
+    open_q = Q(invoice__isnull=False, payment_status__in=[Order.PaymentStatus.PENDING, Order.PaymentStatus.PARTIALLY_PAID]) & ~Q(fulfillment_status=Order.FulfillmentStatus.CANCELLED)
+    return open_q, open_q & Q(invoice__due_date__lt=today)
+
+
+def order_stats(base, today: datetime.date) -> dict:
+    """Counts per status and what is open / overdue (amounts still to pay) over ``base``: orders with an ``invoice`` and a ``paid`` annotation.
+    Shared by the charges list and the central invoices list. ``open`` includes the overdue ones."""
+    open_q, overdue_q = open_filters(today)
+    cancelled = Q(fulfillment_status=Order.FulfillmentStatus.CANCELLED)
+    totals = base.aggregate(
+        drafts=Count("pk", filter=Q(invoice__isnull=True) & ~cancelled),
+        open=Count("pk", filter=open_q), overdue=Count("pk", filter=overdue_q),
+        paid=Count("pk", filter=Q(invoice__isnull=False, payment_status=Order.PaymentStatus.PAID) & ~cancelled),
+        cancelled=Count("pk", filter=cancelled),
+        open_total=Sum("total", filter=open_q), overdue_total=Sum("total", filter=overdue_q),
+    )  # fmt: skip
+    confirmed = Q(payments__status=Payment.PaymentStatus.CONFIRMED)
+    open_paid = base.filter(open_q).aggregate(v=Sum("payments__amount", filter=confirmed))["v"] or Decimal("0")
+    overdue_paid = base.filter(overdue_q).aggregate(v=Sum("payments__amount", filter=confirmed))["v"] or Decimal("0")
+    return {
+        "drafts": totals["drafts"], "open": totals["open"], "overdue": totals["overdue"], "paid": totals["paid"], "cancelled": totals["cancelled"],
+        "open_amount": (totals["open_total"] or Decimal("0")) - open_paid, "overdue_amount": (totals["overdue_total"] or Decimal("0")) - overdue_paid,
+    }  # fmt: skip
 
 
 def _base():
@@ -187,6 +222,8 @@ def _detail(order_id) -> dict:
         "lines": [{"id": ln.pk, "description": ln.description, "quantity": ln.quantity, "unit_price": ln.unit_price, "line_total": ln.line_total} for ln in order.lines.order_by("created")],
         "notes": order.notes,
         "invoice_text": order.invoice_text,
+        "payment_instructions": order.payment_instructions,
+        "default_payment_instructions": defaults.payment_instructions().strip(),
         "payments": [payment_out(p) for p in order.payments.select_related("voucher", "recorded_by").order_by("created")],
         "last_reminder_at": invoice.last_reminder_at if invoice else None,
         "is_draft": draft,
@@ -226,6 +263,7 @@ def _settings_out() -> dict:
     return {
         "reminders_enabled": s.charge_reminders_enabled, "after_days": s.charge_reminder_after_days, "repeat_days": s.charge_reminder_repeat_days,
         "max_reminders": s.charge_reminder_max, "invoice_due_days": s.invoice_due_days,
+        "default_payment_instructions": defaults.payment_instructions().strip(),
     }  # fmt: skip
 
 
@@ -248,17 +286,8 @@ def list_charges(request, status: Status = "all", q: str = "", member_id: uuid.U
     _gate(request)
     today = timezone.localdate()
     base = _base()
-    open_q = Q(invoice__isnull=False, payment_status__in=[Order.PaymentStatus.PENDING, Order.PaymentStatus.PARTIALLY_PAID]) & ~Q(fulfillment_status=Order.FulfillmentStatus.CANCELLED)
-    overdue_q = open_q & Q(invoice__due_date__lt=today)
-    totals = base.aggregate(
-        drafts=Count("pk", filter=Q(invoice__isnull=True) & ~Q(fulfillment_status=Order.FulfillmentStatus.CANCELLED)),
-        open=Count("pk", filter=open_q), overdue=Count("pk", filter=overdue_q),
-        paid=Count("pk", filter=Q(invoice__isnull=False, payment_status=Order.PaymentStatus.PAID) & ~Q(fulfillment_status=Order.FulfillmentStatus.CANCELLED)),
-        cancelled=Count("pk", filter=Q(fulfillment_status=Order.FulfillmentStatus.CANCELLED)),
-        open_total=Sum("total", filter=open_q), overdue_total=Sum("total", filter=overdue_q),
-    )  # fmt: skip
-    open_paid = base.filter(open_q).aggregate(v=Sum("payments__amount", filter=Q(payments__status=Payment.PaymentStatus.CONFIRMED)))["v"] or Decimal("0")
-    overdue_paid = base.filter(overdue_q).aggregate(v=Sum("payments__amount", filter=Q(payments__status=Payment.PaymentStatus.CONFIRMED)))["v"] or Decimal("0")
+    open_q, overdue_q = open_filters(today)
+    summary = order_stats(base, today)
     qs = base
     if status == "draft":
         qs = qs.filter(invoice__isnull=True).exclude(fulfillment_status=Order.FulfillmentStatus.CANCELLED)
@@ -280,17 +309,14 @@ def list_charges(request, status: Status = "all", q: str = "", member_id: uuid.U
     qs = qs.order_by("-created")
     return {
         "count": qs.count(), "results": [_item(o, today) for o in qs[offset : offset + limit]],
-        "summary": {
-            "drafts": totals["drafts"], "open": totals["open"], "overdue": totals["overdue"], "paid": totals["paid"], "cancelled": totals["cancelled"],
-            "open_amount": (totals["open_total"] or Decimal("0")) - open_paid, "overdue_amount": (totals["overdue_total"] or Decimal("0")) - overdue_paid,
-        },
+        "summary": summary,
     }  # fmt: skip
 
 
 @router.post("", response={201: ChargeDetailOut}, summary="Write a charge invoice (a draft)", operation_id="create_charge")
 def create(request, payload: ChargeIn):
     _gate(request)
-    order = svc.create_draft(request.user, member=_member(payload.member_id), lines=_lines(payload.lines), due_date=payload.due_date, notes=payload.notes, invoice_text=payload.invoice_text)
+    order = svc.create_draft(request.user, member=_member(payload.member_id), lines=_lines(payload.lines), due_date=payload.due_date, notes=payload.notes, invoice_text=payload.invoice_text, payment_instructions=payload.payment_instructions)
     return 201, _detail(order.pk)
 
 
@@ -308,7 +334,8 @@ def update(request, charge_id: uuid.UUID, payload: ChargePatch):
     data = payload.dict(exclude_unset=True)
     svc.update_draft(
         request.user, order, member=_member(data["member_id"]) if data.get("member_id") else None,
-        lines=_lines(payload.lines) if payload.lines is not None else None, due_date=data["due_date"] if "due_date" in data else "keep", notes=data.get("notes"), invoice_text=data.get("invoice_text"),
+        lines=_lines(payload.lines) if payload.lines is not None else None, due_date=data["due_date"] if "due_date" in data else "keep", notes=data.get("notes"),
+        invoice_text=data.get("invoice_text"), payment_instructions=data.get("payment_instructions"),
     )  # fmt: skip
     return _detail(charge_id)
 

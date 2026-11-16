@@ -287,7 +287,7 @@
 								</dl>
 								{#if receipt.pickup_instructions}<div class="rounded-box border border-info-border bg-info-bg px-3 py-2 text-info-text"><p class="mb-1 flex items-center gap-1.5 font-mono text-[11px] tracking-[.14em] uppercase"><Truck size={13} aria-hidden="true" />{t('portal.shop.delivery')}</p><p class="whitespace-pre-line">{receipt.pickup_instructions}</p></div>{/if}
 								{#if Number(receipt.due) > 0 && !cancelled && catalog.payment_instructions}<div class="rounded-box border border-line bg-paper px-3 py-2"><p class="mb-1 flex items-center gap-1.5 font-mono text-[11px] tracking-[.14em] text-muted uppercase"><Wallet size={13} aria-hidden="true" />{t('portal.pay_how')}</p><p class="whitespace-pre-line">{catalog.payment_instructions}</p></div>{/if}
-								{#if receipt.invoice_number}<a class="btn btn-outline btn-sm w-fit gap-2" href="/api/v1/portal/shop/orders/{receipt.id}/invoice.pdf"><Download size={14} aria-hidden="true" /> {t('portal.shop.invoice')}</a>{/if}
+								{#if receipt.invoice_number}<a class="btn btn-outline btn-sm w-fit gap-2" href="/api/v1/portal/shop/orders/{receipt.id}/invoice.pdf" download="{receipt.invoice_number}.pdf"><Download size={14} aria-hidden="true" /> {t('portal.shop.invoice')}</a>{/if}
 							</div>
 						</details>
 					{:else}

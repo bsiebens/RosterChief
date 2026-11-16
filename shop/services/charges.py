@@ -130,18 +130,24 @@ def _write_lines(order, lines: list[ChargeLine]) -> None:
 
 
 @transaction.atomic
-def create_draft(actor, *, member: Member, lines: list[ChargeLine], due_date: datetime.date | None = None, notes: str = "", invoice_text: str = "") -> Order:
+def create_draft(actor, *, member: Member, lines: list[ChargeLine], due_date: datetime.date | None = None, notes: str = "", invoice_text: str = "", payment_instructions: str = "") -> Order:
     clean = _clean_lines(lines)
     _check_due(due_date)
     user = actor if getattr(actor, "pk", None) else None
-    order = Order.objects.create(kind=Kind.CHARGE, purchaser=member, total=Decimal("0"), notes=(notes or "").strip(), invoice_text=(invoice_text or "").strip()[:2000], due_date=due_date, created_by=user)
+    order = Order.objects.create(
+        kind=Kind.CHARGE, purchaser=member, total=Decimal("0"), notes=(notes or "").strip(), invoice_text=(invoice_text or "").strip()[:2000],
+        payment_instructions=(payment_instructions or "").strip()[:2000], due_date=due_date, created_by=user,
+    )  # fmt: skip
     _write_lines(order, clean)
     orders.refresh(order)
     return order
 
 
 @transaction.atomic
-def update_draft(actor, order, *, member: Member | None = None, lines: list[ChargeLine] | None = None, due_date="keep", notes: str | None = None, invoice_text: str | None = None) -> Order:
+def update_draft(
+    actor, order, *, member: Member | None = None, lines: list[ChargeLine] | None = None, due_date="keep", notes: str | None = None, invoice_text: str | None = None,
+    payment_instructions: str | None = None,
+) -> Order:
     order = _lock(order)
     if not is_draft(order):
         raise Conflict("Only a draft can be changed. A sent invoice is fixed: cancel it and write a new one.", code="not_a_draft")
@@ -154,6 +160,8 @@ def update_draft(actor, order, *, member: Member | None = None, lines: list[Char
         order.notes = notes.strip()
     if invoice_text is not None:
         order.invoice_text = invoice_text.strip()[:2000]
+    if payment_instructions is not None:
+        order.payment_instructions = payment_instructions.strip()[:2000]
     order.save()
     if lines is not None:
         _write_lines(order, _clean_lines(lines))

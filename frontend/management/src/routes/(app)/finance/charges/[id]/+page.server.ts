@@ -27,7 +27,7 @@ export const actions: Actions = {
 	delete: async ({ params, fetch }) => {
 		const res = await api('DELETE', `/finance/charges/${params.id}`, { f: fetch });
 		if (!res.ok) return failed('delete', res);
-		redirect(303, '/finance/charges');
+		redirect(303, '/finance/invoices');
 	},
 	cancel: async ({ params, fetch }) => {
 		const res = await api<ChargeDetail>('POST', `/finance/charges/${params.id}/cancel`, { f: fetch });

@@ -9,25 +9,27 @@
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
 
-	let { form } = $props();
+	let { data, form } = $props();
 
 	let memberId = $state('');
 	let lines = $state<LineDraft[]>([newLine()]);
 	let dueDate = $state('');
 	let notes = $state('');
 	let invoiceText = $state('');
+	let paymentInstructions = $state('');
 	let tried = $state(false);
 	let busy = $state(false);
 	let leaving = $state(false);
 
-	const dirty = $derived(!!memberId || !!notes || !!invoiceText || !!dueDate || lines.some((l) => l.description || l.unit_price));
+	const dirty = $derived(!!memberId || !!notes || !!invoiceText || !!paymentInstructions || !!dueDate || lines.some((l) => l.description || l.unit_price));
 	const payload = $derived(
 		JSON.stringify({
 			member_id: memberId,
 			lines: lines.map((l) => ({ description: l.description.trim(), quantity: Number(l.quantity) || 0, unit_price: String(l.unit_price) })),
 			due_date: dueDate || null,
 			notes,
-			invoice_text: invoiceText
+			invoice_text: invoiceText,
+			payment_instructions: paymentInstructions
 		})
 	);
 	const complete = $derived(!!memberId && lines.every((l) => l.description.trim() && lineTotal(l) > 0));
@@ -51,7 +53,7 @@
 <svelte:head><title>{pageTitle(t('chg.new.title'))}</title></svelte:head>
 
 {#snippet actions()}
-	<a class="btn btn-outline gap-2" href="/finance/charges"><ArrowLeft size={16} /> {t('chg.d.back')}</a>
+	<a class="btn btn-outline gap-2" href="/finance/invoices"><ArrowLeft size={16} /> {t('chg.d.back')}</a>
 {/snippet}
 
 <form
@@ -77,7 +79,7 @@
 	{#if failure}<Alert kind="error" title={t('chg.d.failed')}>{failure}</Alert>{/if}
 	<div class="grid items-start gap-5 xl:grid-cols-3">
 		<div class="xl:col-span-2">
-			<ChargeForm bind:memberId bind:lines bind:dueDate bind:notes bind:invoiceText {errors} {tried} />
+			<ChargeForm bind:memberId bind:lines bind:dueDate bind:notes bind:invoiceText bind:paymentInstructions defaultInstructions={data.defaultInstructions} {errors} {tried} />
 		</div>
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20">
 			<section class="card card-body card-hl gap-3">
@@ -93,7 +95,7 @@
 				<p class="text-xs text-muted">{dueDate ? t('chg.new.summary_due', { date: day(dueDate) }) : t('chg.new.summary_due_default')}. {t('chg.form.no_vat')}</p>
 				<div class="grid gap-2">
 					<button class="btn btn-primary w-full gap-2" type="submit" disabled={busy}><Save size={16} /> {t('chg.form.save_draft')}</button>
-					<a class="btn btn-outline w-full" href="/finance/charges">{t('common.cancel')}</a>
+					<a class="btn btn-outline w-full" href="/finance/invoices">{t('common.cancel')}</a>
 				</div>
 			</section>
 		</aside>

@@ -114,7 +114,7 @@
 					</thead>
 					<tbody>
 						{#each data.rows as o (o.id)}
-							<tr class="hover:bg-paper">
+							<tr class="cursor-pointer hover:bg-paper" onclick={(e) => { if (!(e.target as HTMLElement).closest('a, button, input, label, select')) goto(orderHref(o.id)); }}>
 								<td>{#if o.fulfillment_status !== 'cancelled'}<input type="checkbox" class="checkbox checkbox-sm" bind:group={selected} value={o.id} aria-label={o.number} />{/if}</td>
 								<td><a class="link font-mono text-xs font-semibold" href={orderHref(o.id)}>{o.number}</a><div class="text-xs text-muted">{t('shop.orders.lines_n', { n: o.line_count })}</div></td>
 								<td class="font-semibold">{o.purchaser.name}</td>

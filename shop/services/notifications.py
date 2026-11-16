@@ -102,7 +102,7 @@ def send(kind: str, order, extra: dict | None = None) -> int:
             values.update(_charge_values(order))
         title, body = title.format(**values), body.format(**values).strip()
         if kind in ("placed", "ready", "charge", "charge_reminder") and order.payment_status != "paid":
-            how_to_pay = _how_to_pay(extra)
+            how_to_pay = (order.payment_instructions or "").strip() or _how_to_pay(extra)
             if how_to_pay:
                 body = f"{body}\n\n{PAYMENT_LABEL[_lang(own or language)]}\n{how_to_pay}"
         if child is not None:

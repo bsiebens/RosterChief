@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
-	import { ArrowLeft, BellRing, ClipboardList, Download, ListOrdered, Save, Send, Trash2, XCircle } from '@lucide/svelte';
+	import { ArrowLeft, BellRing, ClipboardList, Download, ListOrdered, Save, Send, Settings2, Trash2, XCircle } from '@lucide/svelte';
+	import ActionList from '#lib/components/actions/ActionList.svelte';
+	import ActionRow from '#lib/components/actions/ActionRow.svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import ChargeForm, { lineTotal, newLine, type LineDraft } from '#lib/components/finance/ChargeForm.svelte';
 	import ChargePayments from '#lib/components/finance/ChargePayments.svelte';
@@ -20,6 +22,7 @@
 	let dueDate = $state('');
 	let notes = $state('');
 	let invoiceText = $state('');
+	let paymentInstructions = $state('');
 	$effect(() => {
 		const saved = data.charge;
 		untrack(() => {
@@ -28,6 +31,7 @@
 			dueDate = saved.due_date ?? '';
 			notes = saved.notes;
 			invoiceText = saved.invoice_text;
+			paymentInstructions = saved.payment_instructions;
 		});
 	});
 
@@ -47,7 +51,8 @@
 			lines: lines.map((l) => ({ description: l.description.trim(), quantity: Number(l.quantity) || 0, unit_price: String(l.unit_price) })),
 			due_date: dueDate || null,
 			notes,
-			invoice_text: invoiceText
+			invoice_text: invoiceText,
+			payment_instructions: paymentInstructions
 		})
 	);
 	const complete = $derived(!!memberId && lines.length > 0 && lines.every((l) => l.description.trim() && lineTotal(l) > 0));
@@ -68,12 +73,7 @@
 {#snippet badge()}<span class="badge badge-sm {statusBadge(c.status)}">{t(`chg.status.${c.status}`)}</span>{/snippet}
 
 {#snippet actions()}
-	<a class="btn btn-outline gap-2" href="/finance/charges"><ArrowLeft size={16} /> {t('chg.d.back')}</a>
-	{#if !c.is_draft}
-		{#if c.number && c.status !== 'cancelled'}<a class="btn btn-outline gap-2" href={chargePdfHref(c.id)} download><Download size={16} /> {t('chg.d.pdf')}</a>{/if}
-		{#if c.can_remind}<button class="btn btn-outline gap-2" type="button" onclick={() => (remindOpen = true)}><BellRing size={16} /> {t('chg.d.remind')}</button>{/if}
-		{#if c.status !== 'cancelled' && c.status !== 'paid'}<button class="btn btn-outline btn-error gap-2" type="button" disabled={!c.can_cancel} title={c.can_cancel ? '' : t('chg.d.cancel_blocked')} onclick={() => (cancelOpen = true)}><XCircle size={16} /> {t('chg.d.cancel')}</button>{/if}
-	{/if}
+	<a class="btn btn-outline gap-2" href="/finance/invoices"><ArrowLeft size={16} /> {t('chg.d.back')}</a>
 {/snippet}
 
 <svelte:head><title>{pageTitle(c.number ?? t('chg.d.draft_title'))}</title></svelte:head>
@@ -106,7 +106,7 @@
 			<input type="hidden" name="payload" value={payload} />
 			<div class="grid items-start gap-5 xl:grid-cols-3">
 				<div class="xl:col-span-2">
-					<ChargeForm bind:memberId bind:lines bind:dueDate bind:notes bind:invoiceText memberName={c.member.name} {errors} />
+					<ChargeForm bind:memberId bind:lines bind:dueDate bind:notes bind:invoiceText bind:paymentInstructions defaultInstructions={c.default_payment_instructions} memberName={c.member.name} {errors} />
 				</div>
 				<aside class="grid content-start gap-5 xl:sticky xl:top-20">
 					<section class="card card-body card-hl gap-3">
@@ -129,31 +129,50 @@
 		</form>
 	{:else}
 		<div class="grid items-start gap-5 xl:grid-cols-3">
-			<section class="card card-body card-hl gap-4 xl:col-span-3">
-				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ListOrdered size={16} aria-hidden="true" /> {t('chg.d.lines')}</h2>
-				<dl class="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
-					<div><dt class="text-muted">{t('chg.col.member')}</dt><dd class="font-semibold text-ink">{c.member.name}</dd></div>
-					<div><dt class="text-muted">{t('chg.d.issued')}</dt><dd class="font-mono text-ink">{day(c.issued_at)}</dd></div>
-					<div><dt class="text-muted">{t('chg.d.due')}</dt><dd class="font-mono text-ink {c.status === 'overdue' ? 'font-semibold text-danger' : ''}">{day(c.due_date)}</dd></div>
-				</dl>
-				<div class="overflow-x-auto">
-					<table class="table">
-						<thead><tr><th>{t('chg.form.description')}</th><th class="text-right">{t('chg.form.qty')}</th><th class="text-right">{t('chg.form.unit')}</th><th class="text-right">{t('chg.form.line_total')}</th></tr></thead>
-						<tbody>
-							{#each c.lines as l (l.id)}
-								<tr><td>{l.description}</td><td class="text-right font-mono text-sm">{l.quantity}</td><td class="text-right font-mono text-sm">{money(l.unit_price)}</td><td class="text-right font-mono text-sm">{money(l.line_total)}</td></tr>
-							{/each}
-							<tr class="font-semibold"><td colspan="3">{t('chg.form.total')}</td><td class="text-right font-mono">{money(c.total)}</td></tr>
-						</tbody>
-					</table>
-				</div>
-				{#if c.invoice_text}<div><h3 class="text-xs font-semibold tracking-wide text-muted uppercase">{t('chg.d.invoice_text')}</h3><p class="mt-1 text-sm whitespace-pre-line">{c.invoice_text}</p></div>{/if}
-				{#if c.notes}<div><h3 class="text-xs font-semibold tracking-wide text-muted uppercase">{t('chg.d.notes')}</h3><p class="mt-1 text-sm whitespace-pre-line">{c.notes}</p></div>{/if}
-				{#if c.status !== 'cancelled'}<p class="text-sm text-muted">{reminderLine}</p>{/if}
-				<p class="text-xs text-muted">{t('chg.d.fixed')}</p>
-			</section>
+			<div class="grid content-start gap-5 xl:col-span-2">
+				<section class="card card-body card-hl gap-4">
+					<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ListOrdered size={16} aria-hidden="true" /> {t('chg.d.lines')}</h2>
+					<dl class="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
+						<div><dt class="text-muted">{t('chg.col.member')}</dt><dd class="font-semibold text-ink">{c.member.name}</dd></div>
+						<div><dt class="text-muted">{t('chg.d.issued')}</dt><dd class="font-mono text-ink">{day(c.issued_at)}</dd></div>
+						<div><dt class="text-muted">{t('chg.d.due')}</dt><dd class="font-mono text-ink {c.status === 'overdue' ? 'font-semibold text-danger' : ''}">{day(c.due_date)}</dd></div>
+					</dl>
+					<div class="overflow-x-auto">
+						<table class="table">
+							<thead><tr><th>{t('chg.form.description')}</th><th class="text-right">{t('chg.form.qty')}</th><th class="text-right">{t('chg.form.unit')}</th><th class="text-right">{t('chg.form.line_total')}</th></tr></thead>
+							<tbody>
+								{#each c.lines as l (l.id)}
+									<tr><td>{l.description}</td><td class="text-right font-mono text-sm">{l.quantity}</td><td class="text-right font-mono text-sm">{money(l.unit_price)}</td><td class="text-right font-mono text-sm">{money(l.line_total)}</td></tr>
+								{/each}
+								<tr class="font-semibold"><td colspan="3">{t('chg.form.total')}</td><td class="text-right font-mono">{money(c.total)}</td></tr>
+							</tbody>
+						</table>
+					</div>
+					{#if c.invoice_text}<div><h3 class="text-xs font-semibold tracking-wide text-muted uppercase">{t('chg.d.invoice_text')}</h3><p class="mt-1 text-sm whitespace-pre-line">{c.invoice_text}</p></div>{/if}
+					{#if c.payment_instructions || c.default_payment_instructions}<div><h3 class="text-xs font-semibold tracking-wide text-muted uppercase">{t('chg.d.payment_instructions')}</h3><p class="mt-1 text-sm whitespace-pre-line">{c.payment_instructions || c.default_payment_instructions}</p></div>{/if}
+					{#if c.notes}<div><h3 class="text-xs font-semibold tracking-wide text-muted uppercase">{t('chg.d.notes')}</h3><p class="mt-1 text-sm whitespace-pre-line">{c.notes}</p></div>{/if}
+					<p class="text-xs text-muted">{t('chg.d.fixed')}</p>
+				</section>
+				{#if c.status !== 'cancelled'}<ChargePayments charge={c} {form} />{/if}
+			</div>
+			<aside class="grid content-start gap-5 xl:sticky xl:top-20">
+				<section class="card card-body card-hl gap-3">
+					<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Settings2 size={16} aria-hidden="true" /> {t('chg.d.actions')}</h2>
+					<dl class="grid gap-1.5 text-sm">
+						<div class="flex justify-between gap-3"><dt class="text-muted">{t('chg.pay.total')}</dt><dd class="font-mono">{money(c.total)}</dd></div>
+						<div class="flex justify-between gap-3"><dt class="text-muted">{t('chg.pay.paid')}</dt><dd class="font-mono">{money(c.amount_paid)}</dd></div>
+					</dl>
+					<div class="flex items-baseline justify-between border-t border-rule pt-2"><span class="font-display text-xs font-bold tracking-[.08em] text-muted uppercase">{t('chg.pay.due')}</span><span class="font-display text-2xl font-extrabold {Number(c.amount_due) > 0 && c.status !== 'cancelled' ? 'text-warn-text' : 'text-ink'}">{c.status === 'cancelled' ? '—' : money(c.amount_due)}</span></div>
+					{#if c.status === 'paid'}<p class="text-xs font-semibold text-ok-text">{t('chg.status.paid')}</p>{/if}
+					<ActionList>
+						{#if c.number && c.status !== 'cancelled'}<ActionRow icon={Download} href={chargePdfHref(c.id)} download="{c.number}.pdf">{t('chg.d.pdf')}</ActionRow>{/if}
+						{#if c.can_remind}<ActionRow icon={BellRing} onclick={() => (remindOpen = true)}>{t('chg.d.remind')}</ActionRow>{/if}
+						{#if c.status !== 'cancelled' && c.status !== 'paid'}<ActionRow icon={XCircle} danger disabled={!c.can_cancel} title={c.can_cancel ? '' : t('chg.d.cancel_blocked')} onclick={() => (cancelOpen = true)}>{t('chg.d.cancel')}</ActionRow>{/if}
+					</ActionList>
+					{#if c.status !== 'cancelled'}<p class="text-xs text-muted">{reminderLine}</p>{/if}
+				</section>
+			</aside>
 		</div>
-		{#if c.status !== 'cancelled'}<ChargePayments charge={c} {form} />{/if}
 	{/if}
 </div>
 

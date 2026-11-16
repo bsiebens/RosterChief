@@ -24,9 +24,11 @@
 		dueDate = $bindable(''),
 		notes = $bindable(''),
 		invoiceText = $bindable(''),
+		paymentInstructions = $bindable(''),
+		defaultInstructions = '',
 		errors = {},
 		tried = false
-	}: { memberId?: string; memberName?: string; lines: LineDraft[]; dueDate?: string; notes?: string; invoiceText?: string; errors?: Record<string, string>; tried?: boolean } = $props();
+	}: { memberId?: string; memberName?: string; lines: LineDraft[]; dueDate?: string; notes?: string; invoiceText?: string; paymentInstructions?: string; defaultInstructions?: string; errors?: Record<string, string>; tried?: boolean } = $props();
 
 	let changing = $state(false);
 	const showName = $derived(!!memberName && !!memberId && !changing);
@@ -93,6 +95,11 @@
 				<span class="label"><span class="label-text">{t('chg.form.invoice_text')}</span></span>
 				<textarea class="textarea textarea-bordered w-full {errors.invoice_text ? 'textarea-error' : ''}" rows="3" maxlength="2000" bind:value={invoiceText}></textarea>
 				<span class="label-text-alt mt-1 block">{t('chg.form.invoice_text_help')}</span>
+			</label>
+			<label class="form-control w-full sm:col-span-2">
+				<span class="label"><span class="label-text">{t('chg.form.payment_instructions')}</span></span>
+				<textarea class="textarea textarea-bordered w-full" rows="3" maxlength="2000" placeholder={defaultInstructions} bind:value={paymentInstructions}></textarea>
+				<span class="label-text-alt mt-1 block">{defaultInstructions ? t('chg.form.payment_instructions_help') : t('chg.form.payment_instructions_help_none')}</span>
 			</label>
 			<label class="form-control w-full sm:col-span-2">
 				<span class="label"><span class="label-text">{t('chg.form.notes')}</span></span>

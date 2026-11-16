@@ -173,7 +173,7 @@
 					{#if item.next_installment?.late && item.contact?.email}
 						<ActionRow icon={Mail} href={`mailto:${encodeURIComponent(item.contact.email)}?subject=${encodeURIComponent(item.invoice_number ?? '')}`}>{t('installments.contact')}</ActionRow>
 					{/if}
-					{#if confirmed}<ActionRow icon={FileDown} chevron href={invoicePdfHref(item.id)}>{t('fin.act.pdf')}</ActionRow>{/if}
+					{#if confirmed}<ActionRow icon={FileDown} chevron href={invoicePdfHref(item.id)} download="{item.invoice_number ?? 'invoice'}.pdf">{t('fin.act.pdf')}</ActionRow>{/if}
 					{#if confirmed}<form method="POST" action="?/resendInvoice" use:enhance={run()}><ActionRow icon={MailCheck} type="submit" disabled={busy}>{t('fin.act.resend')}</ActionRow></form>{/if}
 					<ActionRow icon={ReceiptText} chevron href={registrationHref(item.id)}>{t('fin.act.review')}</ActionRow>
 				</ActionList>

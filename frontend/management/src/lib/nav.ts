@@ -125,12 +125,12 @@ export const NAV: NavItem[] = [
 		label: 'fin.nav',
 		icon: Banknote,
 		match: (p) => p.startsWith('/finance') || p.startsWith('/registrations'),
-		visible: (me) => me.can_manage_finance || me.can_manage_sponsors || me.can_manage_charges,
+		visible: (me) => me.can_manage_finance || me.can_manage_sponsors || me.can_manage_charges || (me.features.includes('shop') && me.can_manage_shop_invoices),
 		badge: 'finance',
 		children: [
-			{ href: '/finance', label: 'fin.nav.payments', match: (p) => p.startsWith('/finance') && !p.startsWith('/finance/sponsors') && !p.startsWith('/finance/charges'), visible: (me) => me.can_manage_finance, badge: 'payments' },
+			{ href: '/finance', label: 'fin.nav.payments', match: (p) => p.startsWith('/finance') && !p.startsWith('/finance/sponsors') && !p.startsWith('/finance/charges') && !p.startsWith('/finance/invoices'), visible: (me) => me.can_manage_finance, badge: 'payments' },
 			{ href: '/registrations', label: 'reg.nav', match: (p) => p.startsWith('/registrations'), visible: (me) => me.can_manage_finance, badge: 'registrations' },
-			{ href: '/finance/charges', label: 'fin.nav.charges', match: (p) => p.startsWith('/finance/charges'), visible: (me) => me.can_manage_charges },
+			{ href: '/finance/invoices', label: 'fin.nav.invoices', match: (p) => p.startsWith('/finance/invoices') || p.startsWith('/finance/charges'), visible: (me) => me.can_manage_finance || me.can_manage_charges || (me.features.includes('shop') && me.can_manage_shop_invoices) },
 			{ href: '/finance/sponsors', label: 'sponsors.title', match: (p) => p.startsWith('/finance/sponsors'), visible: (me) => me.can_manage_sponsors }
 		]
 	},
@@ -159,7 +159,7 @@ export const isActive = (item: NavItem, path: string) => (item.match ? item.matc
 export function visibleNav(me: Me): NavItem[] {
 	return NAV.filter((i) => !i.visible || i.visible(me)).map((i) => ({
 		...i,
-		href: i.key === 'finance' && !me.can_manage_finance ? (me.can_manage_charges ? '/finance/charges' : '/finance/sponsors') : i.href,
+		href: i.key === 'finance' && !me.can_manage_finance ? (me.can_manage_charges || (me.features.includes('shop') && me.can_manage_shop_invoices) ? '/finance/invoices' : '/finance/sponsors') : i.href,
 		children: i.children?.filter((c) => !c.visible || c.visible(me))
 	}));
 }

@@ -37,7 +37,7 @@
 					<span class="flex flex-wrap items-center gap-1.5">
 						<span class="badge badge-sm {statusTone(row.status)}">{t(`portal.mem_status_${row.status}`)}</span>
 						<span class="badge badge-sm {feeTone(row.fee_status)}">{t(`portal.mem_fee_${row.fee_status}`)}</span>
-						{#if row.invoice_id}<a class="btn btn-outline btn-sm gap-1.5" href="/api/v1/portal/invoices/{row.invoice_id}.pdf" target="_blank" rel="noreferrer"><Download size={14} aria-hidden="true" />{t('portal.mem_invoice', { number: row.invoice_number ?? '' })}</a>{/if}
+						{#if row.invoice_id}<a class="btn btn-outline btn-sm gap-1.5" href="/api/v1/portal/invoices/{row.invoice_id}.pdf" download="{row.invoice_number ?? row.invoice_id}.pdf" target="_blank" rel="noreferrer"><Download size={14} aria-hidden="true" />{t('portal.mem_invoice', { number: row.invoice_number ?? '' })}</a>{/if}
 					</span>
 				</div>
 			{:else}

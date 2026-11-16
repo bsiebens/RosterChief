@@ -25,7 +25,7 @@
 		<div class="flex flex-wrap items-center justify-between gap-2">
 			<span class="font-mono text-sm font-semibold">{order.invoice.number}</span>
 			<div class="flex flex-wrap items-center gap-2">
-				<a class="btn btn-outline btn-sm gap-2" href={invoicePdfHref(order.invoice.id)} target="_blank" rel="noopener"><FileDown size={14} /> {t('shop.invc.pdf')}</a>
+				<a class="btn btn-outline btn-sm gap-2" href={invoicePdfHref(order.invoice.id)} download="{order.invoice.number}.pdf" target="_blank" rel="noopener"><FileDown size={14} /> {t('shop.invc.pdf')}</a>
 				{#if canInvoice}<InvoiceRecreate invoiceId={order.invoice.id} onoutcome={(o) => (recreated = o)} />{/if}
 				{#if canInvoice}<a class="btn btn-outline btn-sm" href="/shop/invoices?q={order.invoice.number}">{t('shop.invc.open')}</a>{/if}
 			</div>

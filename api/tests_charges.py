@@ -97,6 +97,15 @@ class ChargeApiTests(ChargesBase):
         self.assertEqual(self.call("delete", f"/finance/charges/{charge['id']}").status_code, 204)
         self.assertFalse(Order.objects.filter(pk=charge["id"]).exists())
 
+    def test_an_invoice_can_carry_its_own_payment_instructions_otherwise_the_clubs_apply(self):
+        plain = self.draft()
+        self.assertEqual(plain["payment_instructions"], "")
+        own = self.draft(payment_instructions="Pay cash to the treasurer at the next game.")
+        self.assertEqual(own["payment_instructions"], "Pay cash to the treasurer at the next game.")
+        r = self.call("put", f"/finance/charges/{plain['id']}", data={"payment_instructions": "IBAN BE00 1234"})
+        self.assertEqual(r.json()["payment_instructions"], "IBAN BE00 1234")
+        self.assertIn("default_payment_instructions", r.json())
+
     def test_the_input_is_checked(self):
         member = str(self.buyer.pk)
         bad = [
@@ -264,7 +273,7 @@ class ChargeReminderTests(ChargesBase):
 
 class ChargeEmailTests(ChargesBase):
     def test_the_member_gets_a_branded_email_with_the_invoice_and_a_reminder_later(self):
-        order = charges.create_draft(self.owner, member=self.buyer, lines=[charges.ChargeLine("Fine: late for the bus", 1, Decimal("15.00"))], invoice_text="Bus to Heist on 3 November", notes="internal only")
+        order = charges.create_draft(self.owner, member=self.buyer, lines=[charges.ChargeLine("Fine: late for the bus", 1, Decimal("15.00"))], invoice_text="Bus to Heist on 3 November", notes="internal only", payment_instructions="IBAN BE00 9999")
         invoice = charges.send(self.owner, order, due_date=timezone.localdate() + datetime.timedelta(days=14))
         self.dispatch.reset_mock()
         with mock.patch.object(emails, "_invoice_attachment", return_value=(f"{invoice.number}.pdf", b"%PDF-1.4")):
@@ -276,6 +285,7 @@ class ChargeEmailTests(ChargesBase):
         self.assertIn(invoice.number, first.subject)
         self.assertIn("Fine: late for the bus", first.body)
         self.assertIn("Bus to Heist on 3 November", first.body)  # the text on the invoice is repeated in the email
+        self.assertIn("IBAN BE00 9999", first.body)  # the invoice's own payment instructions
         self.assertNotIn("internal only", first.body)
         self.assertIn(invoice.due_date.strftime("%d/%m/%Y"), first.body)
         self.assertEqual([a[0] for a in first.attachments], [f"{invoice.number}.pdf"])

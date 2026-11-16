@@ -304,7 +304,7 @@
 					</div>
 				{/if}
 				<ActionList>
-					{#if item.status === 'confirmed'}<ActionRow icon={FileDown} chevron href={invoicePdfHref(item.id)}>{t('reg.act.pdf')}</ActionRow>{/if}
+					{#if item.status === 'confirmed'}<ActionRow icon={FileDown} chevron href={invoicePdfHref(item.id)} download="{item.invoice_number ?? 'invoice'}.pdf">{t('reg.act.pdf')}</ActionRow>{/if}
 					<form method="POST" action="?/resendConfirmation" use:enhance={run()}><ActionRow icon={Mail} type="submit" disabled={busy || item.status === 'cancelled'}>{t('reg.act.resend_confirmation')}</ActionRow></form>
 					{#if item.status === 'confirmed'}<form method="POST" action="?/resendInvoice" use:enhance={run()}><ActionRow icon={MailCheck} type="submit" disabled={busy}>{t('reg.act.resend_invoice')}</ActionRow></form>{/if}
 					<ActionRow icon={ExternalLink} chevron href={publicUrl}>{t('reg.act.status_page')}</ActionRow>
