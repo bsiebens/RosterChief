@@ -550,7 +550,7 @@
 				</ul>
 			</div>
 			<ul class="hidden grid-cols-3 gap-2 md:grid" aria-label={t('sponsors.title')}>
-				{#each all.slice(0, 6) as sponsor (sponsor.id)}
+				{#each all as sponsor (sponsor.id)}
 					<li class="card h-16 overflow-hidden">{@render sponsorLogo(sponsor)}</li>
 				{/each}
 			</ul>
