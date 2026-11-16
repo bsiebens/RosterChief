@@ -13,7 +13,9 @@
 	import { day, money, statusBadge, STATUS_TABS, type InvoiceType, type TypeSummary } from '#lib/invoices.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
 
-	let { data, form } = $props();
+	let { data: loaded, form } = $props();
+	// Defaults keep the page rendering while hot reload or a failed load leaves part of the data out.
+	const data = $derived({ ...loaded, types: loaded.types ?? [], rows: loaded.rows ?? [], summary: loaded.summary ?? {}, filters: loaded.filters ?? { q: '', tab: 'all', type: 'all', offset: 0 } });
 	const href = (patch: Partial<{ q: string; tab: string; type: string; offset: number }>) => {
 		const f = { ...data.filters, ...('offset' in patch ? {} : { offset: 0 }), ...patch };
 		const sp = new URLSearchParams();
