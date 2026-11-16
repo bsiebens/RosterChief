@@ -227,6 +227,10 @@ if RESEND_API_KEY:
         raise ImproperlyConfigured("Set either DJANGO_SMTP_HOST or RESEND_API_KEY, not both.")
     MAILERS["default"] = {"BACKEND": "rosterchief.mail.ResendEmailBackend", "OPTIONS": {"api_key": RESEND_API_KEY}}
 DEFAULT_FROM_EMAIL = config("DJANGO_FROM_EMAIL", default="webmaster@localhost")
+# A staging host without a verified sending domain (an sslip.io name, say) prints mail to the log. Django 6.1 reports that as a deployment
+# error (mail.E001), which stops `rc deploy`; this opt-in acknowledges it. Never set it on production: nobody could confirm an address.
+if config("DJANGO_MAIL_TO_LOG", cast=bool, default=False) and MAILERS["default"]["BACKEND"] == "django.core.mail.backends.console.EmailBackend":
+    SILENCED_SYSTEM_CHECKS = ["mail.E001"]
 
 # Multi-tenancy: base domain whose subdomains resolve to a club, e.g.
 # "ajax-united.rosterchief.app" -> the club with slug "ajax-united". Leave

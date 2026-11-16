@@ -79,7 +79,7 @@ For a throwaway staging host you can skip the domain, Cloudflare and the API tok
 - There is no Cloudflare proxy, so `rc proxy` is refused. Open ports 80 and 443 to the people who test it (your own address is enough).
 - Use a fixed address (an Elastic IP), or the names change when the instance restarts. A new address is a new base domain: provision again and the clubs have to be made again.
 - It depends on sslip.io being up. For staging that is an acceptable risk. Production should keep a real domain.
-- Email: the Resend sending domain cannot be an sslip.io name. Leave email unset on such a staging host (messages are written to the log) or point the sender at a domain you do own.
+- Email: the Resend sending domain cannot be an sslip.io name. Leave email unset on such a staging host and set `DJANGO_MAIL_TO_LOG=True` in `app.env` (messages are written to the log; without that flag the deploy check fails with `mail.E001`), or point the sender at a domain you do own.
 
 ### Split frontend and backend
 
