@@ -11,8 +11,9 @@ rc_has_backend() { [[ $1 == full || $1 == backend ]]; }
 rc_has_frontend() { [[ $1 == full || $1 == frontend ]]; }
 rc_valid_role() { [[ $1 == full || $1 == backend || $1 == frontend ]]; }
 
-# The sizing profile from site.env: "standard" (default) or "small" (a 1 GB staging box: no Celery worker or beat, one gunicorn
-# worker, memory caps, a trimmed PostgreSQL and Valkey). Celery tasks then run inside the web request (CELERY_TASK_ALWAYS_EAGER).
+# The sizing profile from site.env. "standard" (default): no limits, for 4 GB and up. "medium": a 2 GB host, with memory caps on every
+# service and a sized PostgreSQL and Valkey. "small": a 1 GB staging box, the same but with no Celery worker or beat, one gunicorn
+# worker, and Celery tasks run inside the web request (CELERY_TASK_ALWAYS_EAGER). Drop-ins: deploy/host/profiles/<profile>/.
 rc_profile() {
     local p
     p=$(grep -E '^ROSTERCHIEF_PROFILE=' "$RC_CONFIG/site.env" 2> /dev/null | cut -d= -f2 || true)
@@ -38,6 +39,7 @@ rc_unit_wanted() {
         rosterchief-web.service | rosterchief-worker.service | rosterchief-beat.service) rc_has_backend "$role" ;;
         rosterchief-management.service | rosterchief-controlpanel.service) rc_has_frontend "$role" ;;
         rosterchief-cloudflare-ips.*) rc_has_frontend "$role" ;;
+        postgresql.service) rc_has_backend "$role" ;;
         *) return 0 ;;
     esac
 }
@@ -108,17 +110,18 @@ rc_install_host_files() {
 # Drop-ins of the sizing profile (deploy/host/profiles/<profile>/<unit>.conf become /etc/systemd/system/<unit>.d/10-rosterchief-profile.conf).
 # Always removes the ones installed earlier, so going back to "standard" really goes back.
 rc_install_profile() {
-    local src=$1 role=$2 conf name dir
+    local src=$1 role=$2 profile conf name dir
+    profile=$(rc_profile)
     rm -f /etc/systemd/system/*.service.d/10-rosterchief-profile.conf
-    [[ $(rc_profile) == small ]] || return 0
-    for conf in "$src"/profiles/small/*.conf; do
+    [[ $profile != standard ]] || return 0
+    for conf in "$src/profiles/$profile"/*.conf; do
         name=$(basename "$conf" .conf)
         rc_unit_wanted "$role" "$name" || continue
         dir=/etc/systemd/system/$name.d
         install -d -m 0755 "$dir"
         install -m 0644 "$conf" "$dir/10-rosterchief-profile.conf"
     done
-    if rc_has_backend "$role"; then
+    if [[ $profile == small ]] && rc_has_backend "$role"; then
         # No Celery worker or beat on a small host. They may have been enabled by an earlier deploy.
         systemctl disable --now rosterchief-worker.service rosterchief-beat.service > /dev/null 2>&1 || true
     fi

@@ -51,7 +51,7 @@ load_env() {
     [[ $ACCESS == ip || -n $BASE_DOMAIN ]] || die "$file must set BASE_DOMAIN (or ACCESS=ip for a host reached by its address)."
     [[ -n $OWNER_EMAIL && -n $GITHUB_REPO ]] || die "$file must set OWNER_EMAIL and GITHUB_REPO."
     [[ $ACCESS != ip ]] || CLOUDFLARE_PROXIED=false
-    [[ $PROFILE == standard || $PROFILE == small ]] || die "PROFILE must be standard or small."
+    [[ $PROFILE == standard || $PROFILE == medium || $PROFILE == small ]] || die "PROFILE must be standard, medium or small."
     [[ $CLOUDFLARE_PROXIED == true || $CLOUDFLARE_PROXIED == false ]] || die "CLOUDFLARE_PROXIED must be true or false."
     ((${#HOSTS[@]} > 0)) || die "$file lists no HOSTS."
     H_NAME=() H_ROLE=() H_TRANSPORT=() H_TARGET=() H_OPTS=()

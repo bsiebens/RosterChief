@@ -17,8 +17,10 @@ Usage: sudo bootstrap.sh --role full|backend|frontend --domain BASE_DOMAIN --own
   --backend-url URL           frontend: the backend's private URL, e.g. http://10.0.1.5:8001 (required)
   --github-repo OWNER/REPO    where releases are downloaded from (written to deploy.env)
   --caddy-binary PATH         use this Caddy build instead of downloading one with the Cloudflare DNS module
-  --profile standard|small    small: a 1 GB staging host. No Celery worker or beat (tasks run in the request), one gunicorn worker,
-                              memory caps on the services, a trimmed PostgreSQL and Valkey. Default standard.
+  --profile standard|medium|small
+                              medium: a 2 GB host. Memory caps on every service, a sized PostgreSQL and Valkey, sshd and PostgreSQL
+                              protected from the OOM killer. small: a 1 GB staging host, the same with no Celery worker or beat
+                              (tasks run in the request), one gunicorn worker and a smaller everything. Default standard: no limits.
   --swap-mb N                 size of the swap file in MB, created when the host has no swap (0: none). Default 1024.
 
 Secrets come from the environment, never the command line:
@@ -63,7 +65,7 @@ source "$source_dir/common.sh"
 rc_valid_role "$role" || usage
 [[ $proxied == true || $proxied == false ]] || usage
 [[ $access == dns || $access == ip ]] || usage
-[[ $profile == standard || $profile == small ]] || usage
+[[ $profile == standard || $profile == medium || $profile == small ]] || usage
 [[ $swap_mb =~ ^[0-9]+$ ]] || usage
 [[ $access == dns || $proxied == false ]] || { echo "--access ip cannot be combined with the Cloudflare proxy." >&2; exit 2; }
 if [[ ! $domain =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]*[a-z0-9])?$ || ! $owner_email =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z0-9]+$ ]]; then
@@ -189,16 +191,25 @@ if rc_has_backend "$role"; then
     elif [[ $pg_reload == true ]]; then
         systemctl reload postgresql.service
     fi
-    if [[ $profile == small ]]; then
-        # A 1 GB host: a small cache and few connections (the web app runs one worker).
-        if [[ $(pg -Atqc 'SHOW shared_buffers') != 48MB ]]; then
-            pg -qc "ALTER SYSTEM SET shared_buffers = '48MB'"
-            pg -qc "ALTER SYSTEM SET max_connections = 20"
-            pg -qc "ALTER SYSTEM SET work_mem = '2MB'"
-            pg -qc "ALTER SYSTEM SET maintenance_work_mem = '32MB'"
-            pg -qc "ALTER SYSTEM SET effective_cache_size = '256MB'"
+    # Memory settings by profile. standard: PostgreSQL's own defaults (128MB, 100 connections), so going back resets them.
+    case $profile in
+        small) pg_buffers=48MB pg_conns=20 pg_work=2MB pg_maint=32MB pg_cache=256MB ;;
+        medium) pg_buffers=128MB pg_conns=50 pg_work=4MB pg_maint=64MB pg_cache=768MB ;;
+        *) pg_buffers='' ;;
+    esac
+    pg_now="$(pg -Atqc 'SHOW shared_buffers')/$(pg -Atqc 'SHOW max_connections')"
+    if [[ -n $pg_buffers ]]; then
+        if [[ $pg_now != "$pg_buffers/$pg_conns" ]]; then
+            pg -qc "ALTER SYSTEM SET shared_buffers = '$pg_buffers'"
+            pg -qc "ALTER SYSTEM SET max_connections = $pg_conns"
+            pg -qc "ALTER SYSTEM SET work_mem = '$pg_work'"
+            pg -qc "ALTER SYSTEM SET maintenance_work_mem = '$pg_maint'"
+            pg -qc "ALTER SYSTEM SET effective_cache_size = '$pg_cache'"
             systemctl restart postgresql.service
         fi
+    elif [[ $pg_now != 128MB/100 ]]; then
+        for key in shared_buffers max_connections work_mem maintenance_work_mem effective_cache_size; do pg -qc "ALTER SYSTEM RESET $key"; done
+        systemctl restart postgresql.service
     fi
     if [[ $(pg -Atqc "SELECT 1 FROM pg_roles WHERE rolname = 'rosterchief'") != 1 ]]; then
         runuser -u postgres -- createuser --no-superuser --no-createdb --no-createrole rosterchief
@@ -208,12 +219,13 @@ if rc_has_backend "$role"; then
     fi
 
     printf '%s\n' 'bind 127.0.0.1' 'protected-mode yes' > "$scratch/valkey.conf"
-    if [[ $profile == small ]]; then
-        # No Celery queue lives here on a small host: a bounded cache, and no append-only file (its rewrites fork the process).
-        printf '%s\n' 'appendonly no' 'maxmemory 64mb' 'maxmemory-policy allkeys-lru' >> "$scratch/valkey.conf"
-    else
-        printf '%s\n' 'appendonly yes' >> "$scratch/valkey.conf"
-    fi
+    case $profile in
+        # Valkey is the Celery queue: noeviction, so a full Valkey refuses writes instead of dropping queued tasks.
+        medium) printf '%s\n' 'appendonly yes' 'maxmemory 128mb' 'maxmemory-policy noeviction' >> "$scratch/valkey.conf" ;;
+        # No queue lives here on a small host (tasks run in the request): a bounded cache, and no append-only file (its rewrites fork).
+        small) printf '%s\n' 'appendonly no' 'maxmemory 64mb' 'maxmemory-policy allkeys-lru' >> "$scratch/valkey.conf" ;;
+        *) printf '%s\n' 'appendonly yes' >> "$scratch/valkey.conf" ;;
+    esac
     valkey_changed=false
     cmp -s "$scratch/valkey.conf" /etc/valkey/rosterchief.conf 2> /dev/null || valkey_changed=true
     install -m 0644 "$scratch/valkey.conf" /etc/valkey/rosterchief.conf
