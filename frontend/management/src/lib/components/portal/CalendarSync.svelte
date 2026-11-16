@@ -49,7 +49,7 @@
 <button class={klass} type="button" onclick={show}><CalendarDays size={14} aria-hidden="true" />{t('portal.sync_calendar')}</button>
 
 <Sheet {open} title={t('portal.cal_title')} onclose={() => (open = false)}>
-	<div class="grid gap-4 px-5 pb-6">
+	<div class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 px-5 pb-6">
 		<h2 class="font-display text-xl font-extrabold text-ink">{t('portal.cal_title')}</h2>
 		<p class="text-sm text-muted">{t('portal.cal_intro')}</p>
 		{#if failed}<Alert kind="error">{t('common.error.generic')}</Alert>{/if}
@@ -60,9 +60,9 @@
 			<button class="btn w-fit gap-1.5" type="button" disabled={busy} onclick={() => change(true)}><CalendarDays size={14} aria-hidden="true" />{t('portal.cal_enable')}</button>
 		{:else}
 			{#each [{ key: 'https', label: t('portal.cal_link'), value: https }, { key: 'webcal', label: t('portal.cal_webcal'), value: webcal }] as row (row.key)}
-				<div class="grid gap-1">
+				<div class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1">
 					<span class="text-xs font-semibold text-muted">{row.label}</span>
-					<div class="flex items-center gap-2">
+					<div class="flex min-w-0 items-center gap-2">
 						<div class="input flex min-w-0 flex-1 items-center bg-subhead text-sm"><span class="truncate" title={row.value}>{row.value}</span></div>
 						<button class="btn btn-outline btn-sm shrink-0 gap-1.5" type="button" onclick={() => copy(row.key, row.value)}>
 							{#if copied === row.key}<Check size={14} aria-hidden="true" />{t('portal.cal_copied')}{:else}<Copy size={14} aria-hidden="true" />{t('portal.cal_copy')}{/if}
