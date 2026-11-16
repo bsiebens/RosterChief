@@ -383,7 +383,8 @@ class ResetPasswordTests(UserApiBase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].to, ["rob@club.test"])
         link = next(w for w in mail.outbox[0].body.split() if "/key/" in w or "key=" in w or ("reset" in w and "http" in w))
-        token_part = link.rsplit("/", 1)[-1]
+        token_part = link.rstrip("/").rsplit("/", 1)[-1]  # allauth's own page ends the link with a slash
+        self.assertTrue(token_part)
         self.assertNotIn(token_part, r.content.decode())
         self.assertNotIn("key", set(body))
 
@@ -412,7 +413,7 @@ class ResetPasswordTests(UserApiBase):
         self.assertFalse(user.has_usable_password())
         self.assertFalse(user.check_password(PASSWORD))
         self.assertTrue(PlatformAuditLog.objects.get(action="user.password_reset").data["disable_current_password"])
-        words = [w.strip("<>()\"'") for w in mail.outbox[0].body.split() if "http" in w or "/" in w]
+        words = [w.strip("<>()\"'").rstrip("/") for w in mail.outbox[0].body.split() if "http" in w or "/" in w]
         key = next(w.rsplit("/", 1)[-1] for w in words if w.rsplit("/", 1)[-1].count("-") >= 1)
         _uid, _, token = key.partition("-")
         self.assertTrue(default_token_generator.check_token(user, token), "the emailed token must be made after the password was disabled")

@@ -57,7 +57,7 @@ def feed_for_token(token: str) -> CalendarFeed | None:
 
 
 def _escape(text: str) -> str:
-    return str(text).replace("\\", "\\\\").replace(";", "\;").replace(",", "\\,").replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n")
+    return str(text).replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n")
 
 
 def _fold(line: str) -> str:
