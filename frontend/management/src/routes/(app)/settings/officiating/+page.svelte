@@ -90,13 +90,13 @@
 		<div class="card overflow-x-auto">
 			<table class="table">
 				<thead>
-					<tr><th>{t('levels.col.name')}</th><th class="hidden md:table-cell">{t('levels.col.inherits')}</th><th class="hidden lg:table-cell">{t('levels.col.teams')}</th><th class="text-right">{t('levels.col.members')}</th><th></th></tr>
+					<tr><th class="whitespace-nowrap">{t('levels.col.name')}</th><th class="hidden whitespace-nowrap md:table-cell">{t('levels.col.inherits')}</th><th class="hidden lg:table-cell">{t('levels.col.teams')}</th><th class="text-right">{t('levels.col.members')}</th><th></th></tr>
 				</thead>
 				<tbody>
 					{#each data.levels as l (l.id)}
 						<tr class="hover:bg-paper">
-							<td><button type="button" class="link text-left font-semibold" onclick={() => openForm(l)}>{l.name}</button></td>
-							<td class="hidden md:table-cell">{levelName(l.inherits_from_id) || t('common.none')}</td>
+							<td class="whitespace-nowrap"><button type="button" class="link text-left font-semibold" onclick={() => openForm(l)}>{l.name}</button></td>
+							<td class="hidden whitespace-nowrap md:table-cell">{levelName(l.inherits_from_id) || t('common.none')}</td>
 							<td class="hidden lg:table-cell">
 								<div class="flex flex-wrap gap-1">
 									{#each l.team_ids as id (id)}<span class="badge badge-sm badge-outline">{teamName(id)}</span>{/each}
