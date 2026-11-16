@@ -97,12 +97,13 @@ fi
 # Amazon Linux 2023 has none. Without it a memory spike freezes the host (SSH included) instead of slowing it down.
 # Done first: installing packages and building the Python environment are memory-hungry too.
 if [[ $swap_mb -gt 0 && -z $(swapon --show --noheadings) ]]; then
-    if [[ ! -f /swapfile ]]; then
+    # A leftover of an interrupted run (wrong size, or never formatted) is rebuilt.
+    if [[ $(stat -c %s /swapfile 2> /dev/null || echo 0) -ne $((swap_mb * 1024 * 1024)) ]]; then
+        rm -f /swapfile
         dd if=/dev/zero of=/swapfile bs=1M count="$swap_mb" status=none  # dd, not fallocate: always works on XFS
         chmod 0600 /swapfile
-        mkswap -q /swapfile
     fi
-    swapon /swapfile
+    swapon /swapfile 2> /dev/null || { mkswap /swapfile > /dev/null && swapon /swapfile; }
     grep -Eq '^/swapfile[[:space:]]' /etc/fstab || printf '/swapfile none swap sw 0 0\n' >> /etc/fstab
     echo "Swap: ${swap_mb} MB at /swapfile."
 fi
