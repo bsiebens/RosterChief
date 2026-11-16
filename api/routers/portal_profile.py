@@ -10,25 +10,23 @@ from ninja import File, Router, Schema, UploadedFile
 from ninja.errors import HttpError
 
 from api.auth import CookieAuth, TokenAuth
+from api.routers.analytics import member_document
 from api.routers.portal import _people, _viewer
-from events.models import Event
+from api.routers.requirements import private_download
+from api.schemas_analytics import MemberGameStatsOut
+from api.schemas_member_stats import AttendanceStats, GoalieStats, OfficiatingStats, PlayerStats, PublicPlayerStatsOut
+from events.models import Event, EventFollow, Season
+from events.services import follows, game_stats, member_stats
 from formbuilder.models import FormSend
 from formbuilder.services import audience
-from api.routers.requirements import private_download
-from members.models import ClubMembership, Member, MemberRequirementStatus
-from members.services import memberships as membership_services, onboarding
-from shop.models import Voucher
+from members.models import ClubMembership, MemberRequirementStatus
+from members.services import invoice_access, onboarding, stats_sharing
 from members.services import members as member_services
-from members.services import invoice_access, stats_sharing
+from members.services import memberships as membership_services
 from members.services.errors import Invalid
-from api.routers.analytics import member_document
-from api.schemas_analytics import MemberGameStatsOut
-from api.schemas_member_stats import AttendanceStats, OfficiatingStats, PlayerStats, GoalieStats, PublicPlayerStatsOut
-from events.models import EventFollow, Season
-from events.services import game_stats, member_stats
-from events.services import follows
 from notifications import preferences
 from notifications.models import Category, Channel
+from shop.models import Voucher
 from teams.models import Team, TeamMembership
 
 router = Router(auth=[TokenAuth(door=False), CookieAuth(door=False)])
@@ -77,7 +75,7 @@ def profile(request):
 @router.patch("/profile/{member_id}", summary="Correct my own (or my child's) contact details")
 def update_profile(request, member_id: UUID, payload: ProfileIn):
     viewer, member = _own(request, member_id)
-    values = {key: value for key, value in payload.dict(exclude_unset=True).items()}
+    values = dict(payload.dict(exclude_unset=True).items())
     for key in ("phone", "emergency_phone"):
         if key in values:
             values[key] = values[key].strip() or None
@@ -224,7 +222,11 @@ def _requirement_item(item):
 
 def _membership_rows(people, viewer):
     allowed = set(invoice_access.downloadable_invoices(viewer).values_list("pk", flat=True))  # the invoices this person may download (contact or a parent of the family)
-    rows = ClubMembership.objects.filter(member_id__in=people, season__end_date__gte=timezone.localdate()).select_related("season", "registration_details__batch").prefetch_related("requirement_statuses__events", "payments").order_by("season__start_date")
+    rows = (
+        ClubMembership.objects.filter(member_id__in=people, season__end_date__gte=timezone.localdate()).select_related("season", "registration_details__batch")
+        .prefetch_related("requirement_statuses__events", "payments")
+        .order_by("season__start_date")
+    )
     out = []
     for row in rows:
         batch = getattr(getattr(row, "registration_details", None), "batch", None)
@@ -329,7 +331,7 @@ def stats_people(request):
 
 @router.get("/stats/{member_id}", response=MyStatsOut, summary="My (or my child's) statistics: games, attendance and refereeing")
 def my_stats(request, member_id: UUID, season: UUID | None = None):
-    _viewer_, member = _own(request, member_id)
+    _viewer, member = _own(request, member_id)
     chosen = None
     if season is not None:
         chosen = Season.objects.filter(pk=season).first()
@@ -345,7 +347,7 @@ def my_stats(request, member_id: UUID, season: UUID | None = None):
 
 @router.put("/stats/{member_id}/share", summary="Switch the personal public link on (rotate=true replaces it, the old link stops working)")
 def stats_share_on(request, member_id: UUID, rotate: bool = False):
-    _viewer_, member = _own(request, member_id)
+    _viewer, member = _own(request, member_id)
     if not game_stats.analytics_supported(request.tenant, request.features):
         raise HttpError(404, "Not found.")
     return {"share_token": stats_sharing.enable_for_owner(request.user, member, rotate=rotate)}
@@ -353,6 +355,6 @@ def stats_share_on(request, member_id: UUID, rotate: bool = False):
 
 @router.delete("/stats/{member_id}/share", response={204: None}, summary="Switch the personal public link off")
 def stats_share_off(request, member_id: UUID):
-    _viewer_, member = _own(request, member_id)
+    _viewer, member = _own(request, member_id)
     stats_sharing.disable_for_owner(request.user, member)
     return 204, None

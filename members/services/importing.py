@@ -251,7 +251,7 @@ def validate_rows(actor, rows: list[dict], season) -> list[dict]:
     require_admin(actor)
     teams = _team_lookup()
     emails = {e.lower() for e in Member.objects.exclude(email="").values_list("email", flat=True)}
-    names = {(f.lower(), l.lower(), d) for f, l, d in Member.objects.exclude(date_of_birth=None).values_list("first_name", "last_name", "date_of_birth")}
+    names = {(first.lower(), last.lower(), d) for first, last, d in Member.objects.exclude(date_of_birth=None).values_list("first_name", "last_name", "date_of_birth")}
     seen_emails: set[str] = set()
     seen_names: set = set()
     out = []

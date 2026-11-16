@@ -37,9 +37,8 @@ def _send(event: Event, *, title: str, body: str, actor=None, href: str | None =
     club = current_club()
     if club is None:
         return 0
-    from notifications import inbox
-
     from members.services import recipients
+    from notifications import inbox
 
     actor_id = getattr(actor, "pk", None)
     told = 0

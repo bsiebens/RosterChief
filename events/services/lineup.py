@@ -28,8 +28,8 @@ from django.template.loader import render_to_string
 from django.utils import timezone
 from django_tenants.utils import get_public_schema_name, get_tenant_model
 
-from events.models import Attendance, Event, Lineup, LineupSelection, LineupSlotAssignment, Season
 from club.lineup_template import slot_keys
+from events.models import Attendance, Event, Lineup, LineupSelection, LineupSlotAssignment, Season
 from members.models import Member
 from members.services import audit
 from members.services.access import can_manage_attendance

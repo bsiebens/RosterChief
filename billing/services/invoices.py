@@ -218,7 +218,8 @@ def send_invoice(invoice: Invoice, *, actor=None) -> Invoice:
     ]
     pay_rows = []
     if issuer.get("iban") or issuer.get("bic"):
-        pay_rows = [(label, value) for label, value in [("Beneficiary", issuer.get("legal_name")), ("IBAN", issuer.get("iban")), ("BIC", issuer.get("bic")), ("Reference", invoice.number), ("Amount", f"EUR {ctx['balance']}"), ("Pay before", str(ctx["due_date"]))] if value]
+        pay_rows = [(label, value) for label, value in [("Beneficiary", issuer.get("legal_name")), ("IBAN", issuer.get("iban")), ("BIC", issuer.get("bic")), ("Reference", invoice.number),
+            ("Amount", f"EUR {ctx['balance']}"), ("Pay before", str(ctx["due_date"]))] if value]
     text = f"{t['invoice_intro']}\n\n" + "\n".join(f"{label}: {value}" for label, value in rows)
     if pay_rows:
         text += "\n\nPayment\n" + "\n".join(f"{label}: {value}" for label, value in pay_rows)

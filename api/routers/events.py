@@ -36,7 +36,6 @@ from api.schemas_events import (
     AttendanceRowOut,
     BulkAnswerIn,
     BulkAnswerOut,
-    RemindOut,
     CheckInIn,
     ClaimIn,
     EventDetailOut,
@@ -53,6 +52,7 @@ from api.schemas_events import (
     LineupOut,
     LineupPublishOut,
     LineupScheduleIn,
+    RemindOut,
     TaskIn,
     TaskListOut,
     TaskOut,
@@ -65,12 +65,12 @@ from events.services import calendar as calendar_svc
 from events.services import event_notifications as notices
 from events.services import events as svc
 from events.services import lineup as lineup_svc
-from shop.services.invoices import PDFUnavailable
 from events.services import recurrence as rec
 from events.services import tasks as task_svc
 from members.models import Group, Member
 from members.services import access
 from members.services.errors import Invalid, NotAllowed
+from shop.services.invoices import PDFUnavailable
 from teams.models import Team, TeamMembership
 
 router = Router()

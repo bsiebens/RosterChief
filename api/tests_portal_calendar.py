@@ -41,7 +41,8 @@ class CalendarFeedTests(TestCase):
             FamilyMembership.objects.create(family=family, member=cls.child, role=Role.CHILD)
             place = Location.objects.create(name="Sporthal", address="Straat 1", city="Gent", zip_code="9000", country="BE")
             now = timezone.now()
-            own = Event.objects.create(title="Own, training; evening", kind="training", start=now + datetime.timedelta(days=2), gathering=now + datetime.timedelta(days=2) - datetime.timedelta(minutes=30), location=place, notes="Bring water\nand a towel")
+            own = Event.objects.create(title="Own, training; evening", kind="training", start=now + datetime.timedelta(days=2), gathering=now + datetime.timedelta(days=2) - datetime.timedelta(minutes=30),
+                location=place, notes="Bring water\nand a towel")
             kid = Event.objects.create(title="Kid game", kind="game", start=now + datetime.timedelta(days=3))
             gone = Event.objects.create(title="Cancelled one", kind="training", start=now + datetime.timedelta(days=4), end=now + datetime.timedelta(days=4, hours=1), cancelled=True)
             hidden = Event.objects.create(title="Not for this family", kind="training", start=now + datetime.timedelta(days=5))
@@ -106,8 +107,8 @@ class CalendarFeedTests(TestCase):
         self.assertNotIn("Long ago", text)
         self.assertIn(f"UID:{self.kid_event.pk}-{self.child.pk}@", text)
         kid = text.split("SUMMARY:Kid game (Kiddo)")[0].split("BEGIN:VEVENT")[-1]
-        start = [line for line in kid.split("\r\n") if line.startswith("DTSTART:")][0][8:]
-        end = [line for line in kid.split("\r\n") if line.startswith("DTEND:")][0][6:]
+        start = next(line for line in kid.split("\r\n") if line.startswith("DTSTART:"))[8:]
+        end = next(line for line in kid.split("\r\n") if line.startswith("DTEND:"))[6:]
         self.assertEqual(datetime.datetime.strptime(end, "%Y%m%dT%H%M%SZ") - datetime.datetime.strptime(start, "%Y%m%dT%H%M%SZ"), datetime.timedelta(hours=2))
 
     def test_another_account_sees_none_of_it(self):

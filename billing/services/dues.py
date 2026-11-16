@@ -107,7 +107,8 @@ def quote_period(club, plan: Plan, start: datetime.date, *, is_trial: bool = Fal
 
 @transaction.atomic
 def open_period(
-    club, *, start: datetime.date | None = None, plan: Plan | None = None, is_trial: bool = False, period_end: datetime.date | None = None, actor=None, credit_reference: str | None = None, credit_note=None, invoice_number: str | None = None, invoice: bool = True
+    club, *, start: datetime.date | None = None, plan: Plan | None = None, is_trial: bool = False, period_end: datetime.date | None = None, actor=None, credit_reference: str | None = None, credit_note=None,
+    invoice_number: str | None = None, invoice: bool = True
 ) -> Due:
     """Open (and invoice) the billing period beginning ``start``.
 

@@ -33,7 +33,8 @@ def _ref(member) -> dict | None:
 
 
 def _field(f) -> dict:
-    return {"id": f.pk, "key": f.key, "label": f.label, "field_type": f.field_type, "required": f.required, "help_text": f.help_text, "section": f.section, "order": f.order, "is_active": f.is_active, "options": f.options, "min_value": f.min_value, "max_value": f.max_value}
+    return {"id": f.pk, "key": f.key, "label": f.label, "field_type": f.field_type, "required": f.required, "help_text": f.help_text, "section": f.section, "order": f.order, "is_active": f.is_active, "options": f.options,
+        "min_value": f.min_value, "max_value": f.max_value}
 
 
 def _form_item(f) -> dict:

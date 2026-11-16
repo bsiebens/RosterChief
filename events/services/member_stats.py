@@ -15,7 +15,7 @@ from collections import defaultdict
 
 from django.utils import timezone
 
-from events.models import Attendance, Event, GameMoment, GameStat, Season
+from events.models import Attendance, GameMoment, GameStat, Season
 from events.services import game_stats
 from events.services.attendance import _rate
 from teams.models import StaffAssignment

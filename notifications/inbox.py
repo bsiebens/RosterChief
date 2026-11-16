@@ -25,7 +25,7 @@ def notify(user, club, *, title: str, body: str = "", kind: str = Kind.INFO, hre
             from .services import notify_user
 
             notify_user(user, title=title, body=body, category=category, priority=priority, club=club, notification_id=item.pk, data={"href": href, "inbox_id": str(item.pk)}, send_email=send_email)
-        except Exception:  # noqa: BLE001  (a push hiccup must not lose the inbox entry)
+        except Exception:
             logging.getLogger(__name__).exception("inbox.push_failed")
     return item
 

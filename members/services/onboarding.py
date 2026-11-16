@@ -472,7 +472,7 @@ def _tell_member(actor, membership: ClubMembership, requirement: OnboardingRequi
             title, body = texts[kind]
             fmt = {"name": requirement.name, "who": texts["who_self"] if child is None else child.first_name, "note": note}
             inbox.notify(user, club, title=title.format(**fmt), body=body.format(**fmt).strip(), kind=inbox.Kind.INFO if kind == "approved" else inbox.Kind.WARNING, href="/parent?tab=payments", push=True, category="form")
-    except Exception:  # noqa: BLE001
+    except Exception:
         logging.getLogger(__name__).exception("onboarding.notify_member_failed")
 
 
@@ -499,7 +499,7 @@ def _tell_staff(actor, membership: ClubMembership, requirement: OnboardingRequir
             continue
         try:
             inbox.notify(user, club, title=title, body="Handed in and waiting for your review.", kind=inbox.Kind.INFO, href=f"/members/{membership.member_id}", push=True, category="admin")
-        except Exception:  # noqa: BLE001
+        except Exception:
             import logging
 
             logging.getLogger(__name__).exception("onboarding.notify_failed")

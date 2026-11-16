@@ -130,7 +130,7 @@ def notify_author_of_send_back(news_id, actor_user_id=None) -> int:
         body = item.review_note or "A reviewer sent this news item back to you. Please check it and submit it again."
         inbox.notify(user, club, title=f"“{item.title}” needs changes", body=body, kind=inbox.Kind.WARNING, href=_href(item), push=True, category="news", send_email=False)
         return 1
-    except Exception:  # noqa: BLE001
+    except Exception:
         import logging
 
         logging.getLogger(__name__).exception("news.send_back_notify_failed")

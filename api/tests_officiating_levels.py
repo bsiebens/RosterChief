@@ -100,7 +100,7 @@ class LevelsApiTests(TestCase):
     # -- CRUD, both kinds --
 
     def test_crud(self):
-        for kind, model in (("referee", RefereeLevel), ("official", OfficialLevel)):
+        for kind, _model in (("referee", RefereeLevel), ("official", OfficialLevel)):
             self.assertEqual(self.admin("get", f"/{kind}-levels").json(), [])
             base = self.create(kind, "Regional", [self.u12, self.u14])
             self.assertEqual(sorted(base["team_ids"]), sorted([str(self.u12.pk), str(self.u14.pk)]))

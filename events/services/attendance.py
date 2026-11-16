@@ -533,7 +533,12 @@ def member_kind_turnout(member_ids, season: Season | None = None, *, minimum_res
         return result
     groups = {"games": [Event.EventKind.GAME, Event.EventKind.TOURNAMENT], "practices": [Event.EventKind.TRAINING]}
     for key, kinds in groups.items():
-        rows = _past(season, member_id__in=list(result), event__kind__in=kinds, event__cancelled=False, status__in=[Status.PRESENT, Status.ABSENT]).values("member_id").annotate(present=Count("id", filter=Q(status=Status.PRESENT)), responses=Count("id")).order_by()
+        rows = (
+            _past(season, member_id__in=list(result), event__kind__in=kinds, event__cancelled=False, status__in=[Status.PRESENT, Status.ABSENT])
+            .values("member_id")
+            .annotate(present=Count("id", filter=Q(status=Status.PRESENT)), responses=Count("id"))
+            .order_by()
+        )
         for row in rows:
             if row["responses"] >= minimum_responses:
                 result[row["member_id"]][key] = round(100 * row["present"] / row["responses"])

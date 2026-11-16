@@ -9,9 +9,8 @@ from django.core.cache import cache
 from controlpanel.models import EmailSuppression
 
 from .models import BillingSettings
-from .services import BillingError
+from .services import BillingError, reminders
 from .services import invoices as invoices_svc
-from .services import reminders
 from .tests import BillingTestBase, make_club
 
 

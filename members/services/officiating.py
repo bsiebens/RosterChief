@@ -24,7 +24,7 @@ def _ref(obj) -> dict:
 
 
 def get_profile(member: Member, kind: str):
-    model, _level, related = _KINDS[kind]
+    _model, _level, related = _KINDS[kind]
     return getattr(member, related).select_related("level").order_by("created", "pk").first()
 
 

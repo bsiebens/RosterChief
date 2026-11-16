@@ -92,7 +92,7 @@ def set_sport_lineup_slots(request, sport_id: UUID, payload: SportLineupSlotsIn)
     try:
         template = clean_template(payload.template)
     except TemplateError as exc:
-        raise _invalid("template", str(exc))
+        raise _invalid("template", str(exc)) from exc
     if payload.enabled and not template:
         raise _invalid("template", "Add at least one group with a slot before switching line-up lines on.")
     before = {"enabled": sport.lineup_slots_enabled, "template": sport.lineup_template}

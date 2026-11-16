@@ -96,7 +96,7 @@ class Member(UUIDModel):
     date_of_birth = models.DateField(_("date of birth"), null=True, blank=True)
     language = models.CharField(_("language"), max_length=10, blank=True, choices=settings.LANGUAGES, help_text=_("Preferred language for messages to this person. Empty means the club default."))
 
-    license_number = models.CharField(_("license number"), max_length=50, blank=True, null=True)
+    license_number = models.CharField(_("license number"), max_length=50, blank=True, null=True)  # noqa: DJ001
 
     objects = MemberQuerySet.as_manager()
 

@@ -10,8 +10,8 @@ audience and response window, which don't apply here. Its ``validate_answers`` i
 """
 
 from django.db import transaction
-from django.utils import timezone
 from django.db.models import Count, Q
+from django.utils import timezone
 
 from evaluations.models import EvaluationChecklist, PlayerEvaluation
 from events.models import Season
@@ -204,7 +204,7 @@ def tell_family(actor, evaluation: PlayerEvaluation) -> None:
             evaluation.player, club, title="A new evaluation is available", body=f"{evaluation.checklist.name} · {evaluation.season.name}",
             skip_user_id=getattr(actor, "pk", None), kind=inbox.Kind.INFO, href="/parent/forms", push=True, category="form",
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         import logging
 
         logging.getLogger(__name__).exception("evaluations.notify_failed")

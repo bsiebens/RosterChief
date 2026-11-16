@@ -550,7 +550,7 @@ def event_game(request, event_id: UUID):
 
 @router.put("/events/{event_id}/follow", summary="Follow this game: it appears on top of Home and sends live pushes")
 def follow_event(request, event_id: UUID):
-    viewer, people, event, in_audience = _visible_event(request, event_id)
+    _viewer, _people, event, _in_audience = _visible_event(request, event_id)
     try:
         follows.follow_event(request.user, event)
     except Invalid as error:
@@ -560,13 +560,13 @@ def follow_event(request, event_id: UUID):
 
 @router.delete("/events/{event_id}/follow", summary="Stop following this game")
 def unfollow_event(request, event_id: UUID):
-    viewer, people, event, in_audience = _visible_event(request, event_id)
+    _viewer, _people, event, _in_audience = _visible_event(request, event_id)
     follows.unfollow_event(request.user, event)
     return follows.follow_state(request.user, event)
 
 
 def _task_of(request, event_id, task_id):
-    viewer, people, event, in_audience = _visible_event(request, event_id)
+    viewer, _people, event, in_audience = _visible_event(request, event_id)
     task = EventTask.objects.filter(pk=task_id, event=event).first()
     if task is None or not in_audience:
         raise HttpError(404, "Not found.")
@@ -594,7 +594,7 @@ def unclaim_task(request, event_id: UUID, task_id: UUID):
 
 @router.get("/events/{event_id}/attachments/{attachment_id}/download", summary="Download a file of an event")
 def download_attachment(request, event_id: UUID, attachment_id: UUID):
-    _viewer_, _people_, event, in_audience = _visible_event(request, event_id)
+    _viewer, _people, event, in_audience = _visible_event(request, event_id)
     attachment = EventAttachment.objects.filter(pk=attachment_id, event=event).select_related("event").first()
     if attachment is None or not in_audience:
         raise HttpError(404, "Not found.")

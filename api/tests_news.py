@@ -147,7 +147,7 @@ class NewsApiTests(TestCase):
         self.assertIsNotNone(back["sent_back_at"])
         told.assert_called_once()
         self.assertEqual(self.call("get", f"/news/{nid}", self.ann_user).json()["review_note"], "Add a photo, please")  # the author sees why
-        resubmitted = self.call("post", f"/news/{nid}/submit-for-review", self.ann_user).json()
+        self.call("post", f"/news/{nid}/submit-for-review", self.ann_user).json()
         self.assertEqual(self.call("get", f"/news/{nid}", self.ann_user).json()["review_note"], "")  # cleared once it is submitted again
         # approve = publish
         with mock.patch("news.services.notifications.dispatch_publish_notification") as hook, self.captureOnCommitCallbacks(execute=True):

@@ -159,7 +159,7 @@ def _clean_opponent(o: Opponent, values: dict) -> None:
     alts = values.get("alternative_names", list(o.alternative_names))
     if not name:
         errors["name"] = ["This field is required."]
-    others = [x for x in Opponent.objects.exclude(pk=o.pk)]
+    others = list(Opponent.objects.exclude(pk=o.pk))
     taken = {k.casefold(): x for x in others for k in [x.name, *x.alternative_names]}
     if name and name.casefold() in taken:
         errors["name"] = [f"This name is already used by {taken[name.casefold()].name}."]
