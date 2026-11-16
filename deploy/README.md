@@ -27,7 +27,7 @@ Add `--dry-run` to any command to print what would run without touching anything
 1. **Environment files.** Copy `deploy/environments/staging.env.example` to `staging.env` (and `production.env.example` likewise). They list the servers and are git-ignored. Copy `secrets.example` to `staging.secrets`, `chmod 600`, and fill in:
    - `CLOUDFLARE_API_TOKEN`: scoped to the one zone with *Zone:Read* and *DNS:Edit*. Caddy uses it for the wildcard certificate (DNS challenge).
    - `GITHUB_TOKEN`: a fine-grained, read-only *Contents* token for this repository. Hosts use it to download releases.
-2. **GitHub.** The workflows in `.github/workflows/` run on the repository: `ci.yml` on pull requests and pushes, `release.yml` when a `v*` tag is pushed.
+2. **GitHub.** The workflows in `.github/workflows/` run on the repository: `ci.yml` on every push to `main` only. It lints and checks, runs the full test suite, then (when the pushed commit carries a `v*` tag, as `rc release` does) builds and publishes the release. Nothing runs on `development` or on pull requests.
 3. **Operator access.** SSH hosts need key login and passwordless `sudo`. SSM hosts need the AWS CLI configured (and the instance in Systems Manager).
 
 ## Topologies

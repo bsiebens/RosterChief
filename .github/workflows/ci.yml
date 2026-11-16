@@ -1,8 +1,13 @@
 name: CI
+# Runs on pushes to main only. Everything is gated in order: the fast checks first, then the full test suite, and last the release build.
+# `rc release` pushes main and the tag vX.Y.Z together, so the tag is already there when this runs: the final job packages and publishes
+# that release only when the pushed commit carries a v* tag. A plain push to main (a hotfix merge, say) runs the checks and stops.
 on:
-  pull_request:
   push:
-    branches: [development, main]
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   backend:
@@ -11,9 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --locked
-      # Informational for now: the repository still has older ruff findings. Remove continue-on-error once they are fixed.
       - run: uv run ruff check .
-        continue-on-error: true
       - run: uv run python manage.py check
         env:
           DJANGO_DEBUG: "True"
@@ -21,6 +24,8 @@ jobs:
           DJANGO_DATABASE_URL: postgresql://localhost/ci
   tests:
     # The full Django suite, on PostgreSQL (django-tenants needs it) like the production hosts. Celery runs tasks inline, so no Redis is needed.
+    # Starts only when lint and the Django check passed: no 45-minute run for a typo.
+    needs: backend
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -81,3 +86,64 @@ jobs:
       - run: shellcheck -x -P SCRIPTDIR -S warning deploy/rc deploy/lib/*.sh deploy/host/*.sh deploy/cutover/*.sh
       - name: Rehearse the repository cutover on throwaway repositories
         run: bash deploy/cutover/selftest.sh
+  release:
+    # Last step, and only after every check above passed. Builds and publishes the artifacts the servers download (rc deploy).
+    needs: [backend, tests, frontend, secrets, deploy-scripts]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the history and every tag
+      - name: Is this push a release?
+        id: tag
+        run: |
+          tag=$(git tag --points-at "$GITHUB_SHA" --list 'v*' | sort -V | tail -n 1)
+          if [ -z "$tag" ]; then
+            echo "No v* tag on $GITHUB_SHA: checks only, nothing to release."
+          else
+            version=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -n 1)
+            if [ "v$version" != "$tag" ]; then
+              echo "::error::pyproject.toml says $version but the tag is $tag."
+              exit 1
+            fi
+            echo "Releasing $tag"
+          fi
+          echo "name=$tag" >> "$GITHUB_OUTPUT"
+      - uses: astral-sh/setup-uv@v5
+        if: steps.tag.outputs.name != ''
+      - uses: actions/setup-node@v4
+        if: steps.tag.outputs.name != ''
+        with:
+          node-version: 24
+
+      - name: Build the frontends and keep only runtime dependencies
+        if: steps.tag.outputs.name != ''
+        run: |
+          for app in management controlpanel; do
+            (cd "frontend/$app" && npm ci --no-audit --no-fund && npm run build && npm ci --omit=dev --no-audit --no-fund)
+          done
+
+      - name: Package
+        if: steps.tag.outputs.name != ''
+        env:
+          TAG: ${{ steps.tag.outputs.name }}
+        run: |
+          mkdir dist
+          # Backend: committed source (no frontends, no deploy tooling) plus uv.lock; the host runs `uv sync --locked`.
+          git archive --format=tar.gz --output "dist/rosterchief-${TAG}-backend.tar.gz" "$TAG" -- . ':(exclude)frontend' ':(exclude)deploy' ':(exclude).github'
+          # Frontends: built output, package files and production node_modules only.
+          files=()
+          for app in management controlpanel; do files+=("frontend/$app/build" "frontend/$app/package.json" "frontend/$app/node_modules"); done
+          tar -czf "dist/rosterchief-${TAG}-frontend.tar.gz" "${files[@]}"
+          # Host scripts, units and Caddyfiles: installed on the server with every release.
+          tar -czf "dist/rosterchief-${TAG}-host.tar.gz" -C deploy host
+          (cd dist && sha256sum rosterchief-*.tar.gz > SHA256SUMS && cat SHA256SUMS)
+
+      - name: Publish the release
+        if: steps.tag.outputs.name != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.name }}
+        run: gh release create "$TAG" dist/* --verify-tag --title "$TAG" --generate-notes
