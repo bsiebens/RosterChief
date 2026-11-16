@@ -382,3 +382,9 @@ pyrightconfig.json
 
 # Private uploads (member photos, ...): never served directly, only through authenticated views
 private_media/
+
+# Deployment: real environment files hold hosts and secrets; only the examples are tracked.
+deploy/environments/*.env
+deploy/environments/*.secrets
+!deploy/environments/*.example
+!deploy/lib/

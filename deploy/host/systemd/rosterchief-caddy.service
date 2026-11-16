@@ -7,6 +7,7 @@ After=network-online.target
 User=caddy
 Group=caddy
 EnvironmentFile=/etc/rosterchief/site.env
+EnvironmentFile=-/etc/rosterchief/caddy.env
 Environment=XDG_DATA_HOME=/var/lib/caddy/data XDG_CONFIG_HOME=/var/lib/caddy/config
 ExecStartPre=/usr/local/bin/caddy validate --config /etc/rosterchief/Caddyfile --adapter caddyfile
 ExecStart=/usr/local/bin/caddy run --config /etc/rosterchief/Caddyfile --adapter caddyfile

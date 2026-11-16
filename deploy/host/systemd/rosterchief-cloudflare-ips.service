@@ -1,0 +1,13 @@
+[Unit]
+Description=Refresh the Cloudflare IP ranges Caddy trusts for CF-Connecting-IP
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/rosterchief-cloudflare-ips refresh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/etc/rosterchief
