@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2154
+
 # Rehearses cutover.sh and rollback.sh end to end on throwaway repositories (a fake "GitHub" bare repo, an old codebase with a gitflow
 # layout and tags, and a new codebase with unrelated history). Touches nothing outside a temporary directory. Run: bash deploy/cutover/selftest.sh
 set -euo pipefail
@@ -109,6 +111,22 @@ git -C "$pr" push -q origin main
 if bash "$here/cutover.sh" finish --out "$out" --yes > "$tmp/last.log" 2>&1; then fail "finish accepted a squash merge"; fi
 grep -q "squashed or rebased" "$tmp/last.log" || fail "finish refused for the wrong reason: $(tail -1 "$tmp/last.log")"
 ok "finish refuses a squash merge and explains why"
+
+echo "Scenario 2b: a relative --new path (as in --new .) means the new checkout, not the working clone"
+github=$tmp/github2b.git
+fresh_github "$github"
+out=$tmp/out2b
+(cd "$new" && bash "$here/cutover.sh" prepare --old "$github" --new . --out "$out" > "$tmp/last.log" 2>&1) || { cat "$tmp/last.log" >&2; fail "prepare with --new . failed"; }
+# shellcheck disable=SC1091,SC2154
+. "$out/state.env"
+[[ $new_sha == "$(git -C "$new" rev-parse development)" ]] || fail "--new . fetched the wrong commit"
+[[ $(tree "$out/work" "$cutover") == "$(tree "$new" development)" ]] || fail "--new . did not produce the new tree"
+ok "relative path resolved to the new checkout"
+
+echo "Scenario 2c: pointing --new at the old repository itself is refused"
+if bash "$here/cutover.sh" prepare --old "$github" --new "$old" --new-branch development --out "$tmp/out2c" > "$tmp/last.log" 2>&1; then fail "prepare accepted the old codebase as the new one"; fi
+grep -q "already part of" "$tmp/last.log" || fail "refused for the wrong reason: $(tail -1 "$tmp/last.log")"
+ok "refused"
 
 echo "Scenario 3: prepare refuses uncommitted work in the new codebase"
 echo dirty >> "$new/manage.py"

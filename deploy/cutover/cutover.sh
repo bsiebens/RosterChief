@@ -84,6 +84,7 @@ require_new() {
     [[ -n $new ]] || usage
     git -C "$new" rev-parse --git-dir > /dev/null 2>&1 || die "--new is not a git checkout: $new"
     git -C "$new" rev-parse --verify --quiet "refs/heads/$new_branch" > /dev/null || die "Branch $new_branch does not exist in $new."
+    new=$(cd "$new" && pwd -P)  # absolute: it becomes a remote of a clone elsewhere, where a relative path would mean something else
 }
 
 # ------------------------------------------------------------------------------------------------- shared
@@ -91,7 +92,7 @@ require_new() {
 graft() {
     local name=$1 base=$2 parent=$3 tree=$4 message=$5
     git -C "$work" checkout -q --no-track -B "$name" "$base"
-    git -C "$work" merge -q --allow-unrelated-histories -s ours --no-commit "$parent" > /dev/null
+    git -C "$work" merge -q --allow-unrelated-histories -s ours --no-commit "$parent" > /dev/null 2>&1
     git -C "$work" read-tree --reset -u "$tree"
     git -C "$work" commit -q -m "$message"
     [[ $(git -C "$work" rev-parse "HEAD^{tree}") == "$(git -C "$work" rev-parse "$tree^{tree}")" ]] || die "$name: the tree is not the new code's tree."
@@ -141,8 +142,15 @@ prepare() {
     git -C "$work" remote add v2 "$new"
     git -C "$work" fetch -q --no-tags v2 "+refs/heads/$new_branch:refs/remotes/v2/$new_branch"
     new_sha=$(git -C "$work" rev-parse "refs/remotes/v2/$new_branch")
-    git -C "$work" branch "legacy/$main" "origin/$main"
-    git -C "$work" branch "legacy/$dev" "origin/$dev"
+    [[ $new_sha == "$(git -C "$new" rev-parse "refs/heads/$new_branch")" ]] || die "Fetched the wrong commit for the new codebase ($new_sha)."
+    for old_branch in "$main" "$dev"; do
+        if git -C "$work" merge-base --is-ancestor "$new_sha" "origin/$old_branch" || [[ $(git -C "$work" rev-parse "$new_sha^{tree}") == "$(git -C "$work" rev-parse "origin/$old_branch^{tree}")" ]]; then
+            die "The new codebase's $new_branch is already part of (or identical to) the old repository's $old_branch. Is --new the right checkout?"
+        fi
+    done
+    echo "  new codebase: $new_branch at $new_sha ($(git -C "$work" rev-list --count "$new_sha") commits)"
+    git -C "$work" branch --no-track "legacy/$main" "origin/$main"
+    git -C "$work" branch --no-track "legacy/$dev" "origin/$dev"
     git -C "$work" tag -a "legacy-final-$main" -m "Last state of $main before the new codebase replaced it" "origin/$main"
     git -C "$work" tag -a "legacy-final-$dev" -m "Last state of $dev before the new codebase replaced it" "origin/$dev"
     graft "$cutover" "origin/$main" "refs/remotes/v2/$new_branch" "refs/remotes/v2/$new_branch" "Replace the codebase with the new RosterChief
