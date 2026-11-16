@@ -6,7 +6,7 @@ import { api } from '#lib/management-api.ts';
 import { grantLoginFor } from '#lib/members/form-server.ts';
 import { addPersonToFamily, familyCall } from '#lib/families/server.ts';
 import type { FamilyDetail, GuardianContact, MemberDetail, Season, ShellMe } from '#lib/members/detail-types.ts';
-import type { Officiating, OfficiatingOptions } from '#lib/members/eligibility.ts';
+import type { CopySources, Officiating, OfficiatingOptions } from '#lib/members/eligibility.ts';
 import type { ChecklistItem, EvaluationOut } from '#lib/evaluations.ts';
 import { requirementActions } from '#lib/requirements-server.ts';
 import type { Checklist } from '#lib/requirements.ts';
@@ -52,10 +52,20 @@ export const load: PageServerLoad = async ({ params, fetch, parent }) => {
 	const hasOfficiating = !!me?.features?.includes('referee_officials');
 	let officiating: Officiating = { referee: null, official: null };
 	let officiatingOptions: OfficiatingOptions = { referee_levels: [], official_levels: [], teams: [] };
+	const copySources: CopySources = { referee: [], official: [] };
 	if (hasOfficiating) {
 		const [o, opts] = await Promise.all([api<Officiating>('GET', `/members/${params.id}/officiating`, { f: fetch }), api<OfficiatingOptions>('GET', '/members/officiating/options', { f: fetch })]);
 		if (o.ok && o.data) officiating = o.data;
 		if (opts.ok && opts.data) officiatingOptions = opts.data;
+		// Other referees and officials, so a profile can be set up by copying theirs (level and exclusions). Admins only: they are the ones who can edit.
+		if (me?.can_manage_members) {
+			type Peer = { member_id: string; first_name: string; last_name: string; kind: 'referee' | 'official'; level_id: string | null; level_name: string | null; excluded_team_ids?: string[] };
+			const people = await api<Peer[]>('GET', '/officiating/people', { f: fetch });
+			for (const p of people.ok ? (people.data ?? []) : []) {
+				if (p.member_id === params.id) continue;
+				copySources[p.kind].push({ member_id: p.member_id, name: `${p.first_name} ${p.last_name}`.trim(), level_id: p.level_id, level_name: p.level_name, excluded_team_ids: p.excluded_team_ids ?? [] });
+			}
+		}
 	}
 
 	// Evaluations only for someone with the execute permission; without it nothing is requested (the API would refuse it anyway).
@@ -73,7 +83,7 @@ export const load: PageServerLoad = async ({ params, fetch, parent }) => {
 	}
 
 	const attendance = attendanceRes.ok ? (attendanceRes.data ?? null) : null;
-	return { member, seasons: seasons.data ?? [], attendance, checklist, evaluations, checklists, evaluationsError, gameStats, stats, families, guardians, isAdmin: !!me?.can_manage_members, hasOfficiating, officiating, officiatingOptions };
+	return { member, seasons: seasons.data ?? [], attendance, checklist, evaluations, checklists, evaluationsError, gameStats, stats, families, guardians, isAdmin: !!me?.can_manage_members, hasOfficiating, officiating, officiatingOptions, copySources };
 };
 
 export const actions: Actions = {

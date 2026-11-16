@@ -98,3 +98,4 @@ class OfficiatingPersonOut(Schema):
     eligible_team_names: list[str]
     inherited_team_names: list[str] = []  # the subset of eligible teams that only come through an inherited level
     excluded_team_names: list[str]
+    excluded_team_ids: list[UUID] = []  # same teams as excluded_team_names; lets the UI copy a referee's profile to someone else

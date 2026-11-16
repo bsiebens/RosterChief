@@ -7,7 +7,7 @@
 	import Modal from '#lib/components/Modal.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { formatDate } from '#lib/members/detail-helpers.ts';
-	import type { EligibilityProfile, NamedRef } from '#lib/members/eligibility.ts';
+	import type { CopySource, EligibilityProfile, NamedRef } from '#lib/members/eligibility.ts';
 
 	/** Referee or official eligibility of a member: level, validity and the teams it qualifies for. Everyone reads it; only members.manage_members edits. Feature-gated by the page. */
 	let {
@@ -16,8 +16,9 @@
 		canEdit = false,
 		levels,
 		teams,
+		sources = [],
 		form
-	}: { kind: 'referee' | 'official'; profile: EligibilityProfile | null; levels: NamedRef[]; teams: NamedRef[]; canEdit?: boolean; form?: any } = $props();
+	}: { kind: 'referee' | 'official'; profile: EligibilityProfile | null; levels: NamedRef[]; teams: NamedRef[]; sources?: CopySource[]; canEdit?: boolean; form?: any } = $props();
 
 	const KindIcon = $derived(kindIcon[kind]);
 	let open = $state(false);
@@ -25,7 +26,24 @@
 	const mine = $derived(form?.eligibilityKind === kind);
 	const error = $derived(mine ? (form?.eligibilityError as string | undefined) : undefined);
 	const fields = $derived<Record<string, string>>(mine ? (form?.eligibilityFields ?? {}) : {});
-	const excluded = $derived(new Set((profile?.excluded_teams ?? []).map((x) => x.id)));
+	// The modal's level and exclusions are held here (not read from the DOM) so "Copy from" can fill them in.
+	let levelId = $state('');
+	let excludedIds = $state<string[]>([]);
+	let copyFrom = $state('');
+	const openModal = () => {
+		levelId = profile?.level?.id ?? '';
+		excludedIds = (profile?.excluded_teams ?? []).map((x) => x.id);
+		copyFrom = '';
+		open = true;
+	};
+	/** Copy another referee's or official's level and (for referees) exclusions; ids no longer offered here are dropped. */
+	function copyProfile(memberId: string) {
+		copyFrom = memberId;
+		const source = sources.find((x) => x.member_id === memberId);
+		if (!source) return;
+		levelId = source.level_id && levels.some((l) => l.id === source.level_id) ? source.level_id : '';
+		if (kind === 'referee') excludedIds = source.excluded_team_ids.filter((id) => teams.some((team) => team.id === id));
+	}
 	const run = () => {
 		busy = true;
 		return async ({ result, update }: { result: { type: string }; update: () => Promise<void> }) => {
@@ -42,9 +60,9 @@
 		{#if !canEdit}
 			<!-- read-only: members.manage_members is needed to change eligibility -->
 		{:else if profile}
-			<button class="btn btn-outline btn-sm gap-2" type="button" onclick={() => (open = true)}><Pencil size={16} /> {t('common.edit')}</button>
+			<button class="btn btn-outline btn-sm gap-2" type="button" onclick={openModal}><Pencil size={16} /> {t('common.edit')}</button>
 		{:else}
-			<button class="btn btn-outline btn-sm gap-2" type="button" onclick={() => (open = true)}><Plus size={16} /> {t('eligibility.setup')}</button>
+			<button class="btn btn-outline btn-sm gap-2" type="button" onclick={openModal}><Plus size={16} /> {t('eligibility.setup')}</button>
 		{/if}
 	</div>
 
@@ -90,9 +108,19 @@
 	<form method="POST" action="?/saveEligibility" class="grid gap-3" use:enhance={run}>
 		{#if error && !Object.keys(fields).length}<Alert kind="error" title={t('eligibility.failed')}>{error}</Alert>{/if}
 		<input type="hidden" name="kind" value={kind} />
+		{#if sources.length}
+			<div class="form-control w-full">
+				<label class="label" for="el-copy-{kind}"><span class="label-text">{t('eligibility.copy_from')}</span></label>
+				<select id="el-copy-{kind}" class="select select-bordered w-full" value={copyFrom} onchange={(e) => copyProfile(e.currentTarget.value)}>
+					<option value="">{t('eligibility.copy_pick')}</option>
+					{#each sources as source (source.member_id)}<option value={source.member_id}>{source.name} · {source.level_name ?? t('eligibility.copy_level_none')}</option>{/each}
+				</select>
+				<span class="mt-1 block text-xs text-muted">{t('eligibility.copy_help')}</span>
+			</div>
+		{/if}
 		<div class="form-control w-full">
 			<label class="label" for="el-level-{kind}"><span class="label-text">{t('eligibility.level')}</span></label>
-			<select id="el-level-{kind}" name="level_id" class="select select-bordered w-full {fields.level_id ? 'select-error' : ''}" value={profile?.level?.id ?? ''}>
+			<select id="el-level-{kind}" name="level_id" class="select select-bordered w-full {fields.level_id ? 'select-error' : ''}" bind:value={levelId}>
 				<option value="">{t('eligibility.no_level')}</option>
 				{#each levels as l (l.id)}<option value={l.id}>{l.name}</option>{/each}
 			</select>
@@ -106,7 +134,7 @@
 				<div class="grid max-h-44 grid-cols-1 gap-1 overflow-auto sm:grid-cols-2">
 					{#each teams as team (team.id)}
 						<label class="label cursor-pointer justify-start gap-2">
-							<input type="checkbox" class="checkbox checkbox-sm" name="excluded_team_ids" value={team.id} checked={excluded.has(team.id)} />
+							<input type="checkbox" class="checkbox checkbox-sm" name="excluded_team_ids" value={team.id} bind:group={excludedIds} />
 							<span class="label-text">{team.name}</span>
 						</label>
 					{/each}

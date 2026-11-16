@@ -291,6 +291,7 @@ class TeamSettingsApiTests(TestCase):
         ref = rows[1]
         self.assertEqual(ref["eligible_team_names"], ["U12", "U16"])
         self.assertEqual(ref["excluded_team_names"], ["U14"])
+        self.assertEqual(ref["excluded_team_ids"], [str(self.u14.pk)])
         self.assertEqual(ref["inherited_team_names"], ["U12"])  # U16 is the National level's own team; U12 comes from Regional
         self.assertEqual(rows[0]["inherited_team_names"], [])
         self.assertEqual((ref["level_name"], ref["is_valid"]), ("National", True))

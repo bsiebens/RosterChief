@@ -311,7 +311,8 @@ def officiating_people(actor, *, kind="all", q="", level=None, valid="all") -> l
                 continue
             if valid == "expired" and is_valid:
                 continue
-            excluded = sorted(t.name for t in p.excluded_teams.all()) if k == "referee" else []
+            excluded_teams = sorted(p.excluded_teams.all(), key=lambda t: t.name) if k == "referee" else []
+            excluded = [t.name for t in excluded_teams]
             if k == "referee":
                 ids = p.eligible_team_ids(level_teams(p.level) if p.level_id else None)
             else:
@@ -333,6 +334,7 @@ def officiating_people(actor, *, kind="all", q="", level=None, valid="all") -> l
                     "eligible_team_names": sorted(team_names[i] for i in ids if i in team_names),
                     "inherited_team_names": sorted(team_names[i] for i in inherited if i in team_names),
                     "excluded_team_names": excluded,
+                    "excluded_team_ids": [t.pk for t in excluded_teams],
                 }
             )
     rows.sort(key=lambda r: (r["last_name"].lower(), r["first_name"].lower(), r["kind"]))

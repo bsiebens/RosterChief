@@ -107,8 +107,8 @@
 				<MembershipCard {member} seasons={data.seasons} isAdmin={data.isAdmin} {form} />
 				{#if data.hasOfficiating}
 					<div class="grid gap-4 md:grid-cols-2">
-						<EligibilityCard kind="referee" profile={data.officiating.referee} levels={data.officiatingOptions.referee_levels} teams={data.officiatingOptions.teams} {form} canEdit={data.isAdmin} />
-						<EligibilityCard kind="official" profile={data.officiating.official} levels={data.officiatingOptions.official_levels} teams={data.officiatingOptions.teams} {form} canEdit={data.isAdmin} />
+						<EligibilityCard kind="referee" profile={data.officiating.referee} levels={data.officiatingOptions.referee_levels} teams={data.officiatingOptions.teams} sources={data.copySources.referee} {form} canEdit={data.isAdmin} />
+						<EligibilityCard kind="official" profile={data.officiating.official} levels={data.officiatingOptions.official_levels} teams={data.officiatingOptions.teams} sources={data.copySources.official} {form} canEdit={data.isAdmin} />
 					</div>
 				{/if}
 			</div>

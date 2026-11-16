@@ -98,37 +98,41 @@
 			<div class="card overflow-x-auto">
 				<table class="table">
 					<thead>
-						<tr><th>{t('officials.col.name')}</th><th class="hidden md:table-cell">{t('officials.col.kind')}</th><th>{t('officials.col.level')}</th><th>{t('officials.col.valid_until')}</th><th class="hidden lg:table-cell">{t('officials.col.teams')}</th></tr>
+						<tr><th class="whitespace-nowrap">{t('officials.col.name')}</th><th class="hidden md:table-cell">{t('officials.col.kind')}</th><th class="whitespace-nowrap">{t('officials.col.level')}</th><th class="whitespace-nowrap">{t('officials.col.valid_until')}</th><th class="hidden lg:table-cell">{t('officials.col.teams')}</th></tr>
 					</thead>
 					<tbody>
 						{#each data.people as p (p.member_id + p.kind)}
 						{@const KindIcon = kindIcon[p.kind]}
 							<tr class="hover:bg-paper">
-								<td>
+								<td class="whitespace-nowrap">
 									<a class="group flex items-center gap-3 font-semibold" href="/members/{p.member_id}">
 										<Avatar first_name={p.first_name} last_name={p.last_name} photoUrl={p.photo_url} />
 										<span class="group-hover:underline">{p.first_name} {p.last_name}</span>
 									</a>
 								</td>
 								<td class="hidden md:table-cell"><span class="badge badge-sm badge-ghost gap-1"><KindIcon size={11} aria-hidden="true" /> {t(`officials.kind_pill.${p.kind}`)}</span></td>
-								<td>{p.level_name ?? t('common.none')}</td>
-								<td>
-									<div class="flex flex-wrap items-center gap-2">
+								<td class="whitespace-nowrap">{p.level_name ?? t('common.none')}</td>
+								<td class="whitespace-nowrap">
+									<div class="flex items-center gap-2">
 										<span class="font-mono text-xs text-muted">{p.valid_until ?? t('common.none')}</span>
 										<span class="badge badge-sm {p.is_valid ? 'badge-success' : 'badge-error'}">{p.is_valid ? t('officials.status.valid') : t('officials.status.expired')}</span>
 									</div>
 								</td>
 								<td class="hidden lg:table-cell">
-									<div class="flex flex-wrap items-center gap-1">
-										{#each p.eligible_team_names as n (n)}
-											{#if p.inherited_team_names?.includes(n)}<span class="badge badge-sm border-dashed border-club bg-club/10 text-club-dark" title={t('officials.inherited')}>{n}</span>{:else}<span class="badge badge-sm badge-outline">{n}</span>{/if}
-										{/each}
-										{#if p.kind === 'referee' && p.excluded_team_names.length}
+									{#if p.eligible_team_names.length || !(p.kind === 'referee' && p.excluded_team_names.length)}
+										<div class="flex flex-wrap items-center gap-1">
+											{#each p.eligible_team_names as n (n)}
+												{#if p.inherited_team_names?.includes(n)}<span class="badge badge-sm border-dashed border-club bg-club/10 text-club-dark" title={t('officials.inherited')}>{n}</span>{:else}<span class="badge badge-sm badge-outline">{n}</span>{/if}
+											{/each}
+											{#if !p.eligible_team_names.length}<span class="text-sm text-muted">—</span>{/if}
+										</div>
+									{/if}
+									{#if p.kind === 'referee' && p.excluded_team_names.length}
+										<div class="flex flex-wrap items-center gap-1 {p.eligible_team_names.length ? 'mt-1.5' : ''}">
 											<span class="text-xs text-muted">{t('officials.excluded')}</span>
 											{#each p.excluded_team_names as n (n)}<span class="badge badge-sm badge-outline border-error text-error">{n}</span>{/each}
-										{/if}
-										{#if !p.eligible_team_names.length && !(p.kind === 'referee' && p.excluded_team_names.length)}<span class="text-sm text-muted">—</span>{/if}
-									</div>
+										</div>
+									{/if}
 								</td>
 							</tr>
 						{/each}

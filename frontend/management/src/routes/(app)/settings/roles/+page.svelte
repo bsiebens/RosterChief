@@ -72,7 +72,7 @@
 				<thead><tr><th>{t('roles.col.role')}</th><th class="text-right">{t('roles.col.permissions')}</th><th class="text-right">{t('roles.col.people')}</th><th><span class="sr-only">{t('roles.col.actions')}</span></th></tr></thead>
 				<tbody>
 					{#each data.roles as r (r.id)}
-						<tr class="hover:bg-paper">
+						<tr class="cursor-pointer hover:bg-paper" onclick={(e) => { if (!(e.target as HTMLElement).closest('a, button')) navigate(roleHref(r.id)); }}>
 							<td>
 								<a class="link font-semibold" href={roleHref(r.id)}>{r.name}</a>
 								{#if r.is_system}<span class="badge badge-sm ml-2 gap-1"><Lock size={10} aria-hidden="true" /> {t('roles.system')}</span>{/if}
@@ -82,8 +82,8 @@
 							<td class="text-right font-mono text-sm">{r.member_count}</td>
 							<td class="text-right whitespace-nowrap">
 								<div class="flex justify-end gap-1">
+									{#if !r.is_system}<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('roles.delete_named', { name: r.name })} onclick={() => ((deleting = r), (deleteOpen = true))}><Trash2 size={13} /></button>{:else}<span class="inline-block w-6" aria-hidden="true"></span>{/if}
 									<a class="btn btn-ghost btn-xs btn-square text-muted" href={roleHref(r.id)} aria-label={t('roles.edit_named', { name: r.name })}><ChevronRight size={16} /></a>
-									{#if !r.is_system}<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('roles.delete_named', { name: r.name })} onclick={() => ((deleting = r), (deleteOpen = true))}><Trash2 size={13} /></button>{/if}
 								</div>
 							</td>
 						</tr>

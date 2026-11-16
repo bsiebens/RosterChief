@@ -358,11 +358,13 @@
                             <div class="relative border-l border-line {isToday ? 'bg-club/[0.03]' : ''}" style="height: {hours.length * HOUR_PX}px; background-image: repeating-linear-gradient(to bottom, transparent 0, transparent {HOUR_PX - 1}px, var(--color-line, #e5e7eb) {HOUR_PX - 1}px, var(--color-line, #e5e7eb) {HOUR_PX}px)" aria-label={formatLongDay(d)}>
                                 {#each layout(d) as sg (sg.e.id)}
                                     {@const style = kindStyle(sg.e.kind)}
+                                    {@const score = scoreText(sg.e)}
                                     <a href={eventHref(sg.e.id)}
                                        class="absolute overflow-hidden rounded border border-l-4 border-line bg-white px-1.5 py-1 text-xs shadow-sm hover:z-10 hover:shadow-md focus:z-10 {style.bar} {sg.e.cancelled ? 'bg-subhead opacity-70' : ''}"
                                        style="top: {sg.top}px; height: {sg.height - 2}px; left: calc({(sg.lane / sg.lanes) * 100}% + 2px); width: calc({100 / sg.lanes}% - 4px)"
                                        title="{formatTime(sg.e.start)} {sg.e.title}">
-                                        <span class="block font-mono text-[10px] text-muted">{formatTime(sg.e.start)}{#if sg.e.end} – {formatTime(sg.e.end)}{/if}{#if scoreText(sg.e)} <span class="ml-1 rounded border px-1 font-bold {resultStyle(sg.e)}">{scoreText(sg.e)}</span>{/if}</span>
+                                        <span class="block truncate whitespace-nowrap font-mono text-[10px] text-muted">{formatTime(sg.e.start)}{#if sg.e.end && sg.lanes === 1} – {formatTime(sg.e.end)}{/if}{#if score && sg.height < 56} <span class="ml-1 rounded border px-1 font-bold {resultStyle(sg.e)}">{score}</span>{/if}</span>
+                                        {#if score && sg.height >= 56}<span class="mb-0.5 block"><span class="inline-block whitespace-nowrap rounded border px-1 font-mono text-[11px] font-bold leading-tight {resultStyle(sg.e)}">{score}</span></span>{/if}
                                         <span class="block truncate font-semibold text-ink {sg.e.cancelled ? 'line-through' : ''}">{sg.e.title}</span>
                                         {#if sg.height > 64 && sg.e.location}<span class="block truncate text-[11px] text-muted">{sg.e.location.name}</span>{/if}
                                     </a>

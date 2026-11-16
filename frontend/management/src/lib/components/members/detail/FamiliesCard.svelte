@@ -67,7 +67,7 @@
 				<tbody>
 					{#each detail?.members ?? [] as m (m.member_id)}
 						<tr>
-							<td><a class="link {m.member_id === member.id ? 'font-bold' : 'font-semibold'}" href="/members/{m.member_id}">{m.last_name}, {m.first_name}</a></td>
+							<td class="whitespace-nowrap"><a class="link {m.member_id === member.id ? 'font-bold' : 'font-semibold'}" href="/members/{m.member_id}" title="{m.first_name} {m.last_name}">{m.first_name}</a></td>
 							<td class="text-sm text-muted">{m.email || '—'}</td>
 							<td><span class="badge badge-sm badge-outline">{familyRoleLabel(m.role)}</span></td>
 							{#if isAdmin}
