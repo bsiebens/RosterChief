@@ -1,0 +1,21 @@
+title = "RosterChief secret scanning"
+
+# Start from gitleaks' built-in rules, then add only what is needed for this repository.
+[extend]
+useDefault = true
+
+# False positives go here, as narrowly as possible (a path, or a regex for one known value). A real secret is never allowlisted:
+# it is revoked and rotated, because removing it from the files does not remove it from the history. Individual findings can also be
+# listed by fingerprint in .gitleaksignore.
+[[allowlists]]
+description = "Example environment files contain obvious placeholders, never real values"
+paths = [
+  '''deploy/environments/.*\.example$''',
+  '''deploy/host/app\.env\.example$''',
+]
+
+[[allowlists]]
+description = "A made-up API key in a test fixture for the competition page importer"
+condition = "AND"
+paths = ['''events/tests_imports\.py$''']
+regexes = ['''abc123def456''']

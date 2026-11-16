@@ -1,0 +1,30 @@
+{% autoescape off %}{{ t.hello }}
+{% if on_behalf_of %}{{ t.on_behalf }}
+{% endif %}
+{{ t.intro }}
+
+{% for line in lines %}- {{ line.description }} x {{ line.quantity }}: {{ line.line_total }}{% if line.beneficiary %} ({{ t.for }} {{ line.beneficiary }}){% endif %}{% if line.personalization %} [{{ line.personalization }}]{% endif %}
+{% endfor %}{% for d in discounts %}- {{ t.discount }}{% if d.description %}: {{ d.description }}{% endif %}: -{{ d.amount }}
+{% endfor %}
+{{ t.total }}: {{ total }}
+{% if show_paid %}{{ t.paid }}: {{ paid }}
+{% endif %}{% if is_paid %}{{ t.paid_in_full }}
+{% else %}{{ t.due }}: {{ due }}
+{% endif %}{% if message %}
+{{ message }}
+{% endif %}{% if how_to_pay %}
+{{ t.how_to_pay }}:
+{{ how_to_pay }}
+{% endif %}{% if pickup_instructions %}
+{{ t.next_title }}:
+{{ pickup_instructions }}
+{% elif t.next %}
+{{ t.next_title }}:
+{{ t.next }}
+{% endif %}{% if has_invoice %}
+{{ t.invoice }}
+{% endif %}
+--
+{{ club_name }}
+{{ t.footer }}
+{% endautoescape %}

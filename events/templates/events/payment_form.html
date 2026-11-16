@@ -1,0 +1,88 @@
+{% load l10n %}<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+<meta charset="UTF-8">
+<title>{{ L.title }}</title>
+<style>
+  @page { size: A4; margin: 20mm 18mm; @bottom-center { content: "{{ footer }} - " counter(page) " / " counter(pages); font-size: 8pt; color: #8a8a8a; } }
+  :root { --accent: {{ accent_color }}; --card: {{ info_card_color }}; --ink: #16181d; --muted: #6b7280; --line: #d8dae0; }
+  * { box-sizing: border-box; }
+  body { font-family: sans-serif; font-size: 10pt; color: var(--ink); line-height: 1.45; margin: 0; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 5mm; border-bottom: 2.5pt solid var(--accent); margin-bottom: 8mm; }
+  .brand { display: flex; align-items: center; gap: 4mm; }
+  .brand img { height: 16mm; width: auto; }
+  .club-name { font-size: 16pt; font-weight: 700; color: var(--accent); margin: 0 0 1mm; }
+  .club-address { font-size: 9pt; color: var(--muted); }
+  .doc-title { text-align: right; }
+  .kicker { font-size: 8pt; letter-spacing: 1pt; text-transform: uppercase; color: var(--muted); }
+  .title { font-size: 14pt; font-weight: 700; margin-top: 1mm; }
+  .info-card { background: var(--card); border-radius: 3mm; padding: 5mm 6mm; margin-bottom: 7mm; }
+  .grid { display: flex; flex-wrap: wrap; gap: 4mm 10mm; }
+  .item { min-width: 45mm; }
+  .item.wide { flex: 1 1 100%; min-width: 100%; }
+  .label { font-size: 7.5pt; letter-spacing: .5pt; text-transform: uppercase; color: var(--muted); margin-bottom: .5mm; }
+  .value { font-size: 10.5pt; font-weight: 600; }
+  .note { font-size: 9.5pt; color: var(--muted); margin: 0 0 7mm; }
+  .section { font-size: 8pt; letter-spacing: .5pt; text-transform: uppercase; color: var(--accent); font-weight: 700; margin: 0 0 2mm; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 9mm; }
+  th { text-align: left; font-size: 7.5pt; letter-spacing: .5pt; text-transform: uppercase; color: var(--muted); border-bottom: 1pt solid var(--line); padding: 2mm 2mm 1.5mm 0; }
+  td { padding: 2.5mm 2mm 2.5mm 0; border-bottom: .75pt solid var(--line); vertical-align: top; }
+  .amount { text-align: right; }
+  tr.empty td { color: var(--muted); font-style: italic; }
+  tr.total td { border-bottom: none; border-top: 1.5pt solid var(--accent); font-weight: 700; padding-top: 3mm; }
+  .sub { color: var(--muted); font-size: 8.5pt; }
+  .signatures { display: flex; flex-wrap: wrap; gap: 6mm 5mm; margin-top: 4mm; }
+  .sign-box { flex: 1 1 40mm; min-width: 40mm; }
+  .sign-box .label { margin-bottom: 2mm; }
+  .sign-box .box { border: .75pt solid var(--line); border-radius: 2mm; min-height: 24mm; }
+  .collected { margin-top: 8mm; font-size: 9.5pt; }
+  .fill { display: inline-block; border-bottom: .75pt solid var(--line); min-width: 90mm; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="brand">
+    {% if logo %}<img src="{{ logo }}" alt="">{% endif %}
+    <div>
+      <div class="club-name">{{ official_name }}</div>
+      {% if address %}<div class="club-address">{{ address.address }}</div><div class="club-address">{{ address.zip_code }} {{ address.city }}</div>{% endif %}
+    </div>
+  </div>
+  <div class="doc-title"><div class="kicker">{{ L.title }}</div><div class="title">{{ game.date|date:"j F Y" }}</div></div>
+</div>
+
+<div class="info-card"><div class="grid">
+  <div class="item wide"><div class="label">{{ L.game }}</div><div class="value">{{ game.teams }}{% if game.opponent %} {{ L.vs }} {{ game.opponent }}{% endif %}{% if game.external_id %} <span style="color:var(--muted);font-weight:400">({{ L.id }}: {{ game.external_id }})</span>{% endif %}</div></div>
+  <div class="item"><div class="label">{{ L.date }}</div><div class="value">{{ game.date|date:"j F Y" }}</div></div>
+  <div class="item"><div class="label">{{ L.time }}</div><div class="value">{{ game.time }}</div></div>
+  <div class="item wide"><div class="label">{{ L.people }}</div><div class="value">{% for r in rows %}{{ r.name }}{% if r.type_name %} ({{ r.type_name }}){% endif %}{% if not forloop.last %}, {% endif %}{% empty %}-{% endfor %}</div></div>
+</div></div>
+
+<p class="note">{{ pays }}</p>
+
+<div class="section">{{ L.section }}</div>
+<table>
+  <thead><tr><th>{{ L.person }}</th><th class="amount">{{ L.fee }}</th><th class="amount">{{ L.km }}</th><th class="amount">{{ L.rate }}</th><th class="amount">{{ L.total }}</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td>{{ r.name }}{% if r.type_name %}<br><span class="sub">{{ r.type_name }}</span>{% endif %}</td>
+      <td class="amount">{% if r.no_fee %}{{ L.no_fee }}{% else %}&euro;{{ r.fee|floatformat:2 }}{% endif %}</td>
+      <td class="amount">{% if r.km and not r.no_fee %}{{ r.km|floatformat:"-1" }} km{% else %}-{% endif %}</td>
+      <td class="amount">{% if r.km and not r.no_fee %}&euro;{{ r.km_rate|floatformat:"-4" }}{% else %}-{% endif %}</td>
+      <td class="amount">&euro;{{ r.total|floatformat:2 }}</td>
+    </tr>
+  {% empty %}
+    <tr class="empty"><td colspan="5">{{ L.none }}</td></tr>
+  {% endfor %}
+  {% if rows %}<tr class="total"><td colspan="4">{{ L.total_pay }}</td><td class="amount">&euro;{{ grand_total|floatformat:2 }}</td></tr>{% endif %}
+  </tbody>
+</table>
+
+<div class="signatures">
+  {% for r in rows %}<div class="sign-box"><div class="label">{{ r.name }}{% if r.type_name %} ({{ r.type_name }}){% endif %}</div><div class="box"></div></div>
+  {% empty %}<div class="sign-box"><div class="label">{{ L.sign }}</div><div class="box"></div></div>{% endfor %}
+</div>
+<div class="collected">{{ L.collected }}: <span class="fill">&nbsp;</span></div>
+</body>
+</html>

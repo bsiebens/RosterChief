@@ -1,1220 +1,195 @@
-import datetime
-from datetime import timedelta
+"""Form builder services: audience, status, submission validation, reporting and CSV."""
 
-from django import forms
-from django.contrib.auth import get_user_model
-from django.core.cache import cache
-from django.core.exceptions import ValidationError
+import datetime
+import shutil
+import tempfile
+
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.core.management import call_command
-from django.db import IntegrityError
-from django.db.models import ProtectedError
 from django.test import TestCase, override_settings
-from django.urls import reverse
 from django.utils import timezone
 
-from club.models import Club, ClubMembership, Season
-from members.models import Group, GroupMembership, Member
-from notifications.models import Notification, NotificationCategory
-from teams.models import Team, TeamMembership
+from formbuilder.models import Answer, Field, Form, FormSend
+from formbuilder.services import audience, reporting
+from formbuilder.services.submission import FormSubmissionError, submit_form
+from members.models import Group, GroupMembership
+from news.tests import NewsClubMixin
 
-from .models import Answer, Field, Form, FormSend, Submission
-from .services import (
-    FormSubmissionError,
-    addressed_to,
-    build_form,
-    build_form_class,
-    effective_members,
-    field_choices,
-    form_report,
-    form_status_rows_for,
-    is_send_open,
-    members_not_yet_submitted,
-    resolve_season,
-    submit_form,
-)
-from .services.notifications import notify_form_send
+T = Field.FieldType
+PRIVATE = tempfile.mkdtemp()
 
 
-class FormbuilderTestBase(TestCase):
-    # One two-field form with one open, club-wide-reaching send, shared by
-    # every test here (invited_members carries self.member into the audience
-    # directly, without needing a Season/ClubMembership fixture in every
-    # test -- see FormSendAudienceTests for the team/group/club_wide
-    # resolution itself). Tests that reconfigure the form/send (closing the
-    # window, flipping login_required) mutate a per-test copy handed out by
-    # setUpTestData, and their saves roll back with the transaction.
+def names(members):
+    return sorted(m.first_name for m in members)
+
+
+@override_settings(PRIVATE_MEDIA_ROOT=PRIVATE)
+class FormbuilderServiceTests(NewsClubMixin, TestCase):
     @classmethod
-    def setUpTestData(cls):
-        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        cls.form = Form.objects.create(club=cls.club, title="Sign-up", slug="sign-up")
-        cls.name = Field.objects.create(form=cls.form, key="name", label="Name", field_type=Field.FieldType.TEXT, required=True, order=1)
-        cls.size = Field.objects.create(form=cls.form, key="size", label="Shirt size", field_type=Field.FieldType.CHOICE, required=False, order=2, options=["S", "M", "L"])
-        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
-        cls.send = FormSend.objects.create(club=cls.club, form=cls.form)
-        cls.send.invited_members.add(cls.member)
-
-    def fresh_send(self):
-        """A brand-new FormSend instance for ``self.send``'s pk -- used after
-        mutating ``self.form``/``self.send`` mid-test, so the service layer
-        can't see a stale cached ``.form`` relation from before the change."""
-        return FormSend.objects.get(pk=self.send.pk)
-
-
-class ModelTests(FormbuilderTestBase):
-    def test_str_methods(self):
-        submission = Submission.objects.create(send=self.send, member=self.member)
-        answer = Answer.objects.create(submission=submission, field=self.name, value="Jane")
-
-        self.assertEqual(str(self.form), "Sign-up")
-        self.assertEqual(str(self.name), "Name")
-        self.assertEqual(str(submission), "Sign-up - Jane Doe")
-        self.assertEqual(str(answer), "Sign-up - Jane Doe - Name")
-
-    def test_slug_is_unique_per_club_not_globally(self):
-        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
-        Form.objects.create(club=other_club, title="Sign-up", slug="sign-up")
-
-        with self.assertRaises(IntegrityError):
-            Form.objects.create(club=self.club, title="Another", slug="sign-up")
-
-    def test_key_is_unique_per_form_not_globally(self):
-        other_form = Form.objects.create(club=self.club, title="Other", slug="other")
-        Field.objects.create(form=other_form, key="name", label="Name", order=1)
-
-        with self.assertRaises(IntegrityError):
-            Field.objects.create(form=self.form, key="name", label="Duplicate", order=9)
-
-    def test_answer_is_unique_per_field_per_submission(self):
-        submission = Submission.objects.create(send=self.send, member=self.member)
-        Answer.objects.create(submission=submission, field=self.name, value="Jane")
-
-        with self.assertRaises(IntegrityError):
-            Answer.objects.create(submission=submission, field=self.name, value="Again")
-
-    def test_deleting_form_cascades_through_sends_to_submissions(self):
-        Submission.objects.create(send=self.send, member=self.member)
-
-        self.form.delete()
-
-        self.assertFalse(Field.objects.exists())
-        self.assertFalse(FormSend.objects.exists())
-        self.assertFalse(Submission.objects.exists())
-
-    def test_deleting_a_send_cascades_to_its_submissions_only(self):
-        other_send = FormSend.objects.create(club=self.club, form=self.form)
-        Submission.objects.create(send=self.send, member=self.member)
-        kept = Submission.objects.create(send=other_send, member=self.member)
-
-        self.send.delete()
-
-        self.assertEqual(list(Submission.objects.all()), [kept])
-
-    def test_field_referenced_by_answer_is_protected(self):
-        submission = Submission.objects.create(send=self.send, member=self.member)
-        Answer.objects.create(submission=submission, field=self.name, value="Jane")
-
-        with self.assertRaises(ProtectedError):
-            self.name.delete()
-
-    def test_send_rejects_a_form_from_another_club(self):
-        other_club = Club.objects.create(name="Rival FC", slug="rival-fc-2")
-        other_form = Form.objects.create(club=other_club, title="Other", slug="other")
-        send = FormSend(club=self.club, form=other_form)
-
-        with self.assertRaises(ValidationError) as ctx:
-            send.full_clean()
-        self.assertIn("form", ctx.exception.error_dict)
-
-    def test_is_public_defaults_to_false(self):
-        self.assertFalse(self.send.is_public)
-
-    def test_public_token_is_generated_and_unique(self):
-        other_send = FormSend.objects.create(club=self.club, form=self.form)
-
-        self.assertTrue(self.send.public_token)
-        self.assertTrue(other_send.public_token)
-        self.assertNotEqual(self.send.public_token, other_send.public_token)
-
-
-class FormSlugTests(FormbuilderTestBase):
-    def test_slug_auto_populated_from_title(self):
-        form = Form.objects.create(club=self.club, title="Registration Form")
-
-        self.assertEqual(form.slug, "registration-form")
-
-    def test_explicit_slug_is_preserved(self):
-        form = Form.objects.create(club=self.club, title="Registration", slug="reg")
-
-        self.assertEqual(form.slug, "reg")
-
-    def test_slug_is_unique_per_club_with_suffix(self):
-        first = Form.objects.create(club=self.club, title="Registration")
-        second = Form.objects.create(club=self.club, title="Registration")
-
-        self.assertEqual(first.slug, "registration")
-        self.assertEqual(second.slug, "registration-2")
-
-
-class FieldKeyTests(FormbuilderTestBase):
-    def test_key_auto_populated_from_label(self):
-        field = Field.objects.create(form=self.form, label="First Name", order=5)
-
-        self.assertEqual(field.key, "first-name")
-
-    def test_explicit_key_is_preserved(self):
-        field = Field.objects.create(form=self.form, key="fn", label="First Name", order=5)
-
-        self.assertEqual(field.key, "fn")
-
-    def test_key_is_unique_per_form_with_suffix(self):
-        first = Field.objects.create(form=self.form, label="First Name", order=5)
-        second = Field.objects.create(form=self.form, label="First Name", order=6)
-
-        self.assertEqual(first.key, "first-name")
-        self.assertEqual(second.key, "first-name-2")
-
-    def test_same_key_allowed_in_a_different_form(self):
-        other_form = Form.objects.create(club=self.club, title="Other", slug="other")
-        here = Field.objects.create(form=self.form, label="First Name", order=5)
-        there = Field.objects.create(form=other_form, label="First Name", order=1)
-
-        self.assertEqual(here.key, there.key)
-
-
-class FieldChoicesTests(FormbuilderTestBase):
-    def test_string_options(self):
-        self.assertEqual(field_choices(self.size), [("S", "S"), ("M", "M"), ("L", "L")])
-
-    def test_dict_options(self):
-        field = Field.objects.create(form=self.form, key="plan", label="Plan", field_type=Field.FieldType.CHOICE, order=3, options=[{"value": "a", "label": "Gold"}, {"value": "b", "label": "Silver"}])
-
-        self.assertEqual(field_choices(field), [("a", "Gold"), ("b", "Silver")])
-
-    def test_no_options(self):
-        self.assertEqual(field_choices(self.name), [])
-
-
-class FormSendAudienceTests(FormbuilderTestBase):
-    """formbuilder.services.audience -- effective_members/members_not_yet_submitted/
-    resolve_season/form_status_rows_for/is_send_open. Same union/subtract
-    shape as events' own effective_members, verified independently here
-    rather than assumed."""
-
-    def make_season(self, **kwargs):
-        kwargs.setdefault("club", self.club)
-        kwargs.setdefault("start_date", timezone.localdate() - datetime.timedelta(days=30))
-        kwargs.setdefault("end_date", timezone.localdate() + datetime.timedelta(days=300))
-        return Season.objects.create(**kwargs)
-
-    def test_resolve_season_falls_back_to_current_season(self):
-        season = self.make_season()
-
-        self.assertEqual(resolve_season(self.send), season)
-
-    def test_resolve_season_prefers_an_explicit_season(self):
-        self.make_season()
-        other_season = self.make_season(start_date=timezone.localdate() + datetime.timedelta(days=400), end_date=timezone.localdate() + datetime.timedelta(days=700))
-        self.send.season = other_season
-        self.send.save(update_fields=["season"])
-
-        self.assertEqual(resolve_season(self.fresh_send()), other_season)
-
-    def test_effective_members_includes_team_rosters_for_the_sends_season(self):
-        season = self.make_season()
-        team = Team.objects.create(club=self.club, name="U16")
-        rostered = Member.objects.create(first_name="Alex", last_name="Roe")
-        TeamMembership.objects.create(team=team, member=rostered, season=season)
-        send = FormSend.objects.create(club=self.club, form=self.form)
-        send.teams.add(team)
-
-        self.assertIn(rostered, effective_members(send))
-
-    def test_effective_members_includes_group_members_regardless_of_season(self):
-        group = Group.objects.create(club=self.club, name="Committee")
-        grouped = Member.objects.create(first_name="Sam", last_name="Lane")
-        GroupMembership.objects.create(group=group, member=grouped)
-        send = FormSend.objects.create(club=self.club, form=self.form)
-        send.groups.add(group)
-
-        self.assertIn(grouped, effective_members(send))
-
-    def test_club_wide_send_includes_every_active_member(self):
-        season = self.make_season()
-        active = Member.objects.create(first_name="Cy", last_name="Active")
-        ClubMembership.objects.create(club=self.club, member=active, season=season, status=ClubMembership.StatusChoices.ACTIVE)
-        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
-
-        self.assertIn(active, effective_members(send))
-
-    def test_club_wide_send_excludes_an_inactive_membership(self):
-        season = self.make_season()
-        inactive = Member.objects.create(first_name="Ivy", last_name="Inactive")
-        ClubMembership.objects.create(club=self.club, member=inactive, season=season, status=ClubMembership.StatusChoices.PENDING)
-        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
-
-        self.assertNotIn(inactive, effective_members(send))
-
-    def test_effective_members_excludes_explicitly_excluded_members(self):
-        self.send.excluded_members.add(self.member)
-
-        self.assertNotIn(self.member, effective_members(self.fresh_send()))
-
-    def test_addressed_to_a_single_member(self):
-        outsider = Member.objects.create(first_name="Out", last_name="Sider")
-
-        self.assertTrue(addressed_to(self.send, self.member))
-        self.assertFalse(addressed_to(self.send, outsider))
-
-    def test_addressed_to_any_of_several_members(self):
-        outsider = Member.objects.create(first_name="Out", last_name="Sider")
-
-        self.assertTrue(addressed_to(self.send, [outsider, self.member]))
-        self.assertFalse(addressed_to(self.send, [outsider]))
-        self.assertFalse(addressed_to(self.send, []))
-
-    def test_addressed_to_respects_exclusions(self):
-        self.send.excluded_members.add(self.member)
-
-        self.assertFalse(addressed_to(self.fresh_send(), self.member))
-
-    def test_members_not_yet_submitted_excludes_anyone_with_an_existing_submission(self):
-        Submission.objects.create(send=self.send, member=self.member)
-
-        self.assertNotIn(self.member, members_not_yet_submitted(self.send))
-
-    def test_is_send_open_by_default(self):
-        self.assertTrue(is_send_open(self.send))
-
-    def test_is_send_open_false_once_inactive(self):
-        self.send.is_active = False
-
-        self.assertFalse(is_send_open(self.send))
-
-    def test_is_send_open_false_before_opens_at(self):
-        self.send.opens_at = timezone.now() + timedelta(days=1)
-
-        self.assertFalse(is_send_open(self.send))
-
-    def test_is_send_open_false_after_closes_at(self):
-        self.send.closes_at = timezone.now() - timedelta(days=1)
-
-        self.assertFalse(is_send_open(self.send))
-
-    def test_form_status_rows_for_includes_a_pending_row(self):
-        rows = form_status_rows_for([self.member], self.club)
-
-        self.assertEqual(rows, [{"send": self.send, "member": self.member, "submission": None, "submitted_at": None}])
-
-    def test_form_status_rows_for_carries_the_submitted_at_once_answered(self):
-        submission = Submission.objects.create(send=self.send, member=self.member)
-
-        rows = form_status_rows_for([self.member], self.club)
-
-        self.assertEqual(rows, [{"send": self.send, "member": self.member, "submission": submission, "submitted_at": submission.submitted_at}])
-
-    def test_form_status_rows_for_ignores_the_forms_own_template_lifecycle_flag(self):
-        # A retired template shouldn't retroactively hide a send already out --
-        # Form.is_active only governs whether it can be picked for a *new* send.
-        self.form.is_active = False
-        self.form.save(update_fields=["is_active"])
-
-        rows = form_status_rows_for([self.member], self.club)
-
-        self.assertEqual([row["send"] for row in rows], [self.send])
-
-    def test_form_status_rows_for_includes_a_closed_send_too(self):
-        # Unlike is_send_open -- this is the full historical record, not
-        # "what's actionable right now".
-        self.send.closes_at = timezone.now() - timedelta(days=1)
-        self.send.save(update_fields=["closes_at"])
-
-        rows = form_status_rows_for([self.member], self.club)
-
-        self.assertEqual([row["send"] for row in rows], [self.send])
-
-    def test_form_status_rows_for_has_one_row_per_member_addressed(self):
-        other = Member.objects.create(first_name="Joe", last_name="Roe")
-        self.send.invited_members.add(other)
-
-        rows = form_status_rows_for([self.member, other], self.club)
-
-        self.assertCountEqual([row["member"] for row in rows], [self.member, other])
-
-    def test_form_status_rows_for_omits_someone_outside_the_audience(self):
-        outsider = Member.objects.create(first_name="Out", last_name="Sider")
-
-        rows = form_status_rows_for([self.member, outsider], self.club)
-
-        self.assertEqual([row["member"] for row in rows], [self.member])
-
-
-class SubmitFormTests(FormbuilderTestBase):
-    def test_successful_submission_creates_submission_and_answers(self):
-        submission = submit_form(self.send, self.member, {"name": "Jane", "size": "M"})
-
-        self.assertEqual(submission.send, self.send)
-        self.assertEqual(submission.member, self.member)
-        self.assertEqual(submission.answers.count(), 2)
-        self.assertEqual(submission.answers.get(field=self.name).value, "Jane")
-
-    def test_optional_field_can_be_omitted(self):
-        submission = submit_form(self.send, self.member, {"name": "Jane"})
-
-        self.assertEqual(submission.answers.count(), 1)
-
-    def test_missing_required_field_is_rejected(self):
-        with self.assertRaises(FormSubmissionError) as ctx:
-            submit_form(self.send, self.member, {"size": "M"})
-
-        self.assertIn("name", ctx.exception.errors)
-        self.assertFalse(Submission.objects.exists())
-
-    def test_inactive_send_is_rejected(self):
-        self.send.is_active = False
-        self.send.save()
-
-        with self.assertRaises(FormSubmissionError):
-            submit_form(self.fresh_send(), self.member, {"name": "Jane"})
-
-    def test_login_required_without_member_is_rejected(self):
-        self.form.login_required = True
-        self.form.save()
-
-        with self.assertRaises(FormSubmissionError):
-            submit_form(self.fresh_send(), None, {"name": "Jane"})
-
-    def test_anonymous_submission_allowed_on_a_public_send_when_login_not_required(self):
-        self.send.is_public = True
-        self.send.save()
-
-        submission = submit_form(self.fresh_send(), None, {"name": "Jane"})
-
-        self.assertIsNone(submission.member)
-
-    def test_anonymous_submission_to_a_non_public_send_is_rejected(self):
-        # Only a send explicitly opted into a public link can be answered
-        # without a member -- otherwise per-member limits and the audience
-        # check would simply not apply.
-        with self.assertRaises(FormSubmissionError):
-            submit_form(self.send, None, {"name": "Jane"})
-        self.assertFalse(Submission.objects.exists())
-
-    def test_not_open_yet_is_rejected(self):
-        self.send.opens_at = timezone.now() + timedelta(days=1)
-        self.send.save()
-
-        with self.assertRaises(FormSubmissionError):
-            submit_form(self.fresh_send(), self.member, {"name": "Jane"})
-
-    def test_closed_send_is_rejected(self):
-        self.send.closes_at = timezone.now() - timedelta(days=1)
-        self.send.save()
-
-        with self.assertRaises(FormSubmissionError):
-            submit_form(self.fresh_send(), self.member, {"name": "Jane"})
-
-    def test_open_window_respects_when_argument(self):
-        self.send.opens_at = timezone.now() + timedelta(days=1)
-        self.send.save()
-
-        submission = submit_form(self.fresh_send(), self.member, {"name": "Jane"}, when=timezone.now() + timedelta(days=2))
-
-        self.assertTrue(Submission.objects.filter(pk=submission.pk).exists())
-
-    def test_max_submissions_per_user_is_scoped_to_one_send_not_the_whole_form(self):
-        self.send.max_submissions_per_user = 1
-        self.send.save()
-        other_send = FormSend.objects.create(club=self.club, form=self.form, max_submissions_per_user=1)
-        other_send.invited_members.add(self.member)
-        submit_form(self.fresh_send(), self.member, {"name": "Jane"})
-
-        with self.assertRaises(FormSubmissionError):
-            submit_form(self.fresh_send(), self.member, {"name": "Jane"})
-        # A second send of the same form has its own, independent quota.
-        submit_form(other_send, self.member, {"name": "Jane"})
-
-    def test_invalid_choice_is_rejected(self):
-        with self.assertRaises(FormSubmissionError) as ctx:
-            submit_form(self.send, self.member, {"name": "Jane", "size": "XL"})
-
-        self.assertIn("size", ctx.exception.errors)
-
-    def test_number_field_rejects_non_numeric_input(self):
-        # Validation goes through the same dynamic Django Form the UI renders, so a
-        # NUMBER field is checked as a decimal — not merely "present".
-        Field.objects.create(form=self.form, key="age", label="Age", field_type=Field.FieldType.NUMBER, required=True, order=3)
-
-        with self.assertRaises(FormSubmissionError) as ctx:
-            submit_form(self.send, self.member, {"name": "Jane", "age": "not-a-number"})
-
-        self.assertIn("age", ctx.exception.errors)
-
-    def test_email_field_rejects_an_invalid_address(self):
-        Field.objects.create(form=self.form, key="contact", label="Contact", field_type=Field.FieldType.EMAIL, required=True, order=3)
-
-        with self.assertRaises(FormSubmissionError) as ctx:
-            submit_form(self.send, self.member, {"name": "Jane", "contact": "not-an-email"})
-
-        self.assertIn("contact", ctx.exception.errors)
-
-    def test_multichoice_validation(self):
-        field = Field.objects.create(form=self.form, key="days", label="Days", field_type=Field.FieldType.MULTICHOICE, required=False, order=3, options=["mon", "tue", "wed"])
-        other_member = Member.objects.create(first_name="Joe", last_name="Roe")
-        self.send.invited_members.add(other_member)
-
-        submit_form(self.fresh_send(), self.member, {"name": "Jane", "days": ["mon", "wed"]})
-        with self.assertRaises(FormSubmissionError):
-            submit_form(self.fresh_send(), other_member, {"name": "Joe", "days": ["mon", "sun"]})
-        self.assertEqual(Answer.objects.filter(field=field).count(), 1)
-
-    def test_inactive_field_is_ignored(self):
-        Field.objects.create(form=self.form, key="secret", label="Secret", field_type=Field.FieldType.TEXT, required=True, is_active=False, order=4)
-
-        submission = submit_form(self.send, self.member, {"name": "Jane"})
-
-        self.assertFalse(submission.answers.filter(field__key="secret").exists())
-
-    def test_unknown_keys_are_ignored(self):
-        submission = submit_form(self.send, self.member, {"name": "Jane", "bogus": "x"})
-
-        self.assertEqual(submission.answers.count(), 1)
-
-    def test_a_member_outside_the_audience_is_rejected(self):
-        outsider = Member.objects.create(first_name="Out", last_name="Sider")
-
-        with self.assertRaises(FormSubmissionError):
-            submit_form(self.send, outsider, {"name": "Jane"})
-        self.assertFalse(Submission.objects.filter(member=outsider).exists())
-
-    def test_an_excluded_member_is_rejected_even_if_otherwise_invited(self):
-        self.send.excluded_members.add(self.member)
-
-        with self.assertRaises(FormSubmissionError):
-            submit_form(self.fresh_send(), self.member, {"name": "Jane"})
-
-    def test_anonymous_submission_skips_the_audience_check(self):
-        # member=None on a public send has no audience to check against --
-        # not raised, even though nobody was ever added to this send's
-        # audience for it.
-        empty_send = FormSend.objects.create(club=self.club, form=self.form, is_public=True)
-
-        submission = submit_form(empty_send, None, {"name": "Jane"})
-
-        self.assertIsNotNone(submission)
-
-
-class BuildFormTests(FormbuilderTestBase):
-    def make_all_field_types_form(self):
-        form = Form.objects.create(club=self.club, title="All", slug="all")
-        specs = [
-            ("f_text", Field.FieldType.TEXT, forms.CharField),
-            ("f_area", Field.FieldType.TEXTAREA, forms.CharField),
-            ("f_num", Field.FieldType.NUMBER, forms.DecimalField),
-            ("f_email", Field.FieldType.EMAIL, forms.EmailField),
-            ("f_date", Field.FieldType.DATE, forms.DateField),
-            ("f_choice", Field.FieldType.CHOICE, forms.ChoiceField),
-            ("f_multi", Field.FieldType.MULTICHOICE, forms.MultipleChoiceField),
-            ("f_check", Field.FieldType.CHECKBOX, forms.BooleanField),
-            ("f_file", Field.FieldType.FILE, forms.FileField),
-        ]
-        for i, (key, field_type, _) in enumerate(specs):
-            Field.objects.create(form=form, key=key, label=key, field_type=field_type, required=False, order=i, options=["a", "b"])
-        return form, specs
-
-    def test_field_classes_map_from_field_type(self):
-        form, specs = self.make_all_field_types_form()
-
-        instance = build_form_class(form)()
-
-        for key, _, expected in specs:
-            with self.subTest(key=key):
-                self.assertIsInstance(instance.fields[key], expected)
-
-    def test_required_and_labels_propagate(self):
-        instance = build_form_class(self.form)()
-
-        self.assertTrue(instance.fields["name"].required)
-        self.assertFalse(instance.fields["size"].required)
-        self.assertEqual(instance.fields["name"].label, "Name")
-
-    def test_choice_field_gets_choices(self):
-        instance = build_form(self.form)
-
-        self.assertEqual(list(instance.fields["size"].choices), [("S", "S"), ("M", "M"), ("L", "L")])
-
-    def test_bound_form_validates(self):
-        bound = build_form(self.form, data={"name": "Jane", "size": "M"})
-
-        self.assertTrue(bound.is_valid())
-        self.assertEqual(bound.cleaned_data["name"], "Jane")
-
-    def test_bound_form_reports_required_error(self):
-        bound = build_form(self.form, data={"size": "M"})
-
-        self.assertFalse(bound.is_valid())
-        self.assertIn("name", bound.errors)
-
-    def make_file_form(self):
-        form = Form.objects.create(club=self.club, title="Upload", slug="upload")
-        Field.objects.create(form=form, key="doc", label="Document", field_type=Field.FieldType.FILE, required=True, order=1)
+    def tearDownClass(cls):
+        super().tearDownClass()
+        shutil.rmtree(PRIVATE, ignore_errors=True)
+
+    def make_form(self, *specs, **kw):
+        form = Form.objects.create(title=kw.pop("title", "Survey"), **kw)
+        for i, spec in enumerate(specs):
+            Field.objects.create(form=form, order=i, **{"label": spec[0], "field_type": spec[1], **(spec[2] if len(spec) > 2 else {})})
         return form
 
-    def test_file_field_accepts_a_pdf(self):
-        bound = build_form(self.make_file_form(), data={}, files={"doc": SimpleUploadedFile("cert.pdf", b"%PDF-1.4", content_type="application/pdf")})
-
-        self.assertTrue(bound.is_valid(), bound.errors)
-
-    def test_file_field_rejects_an_oversized_file(self):
-        from rosterchief.uploads import MAX_DOCUMENT_UPLOAD_BYTES
-
-        bound = build_form(self.make_file_form(), data={}, files={"doc": SimpleUploadedFile("cert.pdf", b"0" * (MAX_DOCUMENT_UPLOAD_BYTES + 1), content_type="application/pdf")})
-
-        self.assertFalse(bound.is_valid())
-        self.assertEqual(bound.errors.as_data()["doc"][0].code, "file_too_large")
-
-    def test_file_field_rejects_a_disallowed_type(self):
-        bound = build_form(self.make_file_form(), data={}, files={"doc": SimpleUploadedFile("page.html", b"<html></html>", content_type="text/html")})
-
-        self.assertFalse(bound.is_valid())
-        self.assertEqual(bound.errors.as_data()["doc"][0].code, "invalid_extension")
-
-    def test_inactive_fields_are_excluded(self):
-        Field.objects.create(form=self.form, key="hidden", label="Hidden", is_active=False, order=9)
-
-        instance = build_form(self.form)
-
-        self.assertNotIn("hidden", instance.fields)
-
-
-class FormReportTests(FormbuilderTestBase):
-    def test_columns_are_fields_in_order(self):
-        report = form_report(self.send)
-
-        self.assertEqual(report.columns, [self.name, self.size])
-
-    def test_rows_carry_answer_values(self):
-        submit_form(self.send, self.member, {"name": "Jane", "size": "M"})
-
-        report = form_report(self.send)
-
-        self.assertEqual(report.count, 1)
-        row = report.rows[0]
-        self.assertEqual(row.values[self.name.id], "Jane")
-        self.assertEqual(row.values[self.size.id], "M")
-
-    def test_choice_field_is_summarised(self):
-        joe = Member.objects.create(first_name="Joe", last_name="Roe")
-        kim = Member.objects.create(first_name="Kim", last_name="Ash")
-        self.send.invited_members.add(joe, kim)
-        submit_form(self.fresh_send(), self.member, {"name": "Jane", "size": "M"})
-        submit_form(self.fresh_send(), joe, {"name": "Joe", "size": "M"})
-        submit_form(self.fresh_send(), kim, {"name": "Kim", "size": "L"})
-
-        report = form_report(self.fresh_send())
-
-        self.assertEqual(report.summaries[self.size.id], {"M": 2, "L": 1})
-        self.assertNotIn(self.name.id, report.summaries)
-
-    def test_multichoice_values_are_tallied_per_option(self):
-        days = Field.objects.create(form=self.form, key="days", label="Days", field_type=Field.FieldType.MULTICHOICE, required=False, order=3, options=["mon", "tue"])
-        submit_form(self.send, self.member, {"name": "Jane", "days": ["mon", "tue"]})
-
-        report = form_report(self.send)
-
-        self.assertEqual(report.summaries[days.id], {"mon": 1, "tue": 1})
-
-    def test_empty_send_reports_no_rows(self):
-        report = form_report(self.send)
-
-        self.assertEqual(report.count, 0)
-        self.assertEqual(report.rows, [])
-
-    def test_report_is_scoped_to_one_send_not_every_send_of_the_form(self):
-        other_send = FormSend.objects.create(club=self.club, form=self.form)
-        other_send.invited_members.add(self.member)
-        submit_form(self.send, self.member, {"name": "Jane"})
-        submit_form(other_send, self.member, {"name": "Jane again"})
-
-        report = form_report(self.send)
-
-        self.assertEqual(report.count, 1)
-
-    def test_form_property_reaches_the_underlying_form(self):
-        report = form_report(self.send)
-
-        self.assertEqual(report.form, self.form)
-
-
-class AnswerCleanTests(FormbuilderTestBase):
-    def test_rejects_field_from_another_form(self):
-        other_form = Form.objects.create(club=self.club, title="Other", slug="other")
-        other_field = Field.objects.create(form=other_form, key="x", label="X", order=1)
-        submission = Submission.objects.create(send=self.send, member=self.member)
-        answer = Answer(submission=submission, field=other_field, value="v")
-
-        with self.assertRaises(ValidationError) as ctx:
-            answer.full_clean()
-        self.assertIn("field", ctx.exception.error_dict)
-
-    def test_accepts_field_from_the_submissions_sends_form(self):
-        submission = Submission.objects.create(send=self.send, member=self.member)
-
-        Answer(submission=submission, field=self.name, value="v").full_clean()
-
-
-class NotifyFormSendTests(FormbuilderTestBase):
-    """formbuilder.services.notifications.notify_form_send -- one Notification
-    per resolved audience member, source pointing back at the send."""
-
-    def test_notifies_every_resolved_audience_member(self):
-        other = Member.objects.create(first_name="Joe", last_name="Roe")
-        self.send.invited_members.add(other)
-
-        result = notify_form_send(str(self.send.pk))
-
-        self.assertEqual(Notification.objects.filter(member=self.member).count(), 1)
-        self.assertEqual(Notification.objects.filter(member=other).count(), 1)
-        self.assertEqual(result, "Notified 2 member(s).")
-        self.assertEqual(Notification.objects.get(member=other).category, NotificationCategory.FORM)
-
-    def test_notification_is_stored_in_english_and_dutch(self):
-        self.send.closes_at = timezone.now() + timedelta(days=3)
-        self.send.save()
-
-        notify_form_send(str(self.send.pk))
-
-        notification = Notification.objects.get(member=self.member)
-        self.assertEqual(notification.translations["en"]["title"], self.form.title)
-        self.assertEqual(notification.translations["nl"]["title"], self.form.title)
-        self.assertIn("Please complete", notification.translations["en"]["body"])
-        self.assertIn("alsjeblieft in", notification.translations["nl"]["body"])
-        self.assertNotIn("Please complete", notification.translations["nl"]["body"])
-        self.assertIn(" voor ", notification.translations["nl"]["body"])
-
-    def test_notification_source_points_at_the_send(self):
-        notify_form_send(str(self.send.pk))
-
-        notification = Notification.objects.get(member=self.member)
-        self.assertEqual(notification.source, self.send)
-        self.assertEqual(notification.title, self.form.title)
-
-    def test_deadline_is_mentioned_when_the_send_has_one(self):
-        self.send.closes_at = timezone.now() + timedelta(days=3)
-        self.send.save()
-
-        notify_form_send(str(self.fresh_send().pk))
-
-        notification = Notification.objects.get(member=self.member)
-        self.assertIn(str(timezone.localtime(self.send.closes_at).day), notification.body)
-
-    def test_a_send_with_no_audience_notifies_nobody(self):
-        empty_send = FormSend.objects.create(club=self.club, form=self.form)
-
-        result = notify_form_send(str(empty_send.pk))
-
-        self.assertFalse(Notification.objects.filter(object_id=str(empty_send.pk)).exists())
-        self.assertEqual(result, "Skipped: no one to notify.")
-
-    def test_a_deleted_send_is_skipped_not_errored(self):
-        result = notify_form_send("00000000-0000-0000-0000-000000000000")
-
-        self.assertEqual(result, "Skipped: send no longer exists.")
-
-
-class SendFormRemindersTests(FormbuilderTestBase):
-    """formbuilder.management.commands.send_form_reminders -- one reminder
-    push per send, FORM_REMINDER_LEAD_TIME before it closes, to whoever
-    hasn't submitted yet. Same idempotent-via-timestamp shape as events'
-    own send_deadline_reminders."""
-
-    def setUp(self):
-        # Maintenance.save() writes through to the cache -- a DB rollback
-        # between tests doesn't clear it, see events.tests's own identical
-        # comment on this.
-        cache.clear()
-        self.addCleanup(cache.clear)
-
-    def test_reminds_within_the_window_before_closing(self):
-        self.send.closes_at = timezone.now() + timedelta(days=2)
-        self.send.save()
-
-        result = call_command("send_form_reminders")
-
-        self.assertTrue(Notification.objects.filter(member=self.member, title=self.form.title).exists())
-        self.assertIn("Reminded 1 member(s) across 1 send(s)", result)
-        self.assertEqual(Notification.objects.get(member=self.member).category, NotificationCategory.REMINDER)
-
-    def test_does_not_remind_before_the_window_opens(self):
-        self.send.closes_at = timezone.now() + timedelta(days=10)
-        self.send.save()
-
-        call_command("send_form_reminders")
-
-        self.assertFalse(Notification.objects.exists())
-
-    def test_does_not_remind_after_closing(self):
-        self.send.closes_at = timezone.now() - timedelta(hours=1)
-        self.send.save()
-
-        call_command("send_form_reminders")
-
-        self.assertFalse(Notification.objects.exists())
-
-    def test_a_send_with_no_closes_at_is_never_picked_up(self):
-        call_command("send_form_reminders")
-
-        self.assertFalse(Notification.objects.exists())
-
-    def test_does_not_remind_someone_who_already_submitted(self):
-        self.send.closes_at = timezone.now() + timedelta(days=2)
-        self.send.save()
-        submit_form(self.fresh_send(), self.member, {"name": "Jane"})
-        Notification.objects.all().delete()
-
-        call_command("send_form_reminders")
-
-        self.assertFalse(Notification.objects.filter(member=self.member).exists())
-
-    def test_does_not_remind_the_same_send_twice(self):
-        self.send.closes_at = timezone.now() + timedelta(days=2)
-        self.send.save()
-
-        call_command("send_form_reminders")
-        Notification.objects.all().delete()
-        call_command("send_form_reminders")
-
-        self.assertFalse(Notification.objects.exists())
-
-    def test_marks_processed_even_when_nobody_needed_reminding(self):
-        self.send.closes_at = timezone.now() + timedelta(days=2)
-        self.send.save()
-        submit_form(self.fresh_send(), self.member, {"name": "Jane"})
-
-        call_command("send_form_reminders")
-
-        self.send.refresh_from_db()
-        self.assertIsNotNone(self.send.reminder_sent_at)
-
-    def test_an_inactive_send_is_skipped(self):
-        self.send.closes_at = timezone.now() + timedelta(days=2)
-        self.send.is_active = False
-        self.send.save()
-
-        call_command("send_form_reminders")
-
-        self.assertFalse(Notification.objects.exists())
-
-
-@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "rival-fc.rosterchief.app", "testserver"])
-class PublicFormFillViewTests(TestCase):
-    """formbuilder:fill -- the public, unauthenticated form-fill page
-    (formbuilder.views.PublicFormFillView). Mirrors registration.tests.
-    RegistrationViewTests' own "public, club-scoped" test shape."""
-
-    @classmethod
-    def setUpTestData(cls):
-        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        cls.form = Form.objects.create(club=cls.club, title="Volunteer interest", login_required=False)
-        cls.name = Field.objects.create(form=cls.form, key="name", label="Name", field_type=Field.FieldType.TEXT, required=True, order=1)
-        cls.send = FormSend.objects.create(club=cls.club, form=cls.form, is_public=True)
-
-    def _url(self, token=None):
-        return reverse("formbuilder:fill", args=[token or self.send.public_token])
-
-    def test_get_renders_the_form(self):
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Volunteer interest")
-        self.assertContains(response, "Name")
-
-    def test_404_on_the_base_domain(self):
-        response = self.client.get(self._url(), HTTP_HOST="rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
-
-    def test_404_for_a_non_public_send(self):
-        private_send = FormSend.objects.create(club=self.club, form=self.form, is_public=False)
-
-        response = self.client.get(self._url(private_send.public_token), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
-
-    def test_404_for_a_token_belonging_to_another_club(self):
-        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
-        other_form = Form.objects.create(club=other_club, title="Other", login_required=False)
-        other_send = FormSend.objects.create(club=other_club, form=other_form, is_public=True)
-
-        response = self.client.get(self._url(other_send.public_token), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
-
-    def test_404_for_an_unknown_token(self):
-        response = self.client.get(self._url("not-a-real-token"), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
-
-    def test_anonymous_post_creates_a_submission_with_no_member(self):
-        response = self.client.post(self._url(), {"name": "Jane Doe"}, HTTP_HOST="ajax-united.rosterchief.app")
-
-        submission = Submission.objects.get(send=self.send)
-        self.assertIsNone(submission.member)
-        self.assertEqual(submission.answers.get(field=self.name).value, "Jane Doe")
-        self.assertRedirects(response, self._url(), fetch_redirect_response=False)
-
-    def test_anonymous_post_is_rejected_when_the_form_requires_login(self):
-        self.form.login_required = True
-        self.form.save()
-
-        response = self.client.post(self._url(), {"name": "Jane Doe"}, HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(Submission.objects.exists())
-
-    def test_a_logged_in_visitor_in_the_audience_is_linked_to_their_own_member(self):
-        user = get_user_model().objects.create_user(email="visitor@example.com", password="pw-secret-123")
-        member = Member.objects.create(user=user, first_name="Vera", last_name="Visitor")
-        self.send.invited_members.add(member)
-        self.client.force_login(user)
-
-        self.client.post(self._url(), {"name": "Vera Visitor"}, HTTP_HOST="ajax-united.rosterchief.app")
-
-        submission = Submission.objects.get(send=self.send)
-        self.assertEqual(submission.member, member)
-
-    def test_a_logged_in_visitor_outside_the_audience_is_still_rejected(self):
-        # is_public only ever waives the audience check for a genuine
-        # stranger (member=None) -- formbuilder.services.submission.
-        # submit_form's own _check_open still runs the usual audience check
-        # for any *resolved* member, public link or not. A send with no
-        # configured audience at all (this one: no teams/groups/club_wide/
-        # invited_members) resolves to an empty audience, so even a real
-        # club member who happens to be logged in is turned away, same as
-        # if they'd reached this send any other way.
-        user = get_user_model().objects.create_user(email="outsider@example.com", password="pw-secret-123")
-        Member.objects.create(user=user, first_name="Otto", last_name="Outsider")
-        self.client.force_login(user)
-
-        response = self.client.post(self._url(), {"name": "Otto Outsider"}, HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(Submission.objects.exists())
-
-    def test_a_scoped_audience_does_not_block_an_anonymous_public_submission(self):
-        # is_public is independent of teams/groups/club_wide -- a send aimed
-        # at a specific team still accepts a public, anonymous submission
-        # (submit_form's own audience check only ever runs for a resolved
-        # member -- see SubmitFormTests.test_anonymous_submission_allowed_
-        # when_login_not_required for the service-layer half of this).
-        team = Team.objects.create(club=self.club, name="U16", short_name="U16")
-        self.send.teams.add(team)
-
-        response = self.client.post(self._url(), {"name": "Jane Doe"}, HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertTrue(Submission.objects.filter(send=self.send).exists())
-        self.assertRedirects(response, self._url(), fetch_redirect_response=False)
-
-    def test_invalid_post_reshows_the_form_with_field_errors(self):
-        response = self.client.post(self._url(), {"name": ""}, HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(Submission.objects.exists())
-        self.assertTrue(response.context["form"].errors)
-
-
-class SubmitOnBehalfTests(FormbuilderTestBase):
-    """submit_form(..., submitted_by=...) -- a parent/guardian answering a
-    send for the member it's about. The submission belongs to that member
-    (audience + per-member limit are theirs); submitted_by records who
-    actually filled it in."""
-
-    def setUp(self):
-        self.parent = Member.objects.create(first_name="Paul", last_name="Doe")
-
-    def test_submission_is_recorded_for_the_member_with_the_submitter(self):
-        submission = submit_form(self.send, self.member, {"name": "Jane"}, submitted_by=self.parent)
-
-        self.assertEqual(submission.member, self.member)
-        self.assertEqual(submission.submitted_by, self.parent)
-
-    def test_submitter_defaults_to_the_member_themselves(self):
-        submission = submit_form(self.send, self.member, {"name": "Jane"})
-
-        self.assertEqual(submission.submitted_by, self.member)
-
-    def test_the_per_member_limit_counts_the_member_not_the_submitter(self):
-        self.send.max_submissions_per_user = 1
-        self.send.save()
-        other_child = Member.objects.create(first_name="Kid", last_name="Doe")
-        self.send.invited_members.add(other_child)
-        send = self.fresh_send()
-
-        submit_form(send, self.member, {"name": "Jane"}, submitted_by=self.parent)
-        # A second child of the same parent still has their own allowance.
-        submit_form(send, other_child, {"name": "Kid"}, submitted_by=self.parent)
-        with self.assertRaises(FormSubmissionError):
-            submit_form(send, self.member, {"name": "Jane again"}, submitted_by=self.parent)
-
-        self.assertEqual(Submission.objects.filter(member=self.member).count(), 1)
-
-    def test_the_audience_check_applies_to_the_member_not_the_submitter(self):
-        # The parent isn't in the audience; the member being answered for is.
-        submission = submit_form(self.send, self.member, {"name": "Jane"}, submitted_by=self.parent)
-        self.assertIsNotNone(submission)
-
-        outsider = Member.objects.create(first_name="Out", last_name="Sider")
-        self.send.invited_members.add(self.parent)
-        with self.assertRaises(FormSubmissionError):
-            submit_form(self.fresh_send(), outsider, {"name": "Out"}, submitted_by=self.parent)
-
-
-@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
-class PublicFormAbuseTests(TestCase):
-    """formbuilder:fill -- the public link stays anonymous-fillable, but is
-    capped per client IP per send and carries a honeypot field."""
-
-    HOST = "ajax-united.rosterchief.app"
-
-    @classmethod
-    def setUpTestData(cls):
-        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        cls.form = Form.objects.create(club=cls.club, title="Volunteer interest", login_required=False)
-        cls.name = Field.objects.create(form=cls.form, key="name", label="Name", field_type=Field.FieldType.TEXT, required=True, order=1)
-        cls.send = FormSend.objects.create(club=cls.club, form=cls.form, is_public=True)
-
-    def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
-
-    def _url(self, send=None):
-        return reverse("formbuilder:fill", args=[(send or self.send).public_token])
-
-    def test_submissions_beyond_the_per_ip_limit_get_429_and_save_nothing(self):
-        from .views import PUBLIC_FORM_IP_RATE
-
-        for _ in range(PUBLIC_FORM_IP_RATE.limit):
-            response = self.client.post(self._url(), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
-            self.assertEqual(response.status_code, 302)
-
-        response = self.client.post(self._url(), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
-
-        self.assertEqual(response.status_code, 429)
-        self.assertEqual(Submission.objects.filter(send=self.send).count(), PUBLIC_FORM_IP_RATE.limit)
-        self.assertContains(response, "Too many responses", status_code=429)
-
-    def test_the_limit_is_per_ip(self):
-        from .views import PUBLIC_FORM_IP_RATE
-
-        for _ in range(PUBLIC_FORM_IP_RATE.limit):
-            self.client.post(self._url(), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
-
-        response = self.client.post(self._url(), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.8")
-
-        self.assertEqual(response.status_code, 302)
-
-    def test_the_limit_is_per_send(self):
-        from .views import PUBLIC_FORM_IP_RATE
-
-        other_send = FormSend.objects.create(club=self.club, form=self.form, is_public=True)
-        for _ in range(PUBLIC_FORM_IP_RATE.limit):
-            self.client.post(self._url(), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
-
-        response = self.client.post(self._url(other_send), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
-
-        self.assertEqual(response.status_code, 302)
-
-    def test_invalid_posts_do_not_use_up_the_allowance(self):
-        from .views import PUBLIC_FORM_IP_RATE
-
-        for _ in range(PUBLIC_FORM_IP_RATE.limit):
-            self.client.post(self._url(), {"name": ""}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
-
-        response = self.client.post(self._url(), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
-
-        self.assertEqual(response.status_code, 302)
-        self.assertTrue(Submission.objects.filter(send=self.send).exists())
-
-    def test_honeypot_submission_looks_successful_but_saves_nothing(self):
-        response = self.client.post(self._url(), {"name": "Jane", "contact.website": "http://spam.example"}, HTTP_HOST=self.HOST)
-
-        self.assertRedirects(response, self._url(), fetch_redirect_response=False)
-        self.assertFalse(Submission.objects.exists())
-
-    def test_the_page_renders_the_honeypot_hidden(self):
-        response = self.client.get(self._url(), HTTP_HOST=self.HOST)
-
-        self.assertContains(response, 'name="contact.website"')
-        self.assertContains(response, 'class="hidden" aria-hidden="true"')
-
-
-@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "rival-fc.rosterchief.app", "testserver"])
-class FileAnswerTests(TestCase):
-    """FILE fields: the upload is stored in private storage (never under
-    MEDIA_ROOT), the Answer records its metadata, and only the form's managers
-    and the submitter can download it."""
-
-    HOST = "ajax-united.rosterchief.app"
-
-    @classmethod
-    def setUpTestData(cls):
-        from waffle import get_waffle_flag_model
-
-        from club.models import ClubRole
-        from rosterchief.test_support import enrol_mfa
-
-        User = get_user_model()
-        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        today = timezone.localdate()
-        cls.season = Season.objects.create(club=cls.club, start_date=today - timedelta(days=30), end_date=today + timedelta(days=300))
-        get_waffle_flag_model().objects.get_or_create(name="formbuilder")[0].clubs.add(cls.club)
-
-        cls.form = Form.objects.create(club=cls.club, title="Medical", login_required=False)
-        cls.name = Field.objects.create(form=cls.form, key="name", label="Name", field_type=Field.FieldType.TEXT, required=True, order=1)
-        cls.doc = Field.objects.create(form=cls.form, key="doc", label="Certificate", field_type=Field.FieldType.FILE, required=True, order=2)
-        cls.send = FormSend.objects.create(club=cls.club, form=cls.form, club_wide=True, is_public=True)
-
-        cls.user = User.objects.create_user(email="player@example.com", password="pw-secret-123")
-        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="player@example.com", user=cls.user)
-        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
-
-        cls.admin_user = User.objects.create_user(email="admin@example.com", password="pw-secret-123")
-        cls.admin_member = Member.objects.create(first_name="Ada", last_name="Admin", user=cls.admin_user)
-        ClubMembership.objects.create(club=cls.club, member=cls.admin_member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
-        ClubRole.objects.filter(club=cls.club, member=cls.admin_member).update(role=ClubRole.Roles.ADMIN)
-        enrol_mfa(cls.admin_user)
-
-        cls.outsider_user = User.objects.create_user(email="other@example.com", password="pw-secret-123")
-        outsider = Member.objects.create(first_name="Olga", last_name="Other", email="other@example.com", user=cls.outsider_user)
-        ClubMembership.objects.create(club=cls.club, member=outsider, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
-
-    def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
-
-    def _upload(self, name="cert.pdf", content=b"%PDF-1.4 medical"):
-        return SimpleUploadedFile(name, content, content_type="application/pdf")
-
-    def _file_answer(self):
-        return Answer.objects.get(field=self.doc)
-
-    def _download(self, answer, host=HOST):
-        return self.client.get(reverse("formbuilder:answer_file", args=[answer.pk]), HTTP_HOST=host)
-
-    def test_member_app_submission_with_a_file_is_stored_privately(self):
-        from django.conf import settings
-
-        from rosterchief.storage import private_storage
-
-        self.client.force_login(self.user)
-
-        response = self.client.post(reverse("mobile:form_fill", kwargs={"pk": self.send.pk}), {"name": "Lars", "doc": self._upload()}, HTTP_HOST=self.HOST)
-
-        self.assertEqual(response.status_code, 302)
-        answer = self._file_answer()
-        self.assertEqual(answer.value["name"], "cert.pdf")
-        self.assertEqual(answer.value["size"], len(b"%PDF-1.4 medical"))
-        self.assertEqual(answer.value["content_type"], "application/pdf")
-        self.assertTrue(answer.file.name.startswith(f"formbuilder/{self.send.pk}/{answer.submission_id}/"))
-        self.assertTrue(answer.file.name.endswith("-cert.pdf"))
-        self.assertIs(answer.file.storage, private_storage)
-        self.assertTrue(private_storage.exists(answer.file.name))
-        self.assertTrue(answer.file.path.startswith(str(settings.PRIVATE_MEDIA_ROOT)))
-
-    def test_public_form_submission_with_a_file_is_recorded(self):
-        response = self.client.post(reverse("formbuilder:fill", args=[self.send.public_token]), {"name": "Anon", "doc": self._upload("scan.png", b"\x89PNG fake")}, HTTP_HOST=self.HOST)
-
-        self.assertEqual(response.status_code, 302)
-        answer = self._file_answer()
-        self.assertIsNone(answer.submission.member)
-        self.assertEqual(answer.value["name"], "scan.png")
-        with answer.file.open("rb") as stored:
-            self.assertEqual(stored.read(), b"\x89PNG fake")
-
-    def test_a_hostile_file_name_is_made_safe(self):
-        self.client.force_login(self.user)
-
-        self.client.post(reverse("mobile:form_fill", kwargs={"pk": self.send.pk}), {"name": "Lars", "doc": self._upload('my "cert" <x>.pdf')}, HTTP_HOST=self.HOST)
-
-        stored_name = self._file_answer().file.name.rsplit("/", 1)[-1]
-        self.assertNotIn('"', stored_name)
-        self.assertNotIn("<", stored_name)
-        self.assertNotIn(" ", stored_name)
-
-    def _submit_as_member(self):
-        self.client.force_login(self.user)
-        self.client.post(reverse("mobile:form_fill", kwargs={"pk": self.send.pk}), {"name": "Lars", "doc": self._upload()}, HTTP_HOST=self.HOST)
-        self.client.logout()
-        return self._file_answer()
-
-    def test_the_forms_manager_can_download_it(self):
-        answer = self._submit_as_member()
-        self.client.force_login(self.admin_user)
-
-        response = self._download(answer)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(b"".join(response.streaming_content), b"%PDF-1.4 medical")
-        self.assertIn("attachment", response["Content-Disposition"])
-        self.assertIn("cert.pdf", response["Content-Disposition"])
-        self.assertEqual(response["X-Content-Type-Options"], "nosniff")
-
-    def test_the_submitter_can_download_it(self):
-        answer = self._submit_as_member()
-        self.client.force_login(self.user)
-
-        self.assertEqual(self._download(answer).status_code, 200)
-
-    def test_another_club_member_gets_404(self):
-        answer = self._submit_as_member()
-        self.client.force_login(self.outsider_user)
-
-        self.assertEqual(self._download(answer).status_code, 404)
-
-    def test_the_manager_gets_404_on_another_clubs_host(self):
-        Club.objects.create(name="Rival FC", slug="rival-fc")
-        answer = self._submit_as_member()
-        self.client.force_login(self.admin_user)
-
-        self.assertEqual(self._download(answer, host="rival-fc.rosterchief.app").status_code, 404)
-
-    def test_the_manager_gets_404_with_the_forms_feature_off(self):
-        from waffle import get_waffle_flag_model
-
-        answer = self._submit_as_member()
-        get_waffle_flag_model().objects.get(name="formbuilder").clubs.remove(self.club)
-        self.client.force_login(self.admin_user)
-
-        self.assertEqual(self._download(answer).status_code, 404)
-
-    def test_anonymous_is_sent_to_login(self):
-        answer = self._submit_as_member()
-
-        response = self._download(answer)
-
-        self.assertEqual(response.status_code, 302)
-        self.assertIn(reverse("account_login"), response["Location"])
-
-    def test_responses_page_links_the_download_and_csv_exports_the_name(self):
-        answer = self._submit_as_member()
-        self.client.force_login(self.admin_user)
-
-        page = self.client.get(reverse("management:formsend_responses", args=[self.form.pk, self.send.pk]), HTTP_HOST=self.HOST)
-        export = self.client.get(reverse("management:formsend_responses_export", args=[self.form.pk, self.send.pk]), HTTP_HOST=self.HOST)
-
-        self.assertContains(page, reverse("formbuilder:answer_file", args=[answer.pk]))
-        self.assertContains(page, "cert.pdf")
-        csv_text = export.content.decode()
-        self.assertIn("cert.pdf", csv_text)
-        self.assertNotIn(answer.file.name, csv_text)
-        self.assertNotIn("content_type", csv_text)
-
-    def test_deleting_the_submission_removes_the_stored_file(self):
-        from rosterchief.storage import private_storage
-
-        answer = self._submit_as_member()
-        stored_name = answer.file.name
-
-        answer.submission.delete()
-
-        self.assertFalse(private_storage.exists(stored_name))
+    def make_send(self, form, *, teams=(), groups=(), invited=(), excluded=(), **kw):
+        send = FormSend.objects.create(form=form, **kw)
+        send.teams.set(teams)
+        send.groups.set(groups)
+        send.invited_members.set(invited)
+        send.excluded_members.set(excluded)
+        return send
+
+    # --- models -------------------------------------------------------------------------------------------------
+
+    def test_slugs_and_keys_are_unique(self):
+        a, b = Form.objects.create(title="Big Survey"), Form.objects.create(title="Big Survey")
+        self.assertEqual((a.slug, b.slug), ("big-survey", "big-survey-2"))
+        f1 = Field.objects.create(form=a, label="Your name")
+        f2 = Field.objects.create(form=a, label="Your name")
+        self.assertEqual((f1.key, f2.key), ("your-name", "your-name-2"))
+        self.assertTrue(len(FormSend.objects.create(form=a).public_token) >= 32)
+
+    # --- audience -----------------------------------------------------------------------------------------------
+
+    def test_audience_team_group_club_wide_invited_excluded(self):
+        form = self.make_form()
+        self.assertEqual(names(audience.effective_members(self.make_send(form, teams=[self.team]))), ["Ann", "Cara", "Dan", "Kid", "Kid2"])
+        club = self.make_send(form, club_wide=True)
+        self.assertEqual(names(audience.effective_members(club)), ["Ann", "Bob", "Cara", "Kid", "Kid2"])  # Dan is lapsed
+        group = Group.objects.create(name="Coaches")
+        GroupMembership.objects.create(group=group, member=self.eve)
+        mixed = self.make_send(form, teams=[self.other_team], groups=[group], invited=[self.bob], excluded=[self.eve])
+        self.assertEqual(names(audience.effective_members(mixed)), ["Bob"])
+        self.assertEqual(audience.audience_count(self.make_send(form, teams=[self.team], excluded=[self.dan, self.kid])), 3)
+        self.assertEqual(audience.audience_ids_by_send([club, mixed])[mixed.pk], {self.bob.pk})
+        self.assertTrue(audience.addressed_to(club, [self.eve, self.bob]))
+        self.assertFalse(audience.addressed_to(club, self.eve))
+
+    def test_status_and_open_window(self):
+        now = timezone.now()
+        hour = datetime.timedelta(hours=1)
+        form = self.make_form()
+        for kw, status in (({}, "open"), ({"is_active": False}, "inactive"), ({"opens_at": now + hour}, "scheduled"), ({"closes_at": now - hour}, "closed"), ({"is_active": False, "closes_at": now - hour}, "inactive")):
+            self.assertEqual(audience.send_status(self.make_send(form, **kw)), status)
+
+    def test_guardians(self):
+        self.assertTrue(audience.is_guardian_of(self.parent, self.kid))
+        self.assertFalse(audience.is_guardian_of(self.ann, self.kid))
+        self.assertEqual(names(audience.managed_children(self.parent)), ["Kid", "Kid2"])
+        send = self.make_send(self.make_form(), teams=[self.team])
+        self.assertEqual(names(audience.fillable_members(send, self.parent)), ["Kid", "Kid2"])
+
+    # --- submission ---------------------------------------------------------------------------------------------
+
+    def full_form(self):
+        return self.make_form(
+            ("Name", T.TEXT),
+            ("Age", T.NUMBER, {"required": False}),
+            ("Mail", T.EMAIL, {"required": False}),
+            ("Born", T.DATE, {"required": False}),
+            ("Size", T.CHOICE, {"options": ["S", {"value": "M", "label": "Medium"}], "required": False}),
+            ("Days", T.MULTICHOICE, {"options": ["mon", "tue"], "required": False}),
+            ("Agree", T.CHECKBOX, {"required": False}),
+            ("Doc", T.FILE, {"required": False}),
+        )
+
+    def errors(self, send, member, data, **kw):
+        with self.assertRaises(FormSubmissionError) as ctx:
+            submit_form(send, member, data, **kw)
+        return ctx.exception
+
+    def test_valid_submission_with_every_type(self):
+        send = self.make_send(self.full_form(), teams=[self.team])
+        upload = SimpleUploadedFile("cert.pdf", b"%PDF-1.4 hi", content_type="application/pdf")
+        sub = submit_form(send, self.ann, {"name": " Ann ", "age": "12,5", "mail": "a@b.co", "born": "2012-03-04", "size": "M", "days": ["mon", "tue"], "agree": "on"}, files={"doc": upload})
+        values = {a.field.key: a for a in sub.answers.select_related("field")}
+        self.assertEqual(values["name"].value, "Ann")
+        self.assertEqual(str(values["age"].value), "12.5")
+        self.assertEqual((values["born"].value, values["size"].value, values["days"].value, values["agree"].value), ("2012-03-04", "M", ["mon", "tue"], True))
+        doc = Answer.objects.get(pk=values["doc"].pk)
+        self.assertEqual(doc.value["name"], "cert.pdf")
+        self.assertTrue(doc.file.name.startswith(f"formbuilder/{send.pk}/{sub.pk}/"))
+        self.assertEqual(doc.file.read(), b"%PDF-1.4 hi")
+        self.assertEqual(sub.submitted_by, self.ann)
+
+    def test_blank_optional_not_stored_and_validation_errors(self):
+        send = self.make_send(self.full_form(), teams=[self.team])
+        self.assertEqual(sorted(a.field.key for a in submit_form(send, self.ann, {"name": "x"}).answers.select_related("field")), ["agree", "name"])  # an unchecked box is a stored "no"
+        err = self.errors(send, self.cara, {"name": "", "age": "abc", "mail": "nope", "born": "31-02-2020", "size": "XL", "days": ["mon", "fri"]})
+        self.assertEqual(set(err.errors), {"name", "age", "mail", "born", "size", "days"})
+        self.assertEqual(err.code, "invalid")
+        self.assertEqual(send.submissions.count(), 1)
+
+    def test_required_checkbox_and_multichoice_and_file(self):
+        form = self.make_form(("Ok", T.CHECKBOX), ("Pick", T.MULTICHOICE, {"options": ["a"]}), ("Doc", T.FILE))
+        send = self.make_send(form, teams=[self.team])
+        self.assertEqual(set(self.errors(send, self.ann, {"ok": "false"}).errors), {"ok", "pick", "doc"})
+
+    def test_file_type_and_size(self):
+        send = self.make_send(self.make_form(("Doc", T.FILE)), teams=[self.team])
+        exe = SimpleUploadedFile("evil.exe", b"MZ")
+        self.assertIn("doc", self.errors(send, self.ann, {}, files={"doc": exe}).errors)
+        empty = SimpleUploadedFile("a.pdf", b"")
+        self.assertIn("doc", self.errors(send, self.ann, {}, files={"doc": empty}).errors)
+        big = SimpleUploadedFile("a.pdf", b"x" * (10 * 1024 * 1024 + 1))
+        self.assertIn("doc", self.errors(send, self.ann, {}, files={"doc": big}).errors)
+
+    def test_send_rules(self):
+        now = timezone.now()
+        hour = datetime.timedelta(hours=1)
+        form = self.make_form(("Name", T.TEXT))
+        data = {"name": "x"}
+        self.assertEqual(self.errors(self.make_send(form, teams=[self.team], is_active=False), self.ann, data).code, "inactive")
+        self.assertEqual(self.errors(self.make_send(form, teams=[self.team], opens_at=now + hour), self.ann, data).code, "not_open_yet")
+        self.assertEqual(self.errors(self.make_send(form, teams=[self.team], closes_at=now - hour), self.ann, data).code, "closed")
+        self.assertEqual(self.errors(self.make_send(form, teams=[self.team]), self.bob, data).code, "not_addressed")
+        self.assertEqual(self.errors(self.make_send(form, teams=[self.team]), None, data).code, "login_required")
+        limited = self.make_send(form, teams=[self.team], max_submissions_per_user=1)
+        submit_form(limited, self.ann, data)
+        self.assertEqual(self.errors(limited, self.ann, data).code, "max_submissions")
+        submit_form(limited, self.cara, data)  # the limit is per member
+        # `when` overrides the clock
+        window = self.make_send(form, teams=[self.team], opens_at=now + hour)
+        self.assertEqual(submit_form(window, self.ann, data, when=now + 2 * hour).member, self.ann)
+
+    def test_anonymous_public_submission(self):
+        form = self.make_form(("Name", T.TEXT))
+        public = self.make_send(form, is_public=True)
+        sub = submit_form(public, None, {"name": "Guest"})
+        self.assertEqual((sub.member, sub.submitted_by), (None, None))
+        form.login_required = True
+        form.save()
+        self.assertEqual(self.errors(public, None, {"name": "x"}).code, "login_required")
+
+    def test_on_behalf_of_guardian(self):
+        send = self.make_send(self.make_form(("Name", T.TEXT)), teams=[self.team])
+        sub = submit_form(send, self.kid, {"name": "x"}, submitted_by=self.parent)
+        self.assertEqual((sub.member, sub.submitted_by, sub.submitted_on_behalf_by), (self.kid, self.parent, self.parent))
+        self.assertEqual(self.errors(send, self.kid2, {"name": "x"}, submitted_by=self.ann).code, "not_guardian")
+
+    # --- reporting ----------------------------------------------------------------------------------------------
+
+    def test_report_summaries_not_responded_and_csv(self):
+        form = self.make_form(("Name", T.TEXT), ("Size", T.CHOICE, {"options": ["S", "M"]}), ("Days", T.MULTICHOICE, {"options": ["mon", "tue"], "required": False}), ("Doc", T.FILE, {"required": False}))
+        send = self.make_send(form, teams=[self.team])
+        submit_form(send, self.ann, {"name": "=SUM(1)", "size": "S", "days": ["mon", "tue"]}, files={"doc": SimpleUploadedFile("a, b.pdf", b"x")})
+        submit_form(send, self.kid, {"name": "Kid", "size": "S", "days": ["mon"]}, submitted_by=self.parent)
+        report = reporting.form_report(send)
+        by_key = {c.key: c.pk for c in report.columns}
+        self.assertEqual(report.count, 2)
+        self.assertEqual(report.summaries[by_key["size"]], {"S": 2, "M": 0})
+        self.assertEqual(report.summaries[by_key["days"]], {"mon": 2, "tue": 1})
+        self.assertEqual(names(report.not_responded), ["Cara", "Dan", "Kid2"])
+        ann_row = next(r for r in report.rows if r.submission.member == self.ann)
+        self.assertEqual(ann_row.values[by_key["doc"]], "a, b.pdf")
+        self.assertIn(by_key["doc"], ann_row.files)
+        text = reporting.report_csv(report)
+        self.assertTrue(text.startswith("﻿Submitted at,Member,Submitted by,Name,Size,Days,Doc"))
+        self.assertIn("'=SUM(1)", text)
+        self.assertIn('"mon, tue"', text)
+        self.assertIn('"a, b.pdf"', text)
+        self.assertIn("Parent Test", text)

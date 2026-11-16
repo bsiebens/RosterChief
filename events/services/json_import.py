@@ -40,7 +40,7 @@ from datetime import datetime
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
-from django.utils.translation import gettext_lazy as _
+from django.utils.translation import gettext as _
 
 from events.models import Event, Location
 from teams.models import Team
@@ -74,7 +74,6 @@ class PlannedGame:
 
 @dataclass
 class JSONImportPlan:
-    club: object
     source: str
     competition: str
     title: str
@@ -114,10 +113,10 @@ def load(raw: str | bytes) -> dict:
     return payload
 
 
-def resolve_team(club, name: str) -> Team | None:
+def resolve_team(name: str) -> Team | None:
     """The club's team for ``name``: exact name or short name first, then the one team whose name
     contains it as a whole word (so "U10" finds "Sharks U10" but never "U1")."""
-    teams = list(Team.objects.filter(club=club))
+    teams = list(Team.objects.all())
     wanted = name.strip().casefold()
     for team in teams:
         if wanted in (team.name.casefold(), team.short_name.casefold()):
@@ -127,10 +126,10 @@ def resolve_team(club, name: str) -> Team | None:
     return containing[0] if len(containing) == 1 else None
 
 
-def suggested_location(club, city: str, hosted_by_us: bool) -> Location | None:
+def suggested_location(city: str, hosted_by_us: bool) -> Location | None:
     if hosted_by_us:
-        return Location.objects.filter(club=club, is_home=True).first()
-    return Location.objects.filter(club=club).filter(Q(city__iexact=city) | Q(name__iexact=city)).first()
+        return Location.objects.filter(is_home=True).first()
+    return Location.objects.filter(Q(city__iexact=city) | Q(name__iexact=city)).first()
 
 
 def _label(game: dict, our_code: str) -> str:
@@ -138,17 +137,16 @@ def _label(game: dict, our_code: str) -> str:
     return " · ".join(part for part in [str(game.get("ice") or "").strip(), ", ".join(others)] if part)[:LABEL_MAX_LENGTH]
 
 
-def build_plan(club, raw: str | bytes) -> JSONImportPlan:
+def build_plan(raw: str | bytes) -> JSONImportPlan:
     payload = load(raw)
     source = payload["source"].strip()
     plan = JSONImportPlan(
-        club=club,
         source=source,
         competition=str(payload.get("competition") or DEFAULT_COMPETITION).strip(),
         title=str(payload.get("title") or DEFAULT_TITLE).strip(),
-        location_choices=list(Location.objects.filter(club=club).order_by("name")),
+        location_choices=list(Location.objects.order_by("name")),
     )
-    existing_by_id = {event.external_game_id: event for event in Event.objects.filter(club=club, competition=plan.competition, external_source_id=source).exclude(external_game_id="").prefetch_related("teams").select_related("location")}
+    existing_by_id = {event.external_game_id: event for event in Event.objects.filter(competition=plan.competition, external_source_id=source).exclude(external_game_id="").prefetch_related("teams").select_related("location")}
 
     # Rows on the same date, start time and city are one play day: the file sometimes lists a day once
     # per team and sometimes once with all of them, so those rows are merged (first row's id wins).
@@ -170,7 +168,7 @@ def build_plan(club, raw: str | bytes) -> JSONImportPlan:
             raise JSONImportError(_("%(where)s: “teams” must list at least one team.") % {"where": where})
         teams = []
         for name in team_names:
-            team = resolve_team(club, str(name))
+            team = resolve_team(str(name))
             if team is None:
                 missing_teams.append(str(name))
             elif team not in teams:
@@ -191,7 +189,7 @@ def build_plan(club, raw: str | bytes) -> JSONImportPlan:
         game_id, start, end, city, teams, hosted = entry["id"], entry["start"], entry["end"], entry["city"], entry["teams"], entry["hosted"]
         label = _label(entry, str(payload.get("our_code") or ""))
         existing = existing_by_id.get(game_id)
-        planned = PlannedGame(external_game_id=game_id, start=start, end=end, city=city, teams=teams, hosted_by_us=hosted, label=label, suggested_location=suggested_location(club, city, hosted))
+        planned = PlannedGame(external_game_id=game_id, start=start, end=end, city=city, teams=teams, hosted_by_us=hosted, label=label, suggested_location=suggested_location(city, hosted))
 
         if existing is None:
             plan.to_create.append(planned)
@@ -207,7 +205,7 @@ def build_plan(club, raw: str | bytes) -> JSONImportPlan:
             plan.unchanged_count += 1
 
     if missing_teams:
-        available = ", ".join(Team.objects.filter(club=club).order_by("name").values_list("name", flat=True)) or "—"
+        available = ", ".join(Team.objects.order_by("name").values_list("name", flat=True)) or "—"
         raise JSONImportError(_("No team of this club matches: %(missing)s. The club's teams are: %(available)s.") % {"missing": ", ".join(sorted(set(missing_teams))), "available": available})
     return plan
 
@@ -245,7 +243,6 @@ def apply_plan(plan: JSONImportPlan, locations_by_game_id: dict) -> dict:
     with transaction.atomic():
         for planned in plan.to_create:
             event = Event.objects.create(
-                club=plan.club,
                 title=plan.title,
                 kind=Event.EventKind.GAME,
                 start=planned.start,
@@ -265,7 +262,7 @@ def apply_plan(plan: JSONImportPlan, locations_by_game_id: dict) -> dict:
             if planned.end:
                 event.end = planned.end
             event.location = locations_by_id.get(str(locations_by_game_id.get(planned.external_game_id) or ""))
-            event.save(update_fields=["start", "end", "competition_label", "location"])
+            event.save(update_fields=["start", "end", "competition_label", "location", "modified"])
             event.teams.set(planned.teams)
             updated += 1
 

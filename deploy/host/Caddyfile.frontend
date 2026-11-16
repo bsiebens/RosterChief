@@ -1,0 +1,49 @@
+{
+	email {$CADDY_ACME_EMAIL}
+	# Empty when the Cloudflare proxy is off; trusts only Cloudflare's ranges when it is on.
+	import /etc/rosterchief/cloudflare-ips.caddy
+}
+
+# Frontend host: serves the two SvelteKit apps and forwards everything Django owns (including /static and
+# /media, which live on the backend host) to BACKEND_URL, the backend's private address, e.g. http://10.0.1.5:8001.
+{$ROSTERCHIEF_BASE_DOMAIN}, *.{$ROSTERCHIEF_BASE_DOMAIN} {
+	# Written for this host's access mode (Cloudflare DNS certificate, or Caddy's own CA when reached by IP).
+	import /etc/rosterchief/tls.caddy
+	encode zstd gzip
+
+	@probe {
+		path /_rc/client-ip
+		remote_ip 127.0.0.1 ::1
+	}
+	handle @probe {
+		respond "{client_ip}"
+	}
+
+	@backend path /static/* /media/* /healthz /admin /admin/* /accounts /accounts/* /_allauth/browser/*
+
+	@control host control.{$ROSTERCHIEF_BASE_DOMAIN}
+	handle @control {
+		handle @backend {
+			reverse_proxy {$BACKEND_URL} {
+				header_up Host {$ROSTERCHIEF_BASE_DOMAIN}
+				header_up X-Forwarded-For {client_ip}
+			}
+		}
+		handle {
+			reverse_proxy 127.0.0.1:5173 {
+				header_up X-Forwarded-For {client_ip}
+			}
+		}
+	}
+
+	handle @backend {
+		reverse_proxy {$BACKEND_URL} {
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+	handle {
+		reverse_proxy 127.0.0.1:5174 {
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+}

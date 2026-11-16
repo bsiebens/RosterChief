@@ -1,5 +1,5 @@
 """Flattening a game's timeline into GameStat rows, and summing them back up for a
-team's analytics page (management's team_analytics view).
+team's analytics page (``team_analytics``) and a member's own numbers (``member_stats``).
 
 ``sync_game_stats`` is called from game_timeline.store whenever a timeline changed:
 it replaces the game's rows wholesale, so a federation correcting an assist after
@@ -15,14 +15,14 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from club.models import Club, Season
-from events.models import Event, GameStat, GameTimeline
+from events.models import Event, GameStat, GameTimeline, Season
 from events.services.strength_check import STRENGTH_LABELS, strength_conflicts
 from teams.models import TeamMembership
 
 GOAL, ASSIST, PIM = GameStat.StatType.GOAL, GameStat.StatType.ASSIST, GameStat.StatType.PENALTY_MINUTES
 SHOT, PP_OPPORTUNITY, CONCEDED = GameStat.StatType.SHOT, GameStat.StatType.POWER_PLAY_OPPORTUNITY, GameStat.StatType.GOAL_CONCEDED
 GOALIE_SECONDS = GameStat.StatType.GOALIE_SECONDS
+APPEARANCE = GameStat.StatType.APPEARANCE
 #: GameStat.value is a PositiveSmallIntegerField.
 _MAX_STAT_VALUE = 32767
 #: Penalty kinds that put the other side on a power play (a major or misconduct isn't counted when the source says so).
@@ -30,9 +30,17 @@ POWER_PLAY_KINDS = ("minor", "bench_minor", "double_minor", "major", "")
 POWER_PLAY = ("PP1", "PP2")
 
 
-def analytics_supported(club) -> bool:
-    """Whether team analytics exist for ``club``'s sport -- the timeline stats are ice hockey only today."""
-    return club is not None and club.sport_type == Club.SportType.ICE_HOCKEY
+def analytics_supported(club, features=None) -> bool:
+    """Whether team analytics are available to ``club``: the sport must support them (the timeline stats are ice hockey
+    only today: a sport called "...hockey..." by name or slug) AND the club needs the ``analytics`` feature. ``features``
+    is an ``Entitlements`` (e.g. ``request.features``); without it they are resolved for the club."""
+    sport = getattr(club, "sport", None) if club is not None else None
+    if sport is None or not ("hockey" in (sport.slug or "").lower() or "hockey" in (sport.name or "").lower()):
+        return False
+    from .competitions import entitlements_for
+
+    entitlements = entitlements_for(features if features is not None else club)
+    return bool(entitlements is not None and entitlements.has("analytics"))
 
 
 def _tokens(name: str) -> frozenset:
@@ -78,13 +86,14 @@ class _Roster:
 
 def event_season(event):
     """The event's own season, else the one its start date falls in (Event.season is "explicit, else derived")."""
-    return event.season or Season.covering(event.club_id, timezone.localtime(event.start).date())
+    return event.season or Season.covering(None, timezone.localtime(event.start).date())
 
 
 def _rows_for(event, team, document, roster, overrides=None) -> list[GameStat]:
     our_side = "home" if event.is_home_game else "away"
     overrides = overrides or {}
     conflicts = strength_conflicts(document, overrides)
+    season_id = getattr(event_season(event), "pk", None)
     rows = []
 
     def add(item, stat_type, person, *, value=1, slot="", meta=None, ours=None):
@@ -92,10 +101,9 @@ def _rows_for(event, team, document, roster, overrides=None) -> list[GameStat]:
         person = person or {}
         rows.append(
             GameStat(
-                club_id=event.club_id,
                 event=event,
                 team=team,
-                season_id=getattr(event_season(event), "pk", None),
+                season_id=season_id,
                 stat_type=stat_type,
                 value=value,
                 is_ours=ours,
@@ -108,6 +116,11 @@ def _rows_for(event, team, document, roster, overrides=None) -> list[GameStat]:
                 meta=meta or {},
             )
         )
+
+    # Who dressed (the source's line-up tables): one row per matched player, so a game played without a goal, penalty or
+    # save still counts as a game played.
+    for entry in (document.get("lineups") or {}).get(our_side) or []:
+        add({"id": f"lineup:{our_side}:{entry.get('license') or entry.get('number') or entry.get('name')}", "side": our_side}, APPEARANCE, {"name": entry.get("name"), "number": entry.get("number")}, meta={"pos": entry.get("pos") or "", "license": entry.get("license") or ""}, ours=True)
 
     goalie = None  # who is in our net right now, as far as the timeline says
     goalie_since = 0
@@ -431,6 +444,16 @@ def team_analytics(team, season, scope="all", friendlies=True, competition="") -
     for stat in stats:
         if stat.stat_type == PIM:
             per_game_pim[stat.event_id]["for" if stat.is_ours else "against"] += stat.value
+    # Per game, for the progress charts: our game misconducts (leaving the rest), and the power plays / penalty kills with their goals.
+    per_game = defaultdict(lambda: {"gm": 0, "pp_goals": 0, "pp_opps": 0, "pk_goals_against": 0, "pk_opps": 0})
+    for stat in stats:
+        row = per_game[stat.event_id]
+        if stat.stat_type == PIM and stat.is_ours and stat.meta.get("kind") == "game_misconduct":
+            row["gm"] += stat.value
+        elif stat.stat_type == GOAL and stat.meta.get("strength") in POWER_PLAY:
+            row["pp_goals" if stat.is_ours else "pk_goals_against"] += stat.value
+        elif stat.stat_type == PP_OPPORTUNITY:
+            row["pp_opps" if stat.is_ours else "pk_opps"] += stat.value
     game_rows = [
         {
             "event": game,
@@ -439,6 +462,11 @@ def team_analytics(team, season, scope="all", friendlies=True, competition="") -
             "against": game.score_against,
             "pim_for": per_game_pim[game.pk]["for"] if game.pk in per_game_pim else None,
             "pim_against": per_game_pim[game.pk]["against"] if game.pk in per_game_pim else None,
+            "pim_for_excl": per_game_pim[game.pk]["for"] - per_game[game.pk]["gm"] if game.pk in per_game_pim else None,
+            "pp_goals": per_game[game.pk]["pp_goals"] if game.pk in per_game else None,
+            "pp_opportunities": per_game[game.pk]["pp_opps"] if game.pk in per_game else None,
+            "pk_goals_against": per_game[game.pk]["pk_goals_against"] if game.pk in per_game else None,
+            "pk_opportunities": per_game[game.pk]["pk_opps"] if game.pk in per_game else None,
         }
         for game, bar in zip(reversed(games), reversed(game_bars), strict=True)
     ]
@@ -506,3 +534,111 @@ def team_analytics(team, season, scope="all", friendlies=True, competition="") -
         "game_bars": game_bars,
         "trend": _trend(games) if games else None,
     }
+
+
+def member_stats(member, season=None) -> dict:
+    """A member's own numbers from the matched GameStat rows (their side only), per team and in total, for ``season``
+    (every season when None): ``{"games", "goals", "assists", "points", "penalty_minutes", "pp_goals",
+    "game_winning_goals", "goalie": {"games", "conceded", "seconds", "minutes", "gaa"} | None, "teams": [...]}``,
+    each ``teams`` row being the same counters for one team (``team``, ``season``) -- newest season first."""
+    stats = GameStat.objects.filter(member=member, is_ours=True)
+    if season is not None:
+        stats = stats.filter(season=season)
+    stats = list(stats.select_related("team", "season"))
+
+    def counters(rows):
+        goals = [row for row in rows if row.stat_type == GOAL]
+        conceded = sum(row.value for row in rows if row.stat_type == CONCEDED)
+        seconds = sum(row.value for row in rows if row.stat_type == GOALIE_SECONDS)
+        goalie_games = len({row.event_id for row in rows if row.stat_type in (CONCEDED, GOALIE_SECONDS)})
+        assists = sum(row.value for row in rows if row.stat_type == ASSIST)
+        return {
+            "games": len({row.event_id for row in rows}),
+            "goals": sum(row.value for row in goals),
+            "assists": assists,
+            "points": sum(row.value for row in goals) + assists,
+            "penalties": sum(1 for row in rows if row.stat_type == PIM),
+            "penalty_minutes": sum(row.value for row in rows if row.stat_type == PIM),
+            "pp_goals": sum(row.value for row in goals if row.meta.get("strength") in POWER_PLAY),
+            "game_winning_goals": sum(row.value for row in goals if row.meta.get("game_winning")),
+            "goalie": {"games": goalie_games, "conceded": conceded, "seconds": seconds, "minutes": round(seconds / 60) if seconds else None, "gaa": round(conceded * 3600 / seconds, 2) if seconds else None} if goalie_games else None,
+        }
+
+    per_team = defaultdict(list)
+    for row in stats:
+        per_team[(row.team_id, row.season_id)].append(row)
+    teams = []
+    for rows in per_team.values():
+        teams.append({"team": rows[0].team, "season": rows[0].season, **counters(rows)})
+    teams.sort(key=lambda row: (-(row["season"].start_date.toordinal() if row["season"] else 0), row["team"].name))
+    return {**counters(stats), "teams": teams}
+
+
+def team_leaders(team, season, limit=LEADERS) -> dict:
+    """Just the leaderboards of ``team`` in ``season`` (all its played games): ``top_scorers``, ``top_assists``,
+    ``top_points``, ``top_offenders`` (penalty minutes) and ``goalies`` -- cheaper than ``team_analytics`` for a card."""
+    games = played_games(team, season)
+    stats = list(GameStat.objects.filter(team=team, event__in=[game.pk for game in games]).select_related("member"))
+    goalies = _leaderboard(stats, CONCEDED, GOALIE_SECONDS, limit=None)
+    for goalie in goalies:
+        goalie["minutes"] = round(goalie["seconds"] / 60) if goalie["seconds"] else None
+        goalie["gaa"] = round(goalie["total"] * 3600 / goalie["seconds"], 2) if goalie["seconds"] else None
+    return {
+        "top_scorers": _leaderboard(stats, GOAL, limit=limit),
+        "top_assists": _leaderboard(stats, ASSIST, limit=limit),
+        "top_points": _leaderboard(stats, GOAL, ASSIST, limit=limit),
+        "top_offenders": _leaderboard(stats, PIM, limit=limit),
+        "goalies": goalies,
+    }
+
+
+# ---- manual corrections -------------------------------------------------------------------------------------------
+
+
+def set_strength_override(actor, event, goal_id: str, strength: str) -> GameTimeline:
+    """Fixes (or confirms) the strength of one goal the analytics flagged (``strength_warnings``): stored in
+    ``GameTimeline.strength_overrides`` (which a re-fetch of the timeline leaves alone) and the game's stats are re-synced
+    so the goal counts as ``strength`` and is no longer flagged. Allowed for whoever may manage the game's attendance
+    (settings holders, managers of one of its teams)."""
+    from events.services.strength_check import STRENGTHS
+    from members.services import audit
+    from members.services.access import can_manage_attendance
+    from members.services.errors import Invalid, NotAllowed
+
+    if not can_manage_attendance(actor, event):
+        raise NotAllowed("You are not allowed to correct this game's statistics.")
+    timeline = GameTimeline.objects.filter(event=event).first()
+    if timeline is None:
+        raise Invalid("This game has no timeline.", {"event": ["This game has no timeline."]})
+    if strength not in STRENGTHS:
+        raise Invalid("Unknown strength.", {"strength": [f"Pick one of {', '.join(STRENGTHS)}."]})
+    if not any(item.get("id") == goal_id and item.get("type") == "goal" for item in (timeline.data or {}).get("events", [])):
+        raise Invalid("No such goal in this game.", {"goal": ["No such goal in this game."]})
+    previous = (timeline.strength_overrides or {}).get(goal_id)
+    with transaction.atomic():
+        timeline.strength_overrides = {**(timeline.strength_overrides or {}), goal_id: strength}
+        timeline.save(update_fields=["strength_overrides", "modified"])
+        sync_game_stats(event, timeline.data)
+        audit.record(actor, "game.strength_override", target=event, changes={"goal": goal_id, "strength": [previous, strength]})
+    return timeline
+
+
+def clear_strength_override(actor, event, goal_id: str) -> GameTimeline:
+    """Undoes ``set_strength_override`` for one goal: the source's own strength counts again (and may be flagged again)."""
+    from members.services import audit
+    from members.services.access import can_manage_attendance
+    from members.services.errors import Invalid, NotAllowed
+
+    if not can_manage_attendance(actor, event):
+        raise NotAllowed("You are not allowed to correct this game's statistics.")
+    timeline = GameTimeline.objects.filter(event=event).first()
+    if timeline is None or goal_id not in (timeline.strength_overrides or {}):
+        raise Invalid("This goal has no correction.", {"goal": ["This goal has no correction."]})
+    with transaction.atomic():
+        overrides = dict(timeline.strength_overrides)
+        previous = overrides.pop(goal_id)
+        timeline.strength_overrides = overrides
+        timeline.save(update_fields=["strength_overrides", "modified"])
+        sync_game_stats(event, timeline.data)
+        audit.record(actor, "game.strength_override_cleared", target=event, changes={"goal": goal_id, "strength": [previous, None]})
+    return timeline

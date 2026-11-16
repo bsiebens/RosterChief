@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Credit note {{ note.number }}</title>
+<style>
+  @page { size: A4; margin: 12mm 15mm 14mm; }
+  body { font-family: sans-serif; font-size: 9pt; color: #0f172a; line-height: 1.35; margin: 0; }
+  .muted { color: #64748b; }
+  .label { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.8pt; color: #94a3b8; margin-bottom: 1.5mm; font-weight: bold; }
+  .band { width: 100%; border-collapse: collapse; background: #0f172a; color: #ffffff; }
+  .band td { padding: 6mm 9mm; vertical-align: middle; border: 0; }
+  .band td.right { text-align: right; }
+  .brand-logo { width: 11mm; height: 11mm; vertical-align: middle; }
+  .brand-name { font-size: 15pt; font-weight: bold; letter-spacing: 0.4pt; vertical-align: middle; padding-left: 3mm; }
+  .doc-title { font-size: 22pt; font-weight: bold; letter-spacing: 2pt; text-transform: uppercase; margin: 0; }
+  .doc-number { font-size: 10pt; color: #cbd5e1; margin-top: 1mm; }
+  .doc-number strong { color: #ffffff; }
+  .accent { height: 1.6mm; background: #e4002b; }
+  .meta { width: 100%; border-collapse: collapse; margin-top: 7mm; }
+  .meta td { width: 33.33%; padding: 0 4mm 0 0; vertical-align: top; border: 0; }
+  .meta .value { font-size: 11pt; font-weight: bold; }
+  .meta .value.due { color: #e4002b; }
+  .parties { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; margin-top: 7mm; }
+  .parties td { width: 48.5%; vertical-align: top; padding: 4.5mm 6mm; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 1mm; line-height: 1.55; }
+  .parties td.gap { width: 3%; background: transparent; border: 0; padding: 0; }
+  .name { font-size: 11pt; font-weight: bold; }
+  .void { margin-top: 5mm; padding: 3mm 6mm; border: 2px solid #b00020; border-radius: 1mm; color: #b00020; background: #ffffff; }
+  .void strong.stamp { font-size: 20pt; letter-spacing: 3pt; display: block; }
+  table.lines { width: 100%; border-collapse: collapse; margin-top: 8mm; }
+  table.lines th { text-align: left; font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.8pt; color: #ffffff; background: #0f172a; padding: 2.6mm 4mm; }
+  table.lines td { padding: 3.2mm 4mm; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+  .num { text-align: right; }
+  table.lines th.num, table.lines td.num { white-space: nowrap; }
+  table.lines td.nowrap { white-space: nowrap; }
+  .sub { font-size: 8.5pt; color: #64748b; font-weight: normal; }
+  table.lines tr.sum td { border-bottom: 0; padding: 1.2mm 3mm; }
+  table.lines tr.sum.first td { padding-top: 3mm; }
+  table.lines tr.total td { font-weight: bold; border-top: 1.5px solid #0f172a; padding-top: 2.4mm; font-size: 10.5pt; }
+  table.lines tr.balance td { font-weight: bold; font-size: 12pt; background: #0f172a; color: #ffffff; padding: 3.2mm 3mm; border: 0; }
+  .note { margin-top: 6mm; padding: 4mm 6mm; border: 1px solid #e2e8f0; border-radius: 1mm; line-height: 1.55; }
+  .pay { margin-top: 7mm; padding: 4.5mm 6mm; border: 1px solid #e2e8f0; border-radius: 1mm; page-break-inside: avoid; }
+  .pay table { border-collapse: collapse; }
+  .pay td { padding: 0.8mm 10mm 0.8mm 0; vertical-align: top; }
+  .pay td.k { color: #64748b; }
+  .terms { margin-top: 6mm; white-space: pre-line; color: #334155; }
+  .footer { margin-top: 10mm; padding-top: 3mm; border-top: 1px solid #cbd5e1; font-size: 8pt; color: #64748b; white-space: pre-line; }
+</style>
+</head>
+<body>
+  <table class="band">
+    <tr>
+      <td><svg class="brand-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="40" height="40"><path d="M50 4 L90 18 V50 C90 76 72 92 50 98 C28 92 10 76 10 50 V18 Z" fill="#FFFFFF"></path><rect x="27" y="30" width="46" height="8" rx="4" fill="#0F1A2E"></rect><rect x="27" y="44" width="34" height="8" rx="4" fill="#0F1A2E"></rect><path d="M27 80 L50 62 L73 80 L66 85 L50 72 L34 85 Z" fill="#0F1A2E"></path></svg><span class="brand-name">{{ issuer.legal_name|default:"RosterChief" }}</span></td>
+      <td class="right">
+        <div class="doc-title">Credit note</div>
+        <div class="doc-number">No. <strong>{{ note.number }}</strong></div>
+      </td>
+    </tr>
+  </table>
+  <div class="accent"></div>
+
+  <table class="meta">
+    <tr>
+      <td><div class="label">Credit note date</div><div class="value">{{ note.issued_at|date:"Y-m-d" }}</div></td>
+      <td><div class="label">Credits invoice</div><div class="value">{{ invoice_number }}</div></td>
+      <td><div class="label">Reference</div><div class="value">{{ note.number }}</div></td>
+    </tr>
+  </table>
+
+  <table class="parties">
+    <tr>
+      <td>
+        <div class="label">From</div>
+        <div class="name">{{ issuer.legal_name|default:"RosterChief" }}</div>
+        {% if issuer.address %}{{ issuer.address }}<br>{% endif %}
+        {% if issuer.zip_code or issuer.city %}{{ issuer.zip_code }} {{ issuer.city }}<br>{% endif %}
+        {% if issuer.country_name %}{{ issuer.country_name }}<br>{% endif %}
+        {% if issuer.vat_id %}VAT {{ issuer.vat_id }}<br>{% endif %}
+        {% if issuer.contact_email %}{{ issuer.contact_email }}<br>{% endif %}
+        {% if issuer.website %}{{ issuer.website }}{% endif %}
+      </td>
+      <td class="gap"></td>
+      <td class="to">
+        <div class="label">Credited to</div>
+        <strong class="name">{{ bill_to.name }}</strong><br>
+        {% if bill_to.address %}{{ bill_to.address }}<br>{% endif %}
+        {% if bill_to.zip_code or bill_to.city %}{{ bill_to.zip_code }} {{ bill_to.city }}<br>{% endif %}
+        {% if bill_to.country_name %}{{ bill_to.country_name }}<br>{% endif %}
+        {% if bill_to.vat_id %}VAT {{ bill_to.vat_id }}{% endif %}
+      </td>
+    </tr>
+  </table>
+
+  <table class="lines">
+    <thead>
+      <tr><th>Description</th><th>Credited period</th><th class="num">Net (EUR)</th><th class="num">VAT</th><th class="num">Total (EUR)</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>{{ line_name }}</strong>{% if line_detail %}<br><span class="sub">{{ line_detail }}</span>{% endif %}{% if snap.reason %}<br><span class="sub">{{ snap.reason }}</span>{% endif %}</td>
+        <td class="nowrap">{{ credited_from|date:"Y-m-d" }} &ndash; {{ credited_to|date:"Y-m-d" }}</td>
+        <td class="num">-{{ net }}</td>
+        <td class="num">{% if snap.reverse_charge %}0%{% else %}{{ vat_rate|floatformat:"-2" }}%{% endif %} (-{{ vat }})</td>
+        <td class="num">-{{ total }}</td>
+      </tr>
+      <tr class="sum first"><td colspan="4" class="num">Total excl. VAT</td><td class="num">-{{ net }}</td></tr>
+      <tr class="sum"><td colspan="4" class="num">VAT{% if not snap.reverse_charge %} {{ vat_rate|floatformat:"-2" }}%{% endif %}</td><td class="num">-{{ vat }}</td></tr>
+      <tr class="balance"><td colspan="4" class="num">Total credited</td><td class="num">EUR -{{ total }}</td></tr>
+    </tbody>
+  </table>
+
+  {% if snap.reverse_charge %}
+  <div class="note">
+    <strong>VAT reverse charged.</strong> Intra-community supply of services; the customer is liable for VAT.<br>
+    Issuer VAT: {{ issuer.vat_id|default:"-" }} &middot; Customer VAT: {{ bill_to.vat_id|default:"-" }}
+  </div>
+  {% endif %}
+
+  {% if is_void %}
+  <div class="note">
+    This credit note cancels invoice {{ invoice_number }} (total EUR {{ snap.invoice_total }}), which was voided{% if replacement_invoice_number %} and replaced by invoice {{ replacement_invoice_number }}{% endif %}.
+    It is an accounting document only: the replacement covers the same period and amount, so no payment is due or refunded and your account balance is unchanged.
+  </div>
+  {% else %}
+  <div class="note">
+    This credit note corrects invoice {{ invoice_number }} (original total EUR {{ snap.invoice_total }}), which remains unchanged.
+    Amounts already paid are not refunded: any surplus is kept as credit on your account and deducted from your next invoice.
+  </div>
+  {% endif %}
+
+  {% if issuer.payment_terms %}<div class="terms">{{ issuer.payment_terms }}</div>{% endif %}
+  {% if issuer.invoice_footer %}<div class="footer">{{ issuer.invoice_footer }}</div>{% endif %}
+</body>
+</html>

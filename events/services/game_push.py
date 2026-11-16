@@ -1,188 +1,86 @@
-"""Live game pushes: telling the people who follow a team what just happened in
-its game -- goals, penalties, period ends, the result (GAME_TIMELINE.md phase 4).
+"""Live game pushes: telling the people who follow a game what just happened in it -- goals, penalties, period ends,
+the result (GAME_TIMELINE.md phase 4 in the old app).
 
-The moments themselves are detected and stored by events.services.game_moments
-(one GameMoment per thing that happened); ``record_moments`` hands each batch
-it just stored to ``schedule_delivery``, which pushes it after the transaction
-commits, off the polling thread. Decisions behind the rules here (§9):
+The moments themselves are detected and stored by events.services.game_moments (one GameMoment per thing that
+happened); ``record_moments`` hands each batch it just stored to ``schedule_delivery``, which delivers it once the
+surrounding transaction commits. The rules (unchanged from the old app):
 
-- **Who:** opt-in, anyone with an account in the club, per team they follow
-  (events.GameFollow -- set from the member app or the PWA's "Live game
-  updates" screen). Every one of our teams on the game counts.
-- **What:** every notifiable moment kind. A moment that isn't ``notifiable``
-  (a catch-up after an outage) is never pushed.
-- **How much:** the moments one poll detected go out as *one* push per
-  account (coalesced: the goal and penalty lines in one
-  message). No cap per game -- every poll that found something sends one.
-- **Where:** every channel through notifications.dispatch (native APNs/FCM
-  devices, web push) -- no Notification/inbox row per goal. Each channel is
-  as best-effort as the rest of the app's pushes.
+- **Who:** opt-in, any account following one of the game's teams (events.GameFollow) or the game itself
+  (events.EventFollow) -- see events.services.follows. Coaches and players are not pushed unless they follow.
+- **What:** every notifiable moment kind. A moment that isn't ``notifiable`` (a catch-up after an outage) is never
+  pushed.
+- **How much:** the moments one poll detected go out as *one* message per account (title = the scoreboard, one body
+  line per moment, events.services.game_texts). No cap per game.
+- **Where:** the club inbox with push (notifications.inbox.notify, category "game"): the push engine applies each
+  user's own settings (a user who switched game pushes off still gets the inbox entry). The inbox write and its push
+  outbox entry are one transaction, so delivery is at-least-once.
 """
 
-import datetime
 import logging
 
-from django.conf import settings
-from django.contrib.auth import get_user_model
-from django.db import transaction
-from django.db.models import Q
-from django.urls import NoReverseMatch, reverse
-from django.utils import timezone, translation
+from django.db import connection, transaction
+from django.utils import timezone
+from django_tenants.utils import schema_context
 
-from events.models import Event, EventFollow, GameFollow, GameMoment
+from events.models import Event, GameMoment
+from events.services.follows import followers
 from events.services.game_texts import compose
-from notifications.dispatch import dispatch_to_user
-from notifications.models import NotificationCategory
+from notifications import inbox
+from notifications.models import Category
 
 logger = logging.getLogger(__name__)
 
 
-def followers(event) -> list:
-    """Active accounts following ``event``: any of our teams on it, or the game itself."""
-    team_followers = GameFollow.objects.filter(club=event.club, team__in=event.teams.all()).values_list("user_id", flat=True)
-    game_followers = EventFollow.objects.filter(club=event.club, event=event).values_list("user_id", flat=True)
-    user_ids = set(team_followers) | set(game_followers)
-    return list(get_user_model().objects.filter(pk__in=user_ids, is_active=True))
+def event_href(event) -> str:
+    """Where the push leads in the management app."""
+    return f"/calendar/events/{event.pk}"
 
 
-def _event_url(event) -> str:
-    try:
-        return reverse("mobile:event_detail", kwargs={"pk": event.pk})
-    except NoReverseMatch:
-        return "/app/"
+def _current_club():
+    from events.services.attendance import current_club  # deferred: attendance is a sibling service with heavier imports
+
+    return current_club()
 
 
-def language_for_locale(locale) -> str:
-    """The language in settings.LANGUAGES a device locale ("nl-NL", "nl_BE", "en") maps to, by its
-    first two letters; English when it is empty or not one we translate into."""
-    code = (locale or "").replace("_", "-").split("-")[0].lower()
-    return code if code in {language for language, _name in settings.LANGUAGES} else "en"
-
-
-def deliver_moments(event_id, moment_ids) -> int:
-    """Pushes the given (just recorded) moments of one game to its followers.
-    Every notifiable moment is marked delivered -- after the dispatch -- whether
-    or not anyone follows the team. At-least-once: a crash mid-dispatch leaves
-    the batch unmarked, so the outbox retry sends it again. Returns how many accounts got
-    a push."""
-    event = Event.objects.select_related("club", "opponent", "location").filter(pk=event_id).first()
+def deliver_moments(event_id, moment_ids, *, club=None) -> int:
+    """Delivers the given (just recorded) moments of one game to its followers, in game-clock order. Every notifiable
+    moment of the batch is marked delivered afterwards, whether or not anyone follows the game, so nothing is retried
+    later and a moment is never sent twice. Runs in the club's schema; ``club`` defaults to the active one. Returns how
+    many accounts were notified."""
+    event = Event.objects.select_related("opponent", "location").filter(pk=event_id).first()
     if event is None:
         return 0
-    moments = list(GameMoment.objects.filter(event=event, pk__in=moment_ids, notifiable=True, delivered_at__isnull=True).order_by("game_seconds", "created_at"))
+    moments = list(GameMoment.objects.filter(event=event, pk__in=list(moment_ids), notifiable=True, delivered_at__isnull=True).order_by("game_seconds", "created"))
     if not moments:
         return 0
-
-    composed: dict = {}
-
-    def texts(language):
-        """``compose`` once per distinct language, under that language's override."""
-        if language not in composed:
-            with translation.override(language):
-                composed[language] = compose(event, moments)
-        return composed[language]
-
-    data = {"club_slug": event.club.slug, "target": {"type": "event", "id": str(event.pk)}, "kind": "game_moment", "category": "game"}
-    url = _event_url(event)
+    club = club or _current_club()
+    title, body = compose(event, moments)
     reached = 0
-    for user in followers(event):
-        if dispatch_to_user(club=event.club, user=user, texts=texts, data=data, url=url, thread_id=str(event.pk), category=NotificationCategory.GAME).total:
-            reached += 1
-    # Marked only now that the pushes went out: a crash before this repeats at most this batch
-    # (at-least-once) instead of dropping it for good.
-    GameMoment.objects.filter(pk__in=[moment.pk for moment in moments]).update(delivered_at=timezone.now())
+    with transaction.atomic():
+        if club is not None:
+            for user in followers(event):
+                inbox.notify(user, club, title=title, body=body, kind=inbox.Kind.INFO, href=event_href(event), push=True, category=Category.GAME)
+                reached += 1
+        else:  # pragma: no cover -- only outside a club schema, which never holds games
+            logger.warning("game_push.no_club event_id=%s", event.pk)
+        GameMoment.objects.filter(pk__in=[moment.pk for moment in moments]).update(delivered_at=timezone.now())
     logger.info("game_push.delivered event_id=%s moments=%s accounts=%s", event.pk, len(moments), reached)
     return reached
 
 
 def schedule_delivery(event, moment_ids) -> None:
-    """Writes an outbox entry in the surrounding transaction (the moments and the work to push them
-    commit together) and works it off after commit, off the polling thread."""
-    if moment_ids:
-        from notifications import outbox
-        from notifications.models import OutboxEntry
+    """Delivers ``moment_ids`` after the surrounding transaction commits (right away in autocommit), in the schema that
+    is active now -- the caller may have left its ``schema_context`` by the time the commit happens."""
+    if not moment_ids:
+        return
+    schema = connection.schema_name
+    ids = [str(pk) for pk in moment_ids]
 
-        entry = outbox.enqueue(OutboxEntry.Kind.GAME_MOMENTS, {"event_id": str(event.pk), "moment_ids": [str(pk) for pk in moment_ids]})
-        outbox.kick([entry.pk])
+    def run():
+        try:
+            with schema_context(schema):
+                deliver_moments(event.pk, ids)
+        except Exception:  # a push problem must never break the timeline update; the moments stay undelivered
+            logger.exception("game_push.delivery_failed event_id=%s", event.pk)
 
-
-def followed_team_ids(user, club) -> set:
-    return set(GameFollow.objects.filter(club=club, user=user).values_list("team_id", flat=True))
-
-
-def set_followed_teams(user, club, team_ids) -> set:
-    """Replaces ``user``'s followed teams in ``club`` with ``team_ids`` (only
-    this club's own teams are kept). Returns the resulting set."""
-    from teams.models import Team
-
-    wanted = set(Team.objects.filter(club=club, pk__in=list(team_ids)).values_list("pk", flat=True))
-    with transaction.atomic():
-        GameFollow.objects.filter(club=club, user=user).exclude(team_id__in=wanted).delete()
-        existing = followed_team_ids(user, club)
-        GameFollow.objects.bulk_create([GameFollow(club=club, user=user, team_id=team_id) for team_id in wanted - existing])
-    return wanted
-
-
-# -- following one game, and what Home shows for the games an account follows -------------------
-
-#: A followed game is on Home from this long before it starts ...
-FOLLOWED_GAME_LOOKAHEAD = datetime.timedelta(hours=24)
-#: ... through the time it is live, until this long after its start (a game takes ~2 hours, so the
-#: result stays up for a few hours afterwards).
-FOLLOWED_GAME_LOOKBACK = datetime.timedelta(hours=6)
-#: At most this many followed-game cards on Home (the Calendar has everything).
-FOLLOWED_GAMES_LIMIT = 5
-
-
-def followed_event_ids(user, club) -> set:
-    """The games ``user`` follows directly (not counting the ones their followed teams play)."""
-    return set(EventFollow.objects.filter(club=club, user=user).values_list("event_id", flat=True))
-
-
-def follow_event(user, club, event) -> None:
-    """Idempotent."""
-    EventFollow.objects.get_or_create(club=club, user=user, event=event)
-
-
-def unfollow_event(user, club, event) -> None:
-    """Idempotent."""
-    EventFollow.objects.filter(club=club, user=user, event=event).delete()
-
-
-def follow_state(user, club, event) -> dict:
-    """``{"directly": bool, "via_team": bool}`` for ``user`` and ``event``."""
-    directly = EventFollow.objects.filter(club=club, user=user, event=event).exists()
-    via_team = GameFollow.objects.filter(club=club, user=user, team__in=event.teams.all()).exists()
-    return {"directly": directly, "via_team": via_team}
-
-
-def followed_games(user, club, *, now=None, limit=FOLLOWED_GAMES_LIMIT) -> list[dict]:
-    """Rows ``{"event", "via"}`` for the games ``user`` follows -- directly or through a followed
-    team -- that are worth a card on Home right now: live, starting within the next day, or begun
-    within the last few hours. ``via`` is ``["game"]``, ``["team"]`` or both. Live games first, then
-    what is coming up soonest, then what just finished (latest first); at most ``limit``."""
-    now = now or timezone.now()
-    direct_ids = followed_event_ids(user, club)
-    team_ids = followed_team_ids(user, club)
-    if not direct_ids and not team_ids:
-        return []
-
-    in_window = Q(is_live=True) | Q(start__gte=now - FOLLOWED_GAME_LOOKBACK, start__lte=now + FOLLOWED_GAME_LOOKAHEAD)
-    followed = Q(pk__in=direct_ids) | Q(teams__in=team_ids)
-    events = list(Event.objects.filter(club=club, kind=Event.EventKind.GAME, cancelled=False).filter(followed).filter(in_window).distinct().select_related("location", "opponent", "timeline").prefetch_related("teams"))
-
-    def order(event):
-        if event.is_live:
-            return (0, event.start)
-        if event.start > now:
-            return (1, event.start)
-        return (2, -event.start.timestamp())
-
-    rows = []
-    for event in sorted(events, key=order)[:limit]:
-        via = []
-        if event.pk in direct_ids:
-            via.append("game")
-        if any(team.pk in team_ids for team in event.teams.all()):
-            via.append("team")
-        rows.append({"event": event, "via": via})
-    return rows
+    transaction.on_commit(run)

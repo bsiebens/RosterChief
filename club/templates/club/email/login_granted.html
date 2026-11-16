@@ -1,0 +1,23 @@
+{% extends "club/email/layout.html" %}
+{% block heading %}{{ t.hello }}{% endblock %}
+{% block intro %}{% if user_created %}{{ t.created }}{% else %}{{ t.existing }}{% endif %}{% endblock %}
+{% block action %}
+      <tr><td align="center" style="padding:0 32px 8px;">
+        <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+          <td align="center" style="border-radius:8px;background:{{ secondary }};">
+            <a href="{% if user_created %}{{ set_password_url }}{% else %}{{ login_url }}{% endif %}" style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:{{ secondary_content }};text-decoration:none;border-radius:8px;">{% if user_created %}{{ t.button_set }}{% else %}{{ t.button_login }}{% endif %}</a>
+          </td>
+        </tr></table>
+      </td></tr>
+{% endblock %}
+{% block details %}
+      <tr><td style="padding:20px 32px 8px;">
+        {% if user_created %}<p style="margin:0 0 16px;font-size:13px;line-height:1.5;color:#64748b;text-align:center;">{{ t.link_note }}</p>{% endif %}
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:10px;">
+          <tr><td style="padding:14px 18px;font-size:14px;line-height:1.7;color:#334155;">
+            {{ t.login_line }} <a href="{{ login_url }}" style="color:{{ secondary }};font-weight:600;text-decoration:none;">{{ login_url }}</a><br>
+            {{ t.email_line }} <strong style="color:#0f172a;">{{ login_email }}</strong>
+          </td></tr>
+        </table>
+      </td></tr>
+{% endblock %}

@@ -1,18 +1,13 @@
-"""Importing a team's fixture list for the DFEL (German women's ice hockey
-league, run by EHV-NRW) from the hockeydata.net API.
+"""Importing a team's fixture list for the DFEL (German women's ice hockey league, run by EHV-NRW) from the hockeydata.net
+API.
 
-The public team page (``https://ehv-nrw.de/leagues/team/<team_id>/<division_id>/``)
-carries no game data of its own -- it embeds a hockeydata widget whose config
-(an inline script) holds the public hockeydata API key. That key is read from the
-page on every fetch rather than hard-coded, since it may rotate. The schedule
-itself comes from hockeydata's JSONP ``Schedule`` endpoint for the whole
-division, filtered locally by team id (server-side team filtering times out).
+The public team page (``https://ehv-nrw.de/leagues/team/<team_id>/<division_id>/``) carries no game data of its own: it
+embeds a hockeydata widget whose config (an inline script) holds the public hockeydata API key. That key is read from the
+page on every fetch rather than hard-coded, since it may rotate. The schedule itself comes from hockeydata's JSONP
+``Schedule`` endpoint for the whole division, filtered locally by team id (server-side team filtering times out).
 
-Same two-step preview/confirm flow as events.services.rbihf_import, sharing its
-diff/apply core (``plan_from_fixtures``/``apply_plan``): ``fetch_schedule``
-returns plain JSON text a view can stash in the session, and ``build_plan`` is
-pure with respect to the network once it has that text. The same fetch also
-backs the single-game score refresh, events.competition.hockey.DFEL.
+Same two-step flow as events.services.rbihf_import, sharing its diff/apply core. The same fetch also backs the
+single-game score refresh, events.competition.hockey.DFEL.
 """
 
 import json
@@ -20,7 +15,7 @@ import re
 from datetime import UTC, datetime
 
 import requests
-from django.utils.translation import gettext_lazy as _
+from django.utils.translation import gettext as _
 
 from events.services.rbihf_import import ImportPlan, ScrapedFixture, apply_plan, plan_from_fixtures
 
@@ -34,9 +29,8 @@ SCHEDULE_URL = "https://api.hockeydata.net/data/ebel/Schedule"
 GAME_REPORT_URL = "https://api.hockeydata.net/data/ebel/GetGameReport"
 JSONP_CALLBACK = "rosterchief"
 
-# The widget config is JSON inside a JS string literal, so its quotes show up
-# "-escaped (or backslash-escaped, or plain) depending on how the page was
-# rendered -- accept any of them.
+# The widget config is JSON inside a JS string literal, so its quotes show up "-escaped (or backslash-escaped,
+# or plain) depending on how the page was rendered: accept any of them.
 _QUOTE = r"""(?:\\u0022|\\?["'])"""
 API_KEY_RE = re.compile(rf"apiKey{_QUOTE}\s*:\s*{_QUOTE}(?P<key>[A-Za-z0-9]+){_QUOTE}")
 JSONP_RE = re.compile(r"^\s*[\w$.]+\s*\((?P<body>.*)\)\s*;?\s*$", re.DOTALL)
@@ -56,15 +50,14 @@ class DFELImportError(Exception):
 
 def extract_ids(url: str) -> tuple[str, str]:
     """Returns (team_id, division_id) from an EHV-NRW team page URL."""
-    match = TEAM_URL_RE.match(url.strip())
+    match = TEAM_URL_RE.match((url or "").strip())
     if not match:
         raise DFELImportError(_("That doesn't look like an EHV-NRW team page -- expected something like https://ehv-nrw.de/leagues/team/70779/21691/."))
     return match.group("team_id"), match.group("division_id")
 
 
 def source_id(team_id, division_id) -> str:
-    """What's stored as Event.external_source_id for a DFEL import -- the team
-    *and* division, since the same team has a separate schedule per division."""
+    """Event.external_source_id for a DFEL import: the team *and* division (a team has a schedule per division)."""
     return f"{team_id}/{division_id}"
 
 
@@ -111,20 +104,15 @@ def fetch_api_key(team_id: str, division_id: str) -> str:
 
 
 def fetch_game_report(api_key: str, game_id: str) -> str:
-    """One game's full report (goals, penalties, goalie changes, stats) as JSON
-    text -- see events.services.timeline_parsers.parse_hockeydata. Plain JSON,
-    no callback needed (unlike Schedule's JSONP)."""
+    """One game's full report (goals, penalties, goalie changes, stats) as JSON text."""
     body = _get(GAME_REPORT_URL, params={"apiKey": api_key, "gameId": game_id, "lang": "en", "referer": "ehv-nrw.de"})
     match = JSONP_RE.match(body)
     return match.group("body") if match else body
 
 
 def fetch_schedule(team_id: str, division_id: str) -> str:
-    """Fetches the division's whole schedule and returns it as (unwrapped)
-    JSON text -- a plain str so a view can stash it in the session."""
-    html = _get(TEAM_PAGE_URL.format(team_id=team_id, division_id=division_id))
-    api_key = extract_api_key(html)
-
+    """Fetches the division's whole schedule and returns it as (unwrapped) JSON text."""
+    api_key = fetch_api_key(team_id, division_id)
     params = {"apiKey": api_key, "divisionId": division_id, "lang": "en", "referer": "ehv-nrw.de", "callback": JSONP_CALLBACK}
     body = _get(SCHEDULE_URL, params=params)
 
@@ -139,8 +127,8 @@ def _rows(raw_json: str) -> list[dict]:
 
 
 def _venue_text(location) -> str:
-    """The venue's city when the address has one (what suggested_location
-    matches against Location.city), else its display name."""
+    """The venue's city when the address has one (what suggested_location matches against Location.city), else its
+    display name."""
     if not isinstance(location, dict):
         return ""
     address = location.get("address")
@@ -156,8 +144,8 @@ def _venue_text(location) -> str:
     return (location.get("longname") or location.get("shortname") or "").strip()
 
 
-def parse_fixtures(raw_json: str, team_id: str) -> tuple[str, list[ScrapedFixture]]:
-    """Returns (the team's own display name, its upcoming fixtures)."""
+def parse_fixtures(raw_json: str, team_id: str, include_past: bool = False) -> tuple[str, list[ScrapedFixture]]:
+    """Returns (the team's own display name, its upcoming fixtures; ``include_past`` adds the games already played)."""
     team_id = str(team_id)
     team_name = ""
     fixtures = []
@@ -177,8 +165,8 @@ def parse_fixtures(raw_json: str, team_id: str) -> tuple[str, list[ScrapedFixtur
         if not game_id or not isinstance(timestamp, int | float):
             continue
         start = datetime.fromtimestamp(timestamp / 1000, tz=UTC)
-        if start <= now:
-            continue  # already played (or under way) -- only upcoming games are imported, same as RBIHF
+        if start <= now and not include_past:
+            continue  # already played (or under way): only upcoming games are imported unless asked
 
         fixtures.append(ScrapedFixture(external_game_id=str(game_id), start=start, is_home=is_home, opponent_name=(opponent_name or "").strip(), venue_text=_venue_text(row.get("location"))))
 
@@ -188,12 +176,12 @@ def parse_fixtures(raw_json: str, team_id: str) -> tuple[str, list[ScrapedFixtur
     return team_name, fixtures
 
 
-def build_plan(club, team, source_id: str, raw_json: str, competition_label: str = "") -> ImportPlan:
-    """DFEL counterpart to events.services.rbihf_import.build_plan -- ``source_id``
-    is ``source_id(team_id, division_id)``, ``raw_json`` what fetch_schedule returned."""
+def build_plan(team, source_id: str, raw_json: str, competition_label: str = "", include_past: bool = False) -> ImportPlan:
+    """DFEL counterpart to rbihf_import.build_plan: ``source_id`` is ``source_id(team_id, division_id)``, ``raw_json``
+    what fetch_schedule returned."""
     team_id = source_id.split("/", 1)[0]
-    scraped_team_name, fixtures = parse_fixtures(raw_json, team_id)
-    return plan_from_fixtures(club, team, competition=COMPETITION, source_id=source_id, scraped_team_name=scraped_team_name, fixtures=fixtures, competition_label=competition_label)
+    scraped_team_name, fixtures = parse_fixtures(raw_json, team_id, include_past)
+    return plan_from_fixtures(team, competition=COMPETITION, source_id=source_id, scraped_team_name=scraped_team_name, fixtures=fixtures, competition_label=competition_label)
 
 
 def find_game(raw_json: str, game_id: str) -> dict | None:

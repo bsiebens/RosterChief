@@ -1,365 +1,515 @@
-"""Assigning referees to home games.
+"""Referee management: assigning referees and match officials to home games and keeping track of what they are paid.
 
-Eligibility comes from teams.RefereeProfile -- a per-member level + validity
-(unrelated to members.Group), with the *level* (teams.RefereeLevel) owning
-which teams it qualifies for. A profile with no level, or one whose validity
-has lapsed, is not eligible for anything, and a team explicitly marked as not allowed
-for a profile is subtracted from what its level allows -- see
-RefereeProfile.eligible_teams, the single definition this module reads through. Availability conflicts (the
-member is expected elsewhere at an overlapping time) are surfaced as a
-warning only -- never a hard block, since a human may know the two
-commitments don't actually clash (enough travel time, one is optional).
-Capacity (Event.max_referees) *is* a hard ceiling, enforced here for both
-staff-assignment and any future self-service sign-up.
+Everything here is behind ``events.manage_referees`` (``members.services.access.require_referees``) and, at the API layer, the
+``referee_officials`` feature. Two kinds share every rule (``KINDS``): ``referee`` (``EventReferee``, ``Event.max_referees``,
+``Team.referee_management``, ``teams.RefereeProfile``) and ``official`` (the same with official in each place).
 
-A team can opt out of all of this entirely (Team.referee_management =
-FEDERATION): its home games never need club-arranged referees, so they're
-excluded from eligibility, assignment, and every referee-facing screen --
-see needs_referee_management().
+* A game needs club-arranged people when it is a home game or tournament (``Event.is_home_fixture``) with at least one team the
+  club arranges them for (``Team.<kind>_management == club``). Federation-managed teams are left out entirely.
+* Eligibility comes from the member's profile: a level that qualifies for one of the game's teams (own or inherited) minus the
+  explicitly excluded teams. A lapsed validity is still listed, flagged ``expired`` (managers may still pick them).
+* The capacity ``Event.max_<kind>s`` is a hard ceiling. Schedule conflicts are information only, never a block.
+* Fees are stored per assignment (fee, kilometres, rate per km, "no fee"), which the payment form (``payment_forms``) prints.
 
-Not every referee is a club member -- add_external_referee logs one by name
-only (still counts against Event.max_referees, still capacity-checked), for
-e.g. a federation-appointed referee the club still needs to pay.
-"""
+Not ported from the old app: sign-up invites / acceptances and the notifications sent on assignment."""
 
+import datetime
+from dataclasses import dataclass
 from decimal import Decimal
 
-from django.db import transaction
-from django.db.models import BooleanField, Case, When
+from django.db import connection, transaction
+from django.db.models import Q
 from django.utils import timezone
-from django.utils.formats import date_format
-from django.utils.translation import gettext_lazy as _
 
 from club.models import RefereeType
-from club.services.access import event_season
-from events.models import ASSUMED_EVENT_DURATION, Event, EventReferee, RefereeSignup
-from events.services.attendance import effective_members
+from events.models import ASSUMED_EVENT_DURATION, Attendance, Event, EventOfficial, EventReferee, OfficialSignup, RefereeSignup, Season
+from events.services import referee_notices
 from members.models import Member
-from notifications.models import NotificationCategory
-from notifications.services import notify_members
-from teams.models import RefereeLevel, RefereeProfile, StaffAssignment, Team
+from members.services import access, audit
+from members.services.errors import Invalid
+from teams.models import OfficialLevel, OfficialProfile, RefereeLevel, RefereeProfile, Team
+
+RANGES = ("week", "two_weeks", "10", "25", "50")
+BUSY_STATUSES = (Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.SELECTED, Attendance.AttendanceStatus.MAYBE, Attendance.AttendanceStatus.NO_RESPONSE)
+NEEDS = ("all", "open", "referees", "officials", "fees")
 
 
-class RefereeAssignmentError(Exception):
-    """A referee could not be assigned to a game."""
+@dataclass(frozen=True)
+class Kind:
+    code: str
+    model: type
+    profile: type
+    level: type
+    related: str  # Event reverse accessor
+    team_field: str
+    max_field: str
+    type_kind: str
+    signup: type
+    signup_related: str
 
 
-def event_window(event):
-    """(start, end) for overlap purposes -- events.end may be blank."""
-    return event.start, event.end or (event.start + ASSUMED_EVENT_DURATION)
+KINDS = {
+    "referee": Kind("referee", EventReferee, RefereeProfile, RefereeLevel, "referees", "referee_management", "max_referees", RefereeType.REFEREE, RefereeSignup, "referee_signups"),
+    "official": Kind("official", EventOfficial, OfficialProfile, OfficialLevel, "officials", "official_management", "max_officials", RefereeType.OFFICIAL, OfficialSignup, "official_signups"),
+}
 
 
-def needs_referee_management(event) -> bool:
-    """Whether this event is one the club should be arranging referees for at
-    all: a home game or tournament (Event.is_home_fixture) with at least one
-    club-managed team. A federation-managed team's home fixtures are entirely
-    out of scope for the referee tools -- the federation appoints referees
-    for those, not the club."""
-    return event.is_home_fixture and bool(_club_managed_team_ids(event))
+def kind_of(code: str) -> Kind:
+    if code not in KINDS:
+        raise Invalid("Unknown kind.", {"kind": ["Choose referee or official."]})
+    return KINDS[code]
 
 
-def _club_managed_team_ids(event) -> set:
-    # In Python over .all() (not a .filter()) so a prefetched ``teams`` -- the bulk resync
-    # in events.services.crew_invites -- costs no query per game.
-    return {team.pk for team in event.teams.all() if team.referee_management == Team.RefereeManagement.CLUB}
+# -- which games ---------------------------------------------------------------------------------------------------------
 
 
-def referee_roster(club):
-    """Everyone with a referee level and a validity date, resolved once: ``[(member_id,
-    expired, team_ids)]``, where team_ids is what they'd qualify for were the validity still
-    running. Passed to eligible_referees to evaluate many games without redoing this per game."""
-    team_ids_by_level = RefereeLevel.eligible_team_ids_by_level(club)
-    today = timezone.localdate()
-    profiles = RefereeProfile.objects.filter(club=club, level__isnull=False, valid_until__isnull=False).prefetch_related("excluded_teams")
-    return [(profile.member_id, profile.valid_until < today, profile.eligible_team_ids(team_ids_by_level.get(profile.level_id, set()), ignore_validity=True)) for profile in profiles]
+def club_managed_team_ids(event, kind: Kind) -> set:
+    return {team.pk for team in event.teams.all() if getattr(team, kind.team_field) == Team.Management.CLUB}
 
 
-def eligible_referees(event, *, include_expired=False, roster=None):
-    """Members who could referee `event`: their RefereeProfile is currently valid and
-    allows one of its club-managed teams -- what the level qualifies for (directly, or via
-    whatever that level inherits from) minus the teams explicitly marked as not allowed
-    for that person -- minus whoever is already assigned. Empty unless
-    needs_referee_management.
-
-    ``include_expired`` also returns people whose validity has lapsed but who would
-    otherwise qualify, flagged ``referee_expired`` -- for the staff assign dropdowns, where
-    a manager may still pick them; invites (sync_referee_invites) never include them.
-    ``roster`` is a precomputed referee_roster(event.club) for bulk callers.
-
-    Levels resolved to ids first (RefereeLevel.eligible_team_ids can't be
-    expressed as a single ORM lookup once inheritance is transitive), and the
-    profile check done per profile for the same reason plus the exclusions."""
-    if not needs_referee_management(event):
-        return Member.objects.none()
-
-    team_ids = _club_managed_team_ids(event)
-    if roster is None:
-        roster = referee_roster(event.club)
-    qualifying = [(member_id, expired) for member_id, expired, allowed in roster if allowed & team_ids and (include_expired or not expired)]
-    expired_ids = [member_id for member_id, expired in qualifying if expired]
-    assigned_ids = event.referees.values_list("member_id", flat=True)
-
-    return Member.objects.filter(pk__in=[member_id for member_id, _expired in qualifying]).exclude(pk__in=assigned_ids).annotate(referee_expired=Case(When(pk__in=expired_ids, then=True), default=False, output_field=BooleanField())).distinct()
+def needs_management(event, kind: Kind) -> bool:
+    """A home game or tournament with at least one team the club arranges this kind of person for."""
+    return event.is_home_fixture and bool(club_managed_team_ids(event, kind))
 
 
-def retract_ineligible_invites(profile):
-    """After a profile's exclusions (or level) changed: withdraw the *open* invites
-    (INVITED, upcoming events) for games the person may no longer referee, so they
-    stop seeing them in the app. Accepted sign-ups and real assignments are left alone --
-    those are a person's commitments, for the club's managers to sort out. Returns how
-    many invites were withdrawn."""
-    allowed = profile.eligible_team_ids() if profile.level_id else set()
-    withdrawn = 0
-    invites = RefereeSignup.objects.filter(member=profile.member, event__club=profile.club, event__start__gt=timezone.now(), status=RefereeSignup.Status.INVITED).select_related("event").prefetch_related("event__teams")
-    for invite in invites:
-        if not (allowed & _club_managed_team_ids(invite.event)):
-            invite.delete()
-            withdrawn += 1
-    return withdrawn
+def _managed_games():
+    """Every home game or tournament that needs people or already has some, soonest first (callers filter and slice)."""
+    managed = Q(teams__referee_management=Team.Management.CLUB) | Q(teams__official_management=Team.Management.CLUB)
+    assigned = Q(referees__isnull=False) | Q(officials__isnull=False)
+    return (
+        Event.objects.filter(kind__in=(Event.EventKind.GAME, Event.EventKind.TOURNAMENT), location__is_home=True, cancelled=False)
+        .filter(managed | assigned)
+        .distinct()
+        .select_related("location", "opponent")
+        .prefetch_related("teams", "referees__member", "referees__referee_type", "officials__member", "officials__referee_type", "referee_signups__member", "official_signups__member")
+    )
 
 
-def conflicting_events_for_members(members, event):
-    """Same overlap-and-audience check as conflicting_events, batched across
-    every member in `members` at once: each overlapping candidate's
-    effective_members() is resolved once and shared across every member,
-    instead of once per (member, candidate) pair -- the shape a whole
-    eligible-candidates list needs its conflicts checked in (event detail,
-    the referee dashboard), where the old per-member loop meant one query
-    per candidate for *each* of dozens of candidates. Returns
-    ``{member.pk: [conflicting events]}``."""
-    start, end = event_window(event)
-    overlapping = [candidate for candidate in Event.objects.filter(club=event.club).exclude(pk=event.pk).filter(start__lt=end) if event_window(candidate)[1] > start]
-    member_ids_by_candidate = {candidate.pk: set(effective_members(candidate).values_list("id", flat=True)) for candidate in overlapping}
-    return {member.pk: [candidate for candidate in overlapping if member.pk in member_ids_by_candidate[candidate.pk]] for member in members}
+def _season_end(season) -> datetime.date | None:
+    return season.end_date if season else None
 
 
-def conflicting_events(member, event):
-    """Other events in this club overlapping `event`'s time window where
-    `member` is part of the expected audience -- informational only, never
-    blocks an assignment. Single-member convenience wrapper around
-    conflicting_events_for_members -- checking a whole candidate list should
-    call that directly instead of this in a loop."""
-    return conflicting_events_for_members([member], event)[member.pk]
+# -- types ---------------------------------------------------------------------------------------------------------------
 
 
-def _lock_and_check_capacity(event):
-    """Row-locks `event` and raises RefereeAssignmentError if it's not a
-    club-managed home game or is already at Event.max_referees. Shared by
-    assign_referee/add_external_referee so two admins acting at the same
-    moment can't both squeeze past the ceiling."""
-    event = Event.objects.select_for_update().get(pk=event.pk)
-
-    if not needs_referee_management(event):
-        raise RefereeAssignmentError(_("Referees can only be assigned to home games for club-managed teams."))
-
-    if event.referees.count() >= event.max_referees:
-        raise RefereeAssignmentError(_("This game already has its maximum of %(max)s referee(s).") % {"max": event.max_referees})
-
-    return event
+def types_for(club, kind: Kind):
+    """The club's sport's types of this kind, in form order."""
+    return RefereeType.objects.filter(sport_id=club.sport_id, kind=kind.type_kind).order_by("ordering", "name")
 
 
-def referee_types_for(club, kind=RefereeType.Kind.REFEREE):
-    """The club's sport's referee types of one kind (REFEREE / OFFICIAL), in form order."""
-    return RefereeType.objects.filter(sport__code=club.sport_type, kind=kind).order_by("ordering", "name")
-
-
-def resolve_referee_type(club, referee_type, kind, error_class):
-    """Validate an optional type for an assignment: None passes, anything else must be a RefereeType
-    of the club's sport and the right kind, otherwise ``error_class`` is raised."""
-    if referee_type is None:
+def resolve_type(club, kind: Kind, type_id):
+    if type_id in (None, ""):
         return None
-    if not referee_types_for(club, kind).filter(pk=referee_type.pk).exists():
-        raise error_class(_("This type isn't available for your club's sport."))
+    referee_type = types_for(club, kind).filter(pk=type_id).first()
+    if referee_type is None:
+        raise Invalid("This type isn't available for your club's sport.", {"referee_type_id": ["This type isn't available for your club's sport."]})
     return referee_type
 
 
 def order_assignments(rows):
-    """Referee / official rows in display order, used by every screen and the PDFs: by type ordering
-    (rows without a type last), then alphabetically by display name -- members and externals interleaved.
-    Done in Python so it behaves the same on SQLite and PostgreSQL. Callers should select_related
-    ``member`` and ``referee_type`` to avoid per-row queries."""
+    """Display order used by every screen and the PDF: by type order (untyped last), then by name."""
 
     def key(row):
-        referee_type = row.referee_type
-        return (referee_type is None, referee_type.ordering if referee_type else 0, referee_type.name.casefold() if referee_type else "", row.display_name.casefold(), str(row.pk))
+        t = row.referee_type
+        return (t is None, t.ordering if t else 0, t.name.casefold() if t else "", row.display_name.casefold(), str(row.pk))
 
     return sorted(rows, key=key)
 
 
-@transaction.atomic
-def assign_referee(event, member, *, assigned_by, referee_type=None):
-    """Assign `member` to referee `event`. Raises RefereeAssignmentError if
-    it's not a club-managed home game, the game is already at
-    Event.max_referees, or `member` is already assigned."""
-    referee_type = resolve_referee_type(event.club, referee_type, RefereeType.Kind.REFEREE, RefereeAssignmentError)
-    event = _lock_and_check_capacity(event)
-
-    if event.referees.filter(member=member).exists():
-        raise RefereeAssignmentError(_("%(member)s is already assigned to this game.") % {"member": member})
-
-    referee = EventReferee.objects.create(event=event, member=member, assigned_by=assigned_by, referee_type=referee_type)
-    # An assignment settles the member's invite either way -- a staff pick is
-    # as good as a yes. Without this a directly assigned referee kept showing
-    # as "invited, no response yet", and one never invited had no signup row
-    # at all, so the game never showed up among their own duties in the app.
-    RefereeSignup.objects.update_or_create(event=event, member=member, defaults={"status": RefereeSignup.Status.CONFIRMED, "responded_at": timezone.now()})
-    if assigned_by is not None:
-        # A staff pick, made in the management app: the person didn't take this themselves, so
-        # tell them. (Self-service accepts pass assigned_by=None -- they just did it.)
-        start = timezone.localtime(event.start)
-
-        def body():
-            return _("You have been assigned as a referee for %(event)s on %(when)s.") % {"event": event.title, "when": date_format(start, "D d M, H:i")}
-
-        notify_members([member], club=event.club, title=_("Referee assignment"), body=body, source=event, category=NotificationCategory.CREW)
-    return referee
+# -- eligibility ---------------------------------------------------------------------------------------------------------
 
 
-@transaction.atomic
-def add_external_referee(event, name, *, assigned_by, referee_type=None):
-    """Log a non-member referee (e.g. federation-appointed) by name only.
-    Same capacity/home-game rules as assign_referee -- an external slot still
-    counts against Event.max_referees."""
-    name = name.strip()
-    if not name:
-        raise RefereeAssignmentError(_("A name is required for an external referee."))
-
-    referee_type = resolve_referee_type(event.club, referee_type, RefereeType.Kind.REFEREE, RefereeAssignmentError)
-    event = _lock_and_check_capacity(event)
-
-    return EventReferee.objects.create(event=event, external_name=name, assigned_by=assigned_by, referee_type=referee_type)
-
-
-def rename_external_referee(referee, name):
-    """Correct the name of an externally logged referee. Member-linked rows are refused: their
-    name comes from the member record."""
-    name = (name or "").strip()
-    if not name:
-        raise RefereeAssignmentError(_("A name is required for an external referee."))
-    if not referee.is_external:
-        raise RefereeAssignmentError(_("Only an external referee can be renamed."))
-    referee.external_name = name
-    referee.save(update_fields=["external_name"])
-    return referee
-
-
-def set_referee_type(referee, referee_type):
-    """Change (or clear, with None) the type of an existing assignment."""
-    referee.referee_type = resolve_referee_type(referee.event.club, referee_type, RefereeType.Kind.REFEREE, RefereeAssignmentError)
-    referee.save(update_fields=["referee_type"])
-    return referee
-
-
-@transaction.atomic
-def remove_referee(referee):
-    """Staff taking a referee off a game (management app). The person's own sign-up goes
-    back to ACCEPTED (still interested, no longer picked), so the game stops showing as a
-    confirmed duty in their app but stays on the interest list, and they are told. An external referee has
-    no account behind them: only the assignment goes."""
-    event, member = referee.event, referee.member
-    referee.delete()
-    if member is None:
-        return
-    RefereeSignup.objects.filter(event=event, member=member).update(status=RefereeSignup.Status.ACCEPTED, responded_at=timezone.now())
-
-    def body():
-        return _("You have been removed as a referee for %(event)s.") % {"event": event.title}
-
-    notify_members([member], club=event.club, title=_("Referee assignment removed"), body=body, source=event, category=NotificationCategory.CREW)
-
-
-def set_referee_fee(referee, *, fee=None, km=None, km_rate=None, no_fee=False):
-    """Update one referee assignment's payment details -- what the club owes
-    for this game, split into a flat fee and a mileage component. Any
-    argument left as None clears that field rather than leaving it
-    unchanged, matching how the edit form always submits all three."""
-    if no_fee:
-        # Unpaid: nothing is owed, so whatever was typed into the (hidden) fee line is dropped.
-        fee, km, km_rate = None, None, None
-    referee.fee = fee if fee is not None else Decimal("0.00")
-    referee.km = km
-    referee.km_rate = km_rate
-    referee.no_fee = no_fee
-    referee.save(update_fields=["fee", "km", "km_rate", "no_fee"])
-    return referee
-
-
-def sync_referee_invites(event, *, notify=True, roster=None):
-    """Invites every currently-eligible, not-yet-invited referee to `event` --
-    the referee-facing counterpart to events.sync_event_attendances, wired
-    from the same signal points (events/signals.py's post_save(Event) and
-    the Event.teams m2m). Idempotent: only creates rows for members with no
-    RefereeSignup at all yet for this event, so an unrelated edit (or a
-    second team added later) never re-notifies someone who already
-    responded -- or re-invites someone who already said no. ``notify=False`` creates the
-    rows without the "Referee needed" notification (events.services.crew_invites sends one
-    summary per person instead of one per game)."""
-    if not needs_referee_management(event):
+def candidates(event, kind: Kind, q: str = "") -> list[dict]:
+    """People who could take this game: ``[{id, name, level, expired, eligible, signed_up, conflicts}]``, free people first, then
+    those who signed up, expired last. Already assigned people are left out. Empty when the game needs nobody of this kind.
+    With a search ``q`` the eligible people matching it are followed by up to 15 other members matching it (``eligible``
+    false, no level): anyone can be assigned by hand, e.g. when nobody is eligible."""
+    if not needs_management(event, kind):
         return []
+    team_ids = club_managed_team_ids(event, kind)
+    by_level = {level.pk: level.eligible_team_ids() for level in kind.level.objects.select_related("inherits_from")}
+    today = timezone.localdate()
+    assigned = set(getattr(event, kind.related).values_list("member_id", flat=True))
+    signed = set(getattr(event, kind.signup_related).values_list("member_id", flat=True))
+    profiles = kind.profile.objects.filter(level__isnull=False, valid_until__isnull=False).select_related("member", "level")
+    if kind.code == "referee":
+        profiles = profiles.prefetch_related("excluded_teams")
+    found = []
+    for profile in profiles:
+        if profile.member_id in assigned:
+            continue
+        allowed = profile.eligible_team_ids(by_level.get(profile.level_id, set()), ignore_validity=True) if kind.code == "referee" else set(by_level.get(profile.level_id, set()))
+        if allowed & team_ids:
+            found.append(profile)
+    conflicts = conflicts_for([p.member_id for p in found], event)
+    out = [{"id": p.member_id, "name": str(p.member), "level": p.level.name, "expired": p.valid_until < today, "eligible": True, "signed_up": p.member_id in signed, "conflicts": conflicts.get(p.member_id, [])} for p in found]
+    out.sort(key=lambda row: (bool(row["conflicts"]), row["expired"], not row["signed_up"], row["name"].casefold()))
+    words = (q or "").split()
+    if words:
+        out = [row for row in out if all(w.casefold() in row["name"].casefold() for w in words)]
+        out.extend(_other_members(event, out, assigned, words))
+    return out
 
-    already_invited_ids = set(RefereeSignup.objects.filter(event=event).values_list("member_id", flat=True))
-    new_members = [member for member in eligible_referees(event, roster=roster) if member.pk not in already_invited_ids]
-    if not new_members:
-        return []
 
-    RefereeSignup.objects.bulk_create([RefereeSignup(event=event, member=member) for member in new_members])
-    if notify:
+def _other_members(event, listed: list[dict], assigned: set, words: list[str], limit: int = 15) -> list[dict]:
+    """Members matching ``words`` who are neither listed nor assigned yet, as not-eligible candidates."""
+    people = Member.objects.exclude(pk__in={row["id"] for row in listed} | set(assigned))
+    for word in words:
+        people = people.filter(Q(first_name__icontains=word) | Q(last_name__icontains=word))
+    people = list(people.order_by("last_name", "first_name")[:limit])
+    conflicts = conflicts_for([m.pk for m in people], event)
+    return [{"id": m.pk, "name": str(m), "level": "", "expired": False, "eligible": False, "signed_up": False, "conflicts": conflicts.get(m.pk, [])} for m in people]
 
-        def body():
-            return _("%(event)s needs a referee -- can you take it?") % {"event": event.title}
 
-        notify_members(new_members, club=event.club, title=_("Referee needed"), body=body, source=event, category=NotificationCategory.CREW)
-    return new_members
+def candidate_for(event, kind: Kind, member) -> dict | None:
+    """``member`` as a candidate for this game: an eligible one if they are, else any member (``eligible`` false) as long as the
+    game needs this kind of person and they are not on it yet."""
+    if not needs_management(event, kind):
+        return None
+    match = next((c for c in candidates(event, kind) if c["id"] == member.pk), None)
+    if match is not None:
+        return match
+    if getattr(event, kind.related).filter(member=member).exists():
+        return None
+    return _other_members_row(event, member)
+
+
+def _other_members_row(event, member) -> dict:
+    return {"id": member.pk, "name": str(member), "level": "", "expired": False, "eligible": False, "signed_up": False, "conflicts": conflicts_for([member.pk], event).get(member.pk, [])}
+
+
+def _window(event):
+    return event.start, event.end or (event.start + ASSUMED_EVENT_DURATION)
+
+
+def conflicts_for(member_ids, event) -> dict:
+    """``{member_id: [{event_id, title, start, end, kind, role}]}``: the other events overlapping ``event`` that these members are
+    on, as a referee / official elsewhere (``role`` referee, official) or on the attendance list with an open answer or a yes
+    (``role`` attendance). Information only, never a block on its own."""
+    member_ids = set(member_ids)
+    if not member_ids:
+        return {}
+    start, end = _window(event)
+    nearby = Event.objects.exclude(pk=event.pk).filter(cancelled=False, start__lt=end, start__gt=start - datetime.timedelta(days=2))
+    overlapping = {e.pk: e for e in nearby if _window(e)[1] > start}
+    out: dict = {}
+    if not overlapping:
+        return out
+
+    def add(member_id, other, role):
+        s, e = _window(other)
+        rows = out.setdefault(member_id, [])
+        if not any(r["event_id"] == other.pk and r["role"] == role for r in rows):
+            rows.append({"event_id": other.pk, "title": other.title, "start": s, "end": e, "kind": other.kind, "role": role})
+
+    for kind in KINDS.values():
+        for row in kind.model.objects.filter(member_id__in=member_ids, event_id__in=overlapping):
+            add(row.member_id, overlapping[row.event_id], kind.code)
+    for row in Attendance.objects.filter(member_id__in=member_ids, event_id__in=overlapping, status__in=BUSY_STATUSES):
+        add(row.member_id, overlapping[row.event_id], "attendance")
+    for rows in out.values():
+        rows.sort(key=lambda r: r["start"])
+    return out
+
+
+# -- writes --------------------------------------------------------------------------------------------------------------
+
+
+def _lock(event, kind: Kind) -> Event:
+    event = Event.objects.select_for_update().get(pk=event.pk)
+    if not needs_management(event, kind):
+        raise Invalid(f"A {kind.code} can only be assigned to a home game of a team the club arranges them for.")
+    if getattr(event, kind.related).count() >= getattr(event, kind.max_field):
+        raise Invalid(f"This game already has its maximum of {getattr(event, kind.max_field)} {kind.code}(s).")
+    return event
+
+
+def _assigned_by(actor):
+    return Member.objects.filter(user=actor).first() if actor is not None and getattr(actor, "pk", None) else None
 
 
 @transaction.atomic
-def accept_referee_signup(signup):
-    """Records that `signup`'s member wants to come (ACCEPTED) -- interest only. It
-    creates no EventReferee and uses no capacity: staff pick who actually goes from the
-    referee-management screen (confirm_referee_signup). Someone staff already confirmed
-    stays CONFIRMED. Raises RefereeAssignmentError if the game no longer needs a club-arranged referee
-    (e.g. it was moved away from home)."""
-    if not needs_referee_management(signup.event):
-        raise RefereeAssignmentError(_("Referees can only sign up for home games of club-managed teams."))
-    if signup.status != RefereeSignup.Status.CONFIRMED:
-        signup.status = RefereeSignup.Status.ACCEPTED
-        signup.responded_at = timezone.now()
-        signup.save(update_fields=["status", "responded_at"])
+def assign(actor, event, kind: Kind, *, member_id=None, external_name: str = "", type_id=None, force: bool = False):
+    """Put a club member (``member_id``) or an external person (``external_name``) on a game."""
+    access.require_referees(actor)
+    external_name = (external_name or "").strip()
+    if bool(member_id) == bool(external_name):
+        raise Invalid("Choose a member or give a name.", {"member_id": ["Choose a member or give a name."]})
+    referee_type = resolve_type(connection.tenant, kind, type_id)
+    member = None
+    if member_id:
+        member = Member.objects.filter(pk=member_id).first()
+        match = candidate_for(event, kind, member) if member else None
+        if match is None:
+            raise Invalid("This person can't be assigned to this game.", {"member_id": ["This person can't be assigned to this game."]})
+        if match["conflicts"] and not force:
+            titles = ", ".join(c["title"] for c in match["conflicts"])
+            raise Invalid(f"{member} is already expected elsewhere at this time: {titles}. Confirm to assign anyway.", {"member_id": ["Has another event at the same time."]}, code="conflict")
+    event = _lock(event, kind)
+    if member and getattr(event, kind.related).filter(member=member).exists():
+        raise Invalid(f"{member} is already assigned to this game.", {"member_id": ["Already assigned."]})
+    row = kind.model.objects.create(event=event, member=member, external_name=external_name, referee_type=referee_type, assigned_by=_assigned_by(actor))
+    if member:
+        kind.signup.objects.filter(event=event, member=member).delete()  # a pick settles the sign-up
+        referee_notices.notify_member(member, event, kind.code, assigned=True, actor=actor)
+    audit.record(actor, f"event.{kind.code}_assigned", member=member, target=row, target_label=f"{row.display_name} - {event.title}"[:255], changes={"event": {"from": None, "to": str(event.pk)}})
+    return row
+
+
+@transaction.atomic
+def add_signup(actor, event, kind: Kind, member_id):
+    """Register a sign-up for an eligible member on their behalf (a member app will call the same service later)."""
+    access.require_referees(actor)
+    member = Member.objects.filter(pk=member_id).first()
+    if member is None or not any(c["id"] == member.pk for c in candidates(event, kind)):
+        raise Invalid("This person can't sign up for this game.", {"member_id": ["This person can't sign up for this game."]})
+    signup, created = kind.signup.objects.get_or_create(event=event, member=member)
+    if created:
+        audit.record(actor, f"event.{kind.code}_signup_added", member=member, target=signup, target_label=f"{member} - {event.title}"[:255])
     return signup
 
 
 @transaction.atomic
-def confirm_referee_signup(signup, *, assigned_by):
-    """Staff pick `signup`'s member for the game: the capacity-checked assign_referee
-    (which marks the signup CONFIRMED and tells the member). Raises RefereeAssignmentError
-    when the game is full or the member is already assigned; the signup is left as it was."""
-    assign_referee(signup.event, signup.member, assigned_by=assigned_by)
-    signup.refresh_from_db()
-    return signup
+def remove_signup(actor, signup, kind: Kind) -> None:
+    access.require_referees(actor)
+    audit.record(actor, f"event.{kind.code}_signup_removed", member=signup.member, target=signup, target_label=f"{signup.member} - {signup.event.title}"[:255])
+    signup.delete()
+
+
+FEE_FIELDS = ("fee", "km", "km_rate", "no_fee")
 
 
 @transaction.atomic
-def decline_referee_signup(signup):
-    """Declines `signup`. If they were assigned -- by staff (assign_referee marks the signup CONFIRMED) -- the
-    EventReferee row goes too, so the assignment and the member's own answer
-    never disagree and the desktop screen stops counting someone who can't
-    make it. In that case only, the game's own manager(s) are told
-    (management position, same audience as lineup.notify_dropout): unlike
-    declining an invite nobody was counting on yet, dropping out of an
-    assignment leaves a hole someone now has to fill."""
-    retracted = EventReferee.objects.filter(event=signup.event, member=signup.member).delete()[0] > 0
-    signup.status = RefereeSignup.Status.DECLINED
-    signup.responded_at = timezone.now()
-    signup.save(update_fields=["status", "responded_at"])
+def update(actor, row, kind: Kind, changes: dict):
+    """Change the fee line (fee, km, km_rate, no_fee), the type, or the name of an external person. Only keys in ``changes``
+    are touched. ``no_fee`` clears the fee line, like the old form did."""
+    access.require_referees(actor)
+    errors = {}
+    values = {}
+    for name in FEE_FIELDS:
+        if name in changes:
+            values[name] = changes[name]
+    for name, limit in (("fee", Decimal("999999.99")), ("km", Decimal("99999.9")), ("km_rate", Decimal("99.9999"))):
+        value = values.get(name)
+        if value is not None and (value < 0 or value > limit):
+            errors[name] = ["Must be a positive amount within range."]
+    if "name" in changes:
+        name = (changes["name"] or "").strip()
+        if not row.is_external:
+            errors["name"] = ["Only an external person can be renamed."]
+        elif not name:
+            errors["name"] = ["A name is required."]
+        else:
+            values["external_name"] = name
+    if "referee_type_id" in changes:
+        try:
+            values["referee_type"] = resolve_type(connection.tenant, kind, changes["referee_type_id"])
+        except Invalid as e:
+            errors.update(e.errors)
+    if errors:
+        raise Invalid("Please correct the highlighted fields.", errors)
+    if values.get("no_fee", row.no_fee):
+        values.update(fee=Decimal("0.00"), km=None, km_rate=None)
+        values.setdefault("no_fee", row.no_fee)
+    elif "fee" in values and values["fee"] is None:
+        values["fee"] = Decimal("0.00")
+    diff = audit.diff(row, {k: v for k, v in values.items() if k != "referee_type"} | ({"referee_type_id": values["referee_type"].pk if values["referee_type"] else None} if "referee_type" in values else {}))
+    for name, value in values.items():
+        setattr(row, name, value)
+    row.save()
+    if diff:
+        audit.record(actor, f"event.{kind.code}_updated", member=row.member, target=row, target_label=f"{row.display_name} - {row.event.title}"[:255], changes=diff)
+    return row
 
-    if retracted:
-        manager_ids = StaffAssignment.objects.filter(team__in=signup.event.teams.all(), position__management_position=True, season=event_season(signup.event)).values_list("member_id", flat=True).distinct()
-        managers = Member.objects.filter(pk__in=manager_ids)
-        if managers:
 
-            def body():
-                return _("%(member)s can no longer referee %(event)s after all -- you may need to find a replacement.") % {"member": signup.member.get_full_name(), "event": signup.event.title}
+@transaction.atomic
+def remove(actor, row, kind: Kind) -> None:
+    access.require_referees(actor)
+    label = f"{row.display_name} - {row.event.title}"[:255]
+    member, pk, event = row.member, row.pk, row.event
+    row.delete()
+    referee_notices.notify_member(member, event, kind.code, assigned=False, actor=actor)
+    entry = audit.record(actor, f"event.{kind.code}_removed", member=member, changes={"event": {"from": str(row.event_id), "to": None}})
+    entry.target_type, entry.target_id, entry.target_label = f"event{kind.code}", str(pk), label
+    entry.save(update_fields=["target_type", "target_id", "target_label", "modified"])
 
-            notify_members(managers, club=signup.event.club, title=_("Referee dropped out"), body=body, source=signup.event, category=NotificationCategory.CREW)
 
-    return signup
+@transaction.atomic
+def set_capacity(actor, event, *, max_referees=None, max_officials=None):
+    """Raise or lower how many of each a game takes. Not below what is already assigned."""
+    access.require_referees(actor)
+    errors = {}
+    for kind, value in ((KINDS["referee"], max_referees), (KINDS["official"], max_officials)):
+        if value is None:
+            continue
+        if value < 0 or value > 20:
+            errors[kind.max_field] = ["Choose a number between 0 and 20."]
+        elif value < getattr(event, kind.related).count():
+            errors[kind.max_field] = ["More people are already assigned."]
+    if errors:
+        raise Invalid("Please correct the highlighted fields.", errors)
+    changes = {k: v for k, v in (("max_referees", max_referees), ("max_officials", max_officials)) if v is not None}
+    diff = audit.diff(event, changes)
+    for name, value in changes.items():
+        setattr(event, name, value)
+    event.save(update_fields=list(changes) or None)
+    if diff:
+        audit.record(actor, "event.referee_capacity_updated", target=event, target_label=event.title[:255], changes=diff)
+    return event
+
+
+# -- reading -------------------------------------------------------------------------------------------------------------
+
+
+def assignment_out(row, conflicts=()) -> dict:
+    return {
+        "id": row.pk,
+        "member_id": row.member_id,
+        "name": row.display_name,
+        "is_external": row.is_external,
+        "type_id": row.referee_type_id,
+        "type_name": row.referee_type.name if row.referee_type_id else "",
+        "fee": row.fee or Decimal("0.00"),
+        "km": row.km,
+        "km_rate": row.km_rate,
+        "no_fee": row.no_fee,
+        "fee_pending": row.fee_pending,
+        "total": row.total_payable,
+        "conflicts": list(conflicts),
+    }
+
+
+def game_out(event, *, conflicts: bool = False, detail: bool = False) -> dict:
+    """The API shape of a game. ``conflicts`` adds the double bookings of the assigned people; ``detail`` also works out, per
+    sign-up, whether the person can be assigned right now and what they would clash with."""
+    out = {
+        "id": event.pk,
+        "title": event.title,
+        "kind": event.kind,
+        "start": event.start,
+        "end": _window(event)[1],
+        "location_name": event.location.name if event.location_id else "",
+        "opponent_name": event.opponent.name if event.opponent_id else "",
+        "teams": [{"id": t.pk, "name": t.name, "short_name": t.short_name} for t in event.teams.all()],
+    }
+    total = Decimal("0")
+    pending = False
+    signups = []
+    clashes = 0
+    for kind in KINDS.values():
+        rows = order_assignments(getattr(event, kind.related).all())
+        found = conflicts_for([r.member_id for r in rows if r.member_id], event) if conflicts else {}
+        clashes += len(found)
+        total += sum((r.total_payable for r in rows), Decimal("0"))
+        pending = pending or any(r.fee_pending for r in rows)
+        out[kind.related] = [assignment_out(r, found.get(r.member_id, ())) for r in rows]
+        out[f"max_{kind.related}"] = getattr(event, kind.max_field)
+        out[f"needs_{kind.related}"] = needs_management(event, kind)
+        out[f"{kind.code}_short"] = out[f"needs_{kind.related}"] and len(rows) < getattr(event, kind.max_field)
+        sign_rows = list(getattr(event, kind.signup_related).all())
+        free = {c["id"]: c for c in candidates(event, kind)} if detail and sign_rows and len(rows) < getattr(event, kind.max_field) else {}
+        for sign in sign_rows:
+            match = free.get(sign.member_id)
+            signups.append({"id": sign.pk, "kind": kind.code, "member_id": sign.member_id, "name": str(sign.member), "created": sign.created, "can_assign": match is not None, "conflicts": match["conflicts"] if match else []})
+    out["signups"] = signups
+    out["fees_pending"] = pending
+    out["conflict_count"] = clashes
+    out["total"] = total
+    return out
+
+
+def game_detail(event) -> dict:
+    return game_out(event, conflicts=True, detail=True)
+
+
+def _matches(game: dict, need: str) -> bool:
+    if need == "open":
+        return game["referee_short"] or game["official_short"]
+    if need == "referees":
+        return game["referee_short"]
+    if need == "officials":
+        return game["official_short"]
+    if need == "fees":
+        return game["fees_pending"]
+    return True
+
+
+def _season_bounds():
+    season = Season.get_current()
+    return (season.start_date, season.end_date) if season else (None, None)
+
+
+def games(*, scope: str = "upcoming", range_: str = "two_weeks", need: str = "all") -> dict:
+    """The management list. ``upcoming``: managed games from now on, narrowed by ``range_`` (a calendar window or a count)
+    and then by ``need``. ``season``: every game of the current season that has someone assigned, past and upcoming, in date
+    order (the payments tab). ``counts`` holds the size of every ``need`` chip over the same window."""
+    now = timezone.now()
+    if range_ not in RANGES:
+        range_ = "two_weeks"
+    if need not in NEEDS:
+        need = "all"
+    qs = _managed_games()
+    if scope == "season":
+        first, last = _season_bounds()
+        if first:
+            qs = qs.filter(start__date__gte=first, start__date__lte=last)
+        rows = [game_out(e) for e in qs.order_by("start")]
+        rows = [g for g in rows if g["referees"] or g["officials"]]
+    else:
+        events = list(qs.filter(start__gte=now).order_by("start"))
+        if range_ in ("week", "two_weeks"):
+            today = timezone.localdate()
+            end = today + datetime.timedelta(days=6 - today.weekday()) + datetime.timedelta(days=7 if range_ == "two_weeks" else 0)
+            events = [e for e in events if timezone.localtime(e.start).date() <= end]
+        else:
+            events = events[: int(range_)]
+        rows = [game_out(e, conflicts=True) for e in events]
+        rows = [g for g in rows if g["needs_referees"] or g["needs_officials"] or g["referees"] or g["officials"]]
+    counts = {key: sum(1 for g in rows if _matches(g, key)) for key in NEEDS}
+    return {"games": [g for g in rows if _matches(g, need)], "counts": counts, "range": range_, "need": need, "scope": scope}
+
+
+def summary() -> dict:
+    """KPIs over the rest of the season, the workload per person this season and what the club can choose from."""
+    now = timezone.now()
+    season = Season.get_current()
+    upcoming = [e for e in _managed_games().filter(start__gte=now) if not season or timezone.localtime(e.start).date() <= season.end_date]
+    kpis = {}
+    for kind in KINDS.values():
+        managed = [e for e in upcoming if needs_management(e, kind)]
+        counts = [len(getattr(e, kind.related).all()) for e in managed]
+        maxes = [getattr(e, kind.max_field) for e in managed]
+        kpis[kind.code] = {
+            "games": len(managed),
+            # Every game lands in exactly one bucket; a game that needs nobody of this kind (max 0) is fully staffed.
+            "none": sum(1 for c, m in zip(counts, maxes, strict=True) if m > 0 and c == 0),
+            "partial": sum(1 for c, m in zip(counts, maxes, strict=True) if 0 < c < m),
+            "full": sum(1 for c, m in zip(counts, maxes, strict=True) if c >= m),
+        }
+    workload: dict = {}
+    since = season.start_date if season else None
+    for kind in KINDS.values():
+        rows = kind.model.objects.select_related("member", "event")
+        if season:
+            rows = rows.filter(event__start__date__gte=season.start_date, event__start__date__lte=season.end_date)
+        for row in rows:
+            key = (kind.code, row.member_id or row.external_name.casefold())
+            entry = workload.setdefault(key, {"key": f"{kind.code}:{key[1]}", "member_id": row.member_id, "name": row.display_name, "kind": kind.code, "games": 0, "total": Decimal("0")})
+            entry["games"] += 1
+            entry["total"] += row.total_payable
+    pending = 0
+    for kind in KINDS.values():
+        rows = kind.model.objects.filter(fee=0, no_fee=False)
+        if season:
+            rows = rows.filter(event__start__date__gte=since, event__start__date__lte=season.end_date)
+        pending += rows.count()
+    return {
+        "season_name": season.name if season else "",
+        "kpis": kpis,
+        "fees_pending": pending,
+        "workload": sorted(workload.values(), key=lambda w: (-w["games"], w["name"].casefold())),
+    }
+
+
+def club_types(club) -> dict:
+    return {kind.code: [{"id": t.pk, "name": t.name} for t in types_for(club, kind)] for kind in KINDS.values()}

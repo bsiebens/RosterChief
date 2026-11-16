@@ -1,0 +1,10 @@
+[Unit]
+Description=Check RosterChief services and public TLS routes
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/rosterchief/site.env
+ExecStart=/usr/local/sbin/rosterchief-health --tls
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
