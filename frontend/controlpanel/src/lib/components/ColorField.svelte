@@ -7,9 +7,9 @@
 	}: { label: string; value?: string; error?: string; help?: string } = $props();
 
 	const id = $props.id();
-	const HEX = /^#[0-9a-f]{6}$/;
+	const HEX = /^#[0-9a-f]{6}$/i; // saved colours arrive in capitals (#E11B22), typed ones are lowercased
 	// The native colour input cannot be empty: show a neutral grey while "theme default" (empty) is chosen.
-	const swatch = $derived(HEX.test(value) ? value : '#d4d8de');
+	const swatch = $derived(HEX.test(value) ? value.toLowerCase() : '#d4d8de');
 
 	function onText(e: Event & { currentTarget: HTMLInputElement }) {
 		let v = e.currentTarget.value.trim().toLowerCase();
