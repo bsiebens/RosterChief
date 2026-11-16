@@ -59,6 +59,19 @@ rc_validate_caddyfile() {
     )
 }
 
+# The certificate directive of the Caddyfile, from ACCESS_MODE in site.env: "dns" (default) gets a real wildcard
+# certificate through Cloudflare's DNS; "ip" (a staging host reached as <ip>.sslip.io) uses Caddy's own CA, so browsers
+# warn once and nothing outside the host is needed.
+rc_access_mode() { grep -E '^ACCESS_MODE=' "$RC_CONFIG/site.env" 2> /dev/null | cut -d= -f2 || true; }
+rc_write_tls_snippet() {
+    if [[ $(rc_access_mode) == ip ]]; then
+        printf 'tls internal\n' > "$RC_CONFIG/tls.caddy"
+    else
+        printf 'tls {\n\tdns cloudflare {env.CLOUDFLARE_API_TOKEN}\n}\n' > "$RC_CONFIG/tls.caddy"
+    fi
+    chmod 0644 "$RC_CONFIG/tls.caddy"
+}
+
 # Install scripts, systemd units and the Caddyfile from an extracted deploy/host directory.
 # Called by bootstrap.sh and by every release, so host-side changes ship with the version.
 rc_install_host_files() {
@@ -78,5 +91,6 @@ rc_install_host_files() {
         fi
     done
     install -m 0644 "$src/Caddyfile.$role" "$RC_CONFIG/Caddyfile"
+    rc_write_tls_snippet
     systemctl daemon-reload
 }

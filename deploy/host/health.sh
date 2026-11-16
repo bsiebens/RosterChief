@@ -24,7 +24,9 @@ for unit in "${units[@]}"; do
     systemctl is-active --quiet "$unit.service" || fail "Unhealthy systemd unit: $unit"
 done
 
-probe() { curl --fail --silent --show-error --max-time 8 --output /dev/null "$@"; }
+insecure=()
+[[ $(rc_access_mode) != ip ]] || insecure=(--insecure)  # reached by IP: Caddy's own CA signs the certificate
+probe() { curl --fail --silent --show-error --max-time 8 --output /dev/null ${insecure[@]+"${insecure[@]}"} "$@"; }
 sveltekit_headers() { printf '%s\n' -H "Host: $1" -H "X-Forwarded-Host: $1" -H 'X-Forwarded-Proto: https' -H 'X-Forwarded-For: 127.0.0.1'; }
 
 if rc_has_backend "$role"; then
@@ -49,7 +51,7 @@ if [[ ${1:-} == --tls ]]; then
         probe --resolve "$domain:443:127.0.0.1" "https://$domain/healthz" || fail "Public /healthz failed"
         probe --resolve "$domain:443:127.0.0.1" "https://$domain/login" || fail "Public /login failed"
         probe --resolve "$control:443:127.0.0.1" "https://$control/login" || fail "Control panel /login failed"
-        seen=$(curl --silent --max-time 8 --resolve "$domain:443:127.0.0.1" -H 'CF-Connecting-IP: 203.0.113.9' "https://$domain/_rc/client-ip" || true)
+        seen=$(curl --silent --max-time 8 ${insecure[@]+"${insecure[@]}"} --resolve "$domain:443:127.0.0.1" -H 'CF-Connecting-IP: 203.0.113.9' "https://$domain/_rc/client-ip" || true)
         [[ $seen == 127.0.0.1 ]] || fail "Caddy trusts a forged CF-Connecting-IP from a non-Cloudflare peer (saw '$seen'). Check /etc/rosterchief/cloudflare-ips.caddy."
     fi
 fi

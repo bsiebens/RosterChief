@@ -38,7 +38,7 @@ load_env() {
     file=$RC_DIR/environments/$name.env
     secrets=$RC_DIR/environments/$name.secrets
     [[ -f $file ]] || die "No $file. Copy deploy/environments/$name.env.example and fill it in."
-    HOSTS=() BASE_DOMAIN='' OWNER_EMAIL='' GITHUB_REPO='' CLOUDFLARE_PROXIED=true TRUSTED_CIDR='' PROMOTE_FROM=''
+    HOSTS=() BASE_DOMAIN='' ACCESS='' OWNER_EMAIL='' GITHUB_REPO='' CLOUDFLARE_PROXIED=true TRUSTED_CIDR='' PROMOTE_FROM=''
     # shellcheck disable=SC1090
     source "$file"
     if [[ -f $secrets ]]; then
@@ -47,7 +47,10 @@ load_env() {
         source "$secrets"
     fi
     ENV_NAME=$name
-    [[ -n $BASE_DOMAIN && -n $OWNER_EMAIL && -n $GITHUB_REPO ]] || die "$file must set BASE_DOMAIN, OWNER_EMAIL and GITHUB_REPO."
+    [[ -z $ACCESS || $ACCESS == ip ]] || die "ACCESS must be empty (a domain on Cloudflare) or ip."
+    [[ $ACCESS == ip || -n $BASE_DOMAIN ]] || die "$file must set BASE_DOMAIN (or ACCESS=ip for a host reached by its address)."
+    [[ -n $OWNER_EMAIL && -n $GITHUB_REPO ]] || die "$file must set OWNER_EMAIL and GITHUB_REPO."
+    [[ $ACCESS != ip ]] || CLOUDFLARE_PROXIED=false
     [[ $CLOUDFLARE_PROXIED == true || $CLOUDFLARE_PROXIED == false ]] || die "CLOUDFLARE_PROXIED must be true or false."
     ((${#HOSTS[@]} > 0)) || die "$file lists no HOSTS."
     H_NAME=() H_ROLE=() H_TRANSPORT=() H_TARGET=() H_OPTS=()
@@ -63,6 +66,22 @@ load_env() {
         done
         H_NAME+=("$n") H_ROLE+=("$r") H_TRANSPORT+=("$t") H_TARGET+=("$g") H_OPTS+=("$o")
     done
+    [[ $ACCESS != ip ]] || BASE_DOMAIN=$(ip_base_domain)
+}
+
+# ACCESS=ip: the base domain is the public host's address as an sslip.io name (1.2.3.4 becomes 1-2-3-4.sslip.io).
+# sslip.io answers every name under it with that address, including club.1-2-3-4.sslip.io, so no DNS record is needed.
+ip_base_domain() {
+    local i ip
+    for ((i = 0; i < ${#H_NAME[@]}; i++)); do
+        [[ ${H_ROLE[i]} != backend ]] || continue
+        ip=$(host_opt "$i" public_ip)
+        [[ -n $ip ]] || { [[ ${H_TRANSPORT[i]} == ssh ]] && ip=${H_TARGET[i]##*@}; }
+        [[ $ip =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || die "ACCESS=ip needs the host's public IPv4 address: use an ssh target like ec2-user@203.0.113.10, or add public_ip=203.0.113.10 to the host's options."
+        printf '%s.sslip.io' "${ip//./-}"
+        return 0
+    done
+    die "ACCESS=ip needs a full or frontend host."
 }
 
 # host_opt INDEX KEY: the value of key=value in the host's trailing options, or empty.

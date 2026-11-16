@@ -69,6 +69,18 @@ This is the checklist. The command reference and the details of how a host insta
 6. **Send a test email** (below), and check `sudo rosterchief-health --tls`.
 7. **Production** is the same, once staging is happy: `provision production …`, then `deploy/rc deploy production v1.0.0`. Production refuses a version that has not run on every staging host (override once with `--force`).
 
+### Staging without a domain (reached by IP address)
+
+For a throwaway staging host you can skip the domain, Cloudflare and the API token. In `staging.env` comment out `BASE_DOMAIN` and set `ACCESS=ip`. Everything else stays the same (`provision`, `deploy`, `status`).
+
+- The base domain becomes **`<ip>.sslip.io`**, for example `203-0-113-10.sslip.io` for 203.0.113.10. [sslip.io](https://sslip.io) answers every name under it with that address, so the control panel is `https://control.203-0-113-10.sslip.io` and a club called `sharks` is `https://sharks.203-0-113-10.sslip.io`. Nothing is configured in DNS. The club slug-to-subdomain routing the app relies on keeps working.
+- The IP is read from an ssh target (`ec2-user@203.0.113.10`). For an SSM host add `public_ip=203.0.113.10` to its options.
+- Caddy signs the certificates with its own certificate authority, so the browser warns once for each name. Accept it. Passkeys and secure cookies still work, but the page is not "trusted", and installing the app to a phone's home screen may be refused. Use a real domain when that matters.
+- There is no Cloudflare proxy, so `rc proxy` is refused. Open ports 80 and 443 to the people who test it (your own address is enough).
+- Use a fixed address (an Elastic IP), or the names change when the instance restarts. A new address is a new base domain: provision again and the clubs have to be made again.
+- It depends on sslip.io being up. For staging that is an acceptable risk. Production should keep a real domain.
+- Email: the Resend sending domain cannot be an sslip.io name. Leave email unset on such a staging host (messages are written to the log) or point the sender at a domain you do own.
+
 ### Split frontend and backend
 
 List one backend (with `private_ip=`) and one or more frontends in the environment file, set `TRUSTED_CIDR` to the VPC range, and provision each host. `rc` derives the frontend's backend address (`http://<private_ip>:8001`) itself. Migrations run only on the backend, which is always deployed first. PostgreSQL, Valkey, media and private media live on the backend host.

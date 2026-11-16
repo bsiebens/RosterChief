@@ -5,9 +5,8 @@
 }
 
 {$ROSTERCHIEF_BASE_DOMAIN}, *.{$ROSTERCHIEF_BASE_DOMAIN} {
-	tls {
-		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
-	}
+	# Written for this host's access mode (Cloudflare DNS certificate, or Caddy's own CA when reached by IP).
+	import /etc/rosterchief/tls.caddy
 	encode zstd gzip
 
 	# Answers only to a loopback peer. Health checks send a forged CF-Connecting-IP and expect to see

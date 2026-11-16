@@ -7,9 +7,8 @@
 # Frontend host: serves the two SvelteKit apps and forwards everything Django owns (including /static and
 # /media, which live on the backend host) to BACKEND_URL, the backend's private address, e.g. http://10.0.1.5:8001.
 {$ROSTERCHIEF_BASE_DOMAIN}, *.{$ROSTERCHIEF_BASE_DOMAIN} {
-	tls {
-		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
-	}
+	# Written for this host's access mode (Cloudflare DNS certificate, or Caddy's own CA when reached by IP).
+	import /etc/rosterchief/tls.caddy
 	encode zstd gzip
 
 	@probe {

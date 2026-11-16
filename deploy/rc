@@ -191,6 +191,7 @@ cmd_provision() {
     i=$(select_hosts all "$host_filter")
     role=${H_ROLE[i]}
     args=(--role "$role" --domain "$BASE_DOMAIN" --owner-email "$OWNER_EMAIL" --proxied "$CLOUDFLARE_PROXIED" --github-repo "$GITHUB_REPO")
+    [[ $ACCESS != ip ]] || args+=(--access ip)
     case $role in
         backend)
             [[ -n $TRUSTED_CIDR ]] || die "Set TRUSTED_CIDR (the private network frontends live in) in the environment file."
@@ -226,7 +227,10 @@ SCRIPT
     echo
     echo "Next steps for ${H_NAME[i]}:"
     [[ -z $secrets_note ]] || echo "  * $secrets_note"
-    if [[ $role != backend ]]; then
+    if [[ $role != backend && $ACCESS == ip ]]; then
+        echo "  * No DNS needed: the control panel is at https://control.$BASE_DOMAIN and each club at https://<club>.$BASE_DOMAIN (sslip.io points every such name at this host)."
+        echo "  * Your browser warns about the certificate (Caddy's own CA signs it): accept it once per name. Allow ports 80 and 443 in the security group."
+    elif [[ $role != backend ]]; then
         echo "  * Cloudflare DNS: A records for $BASE_DOMAIN and *.$BASE_DOMAIN to this host's public address (proxied: $CLOUDFLARE_PROXIED)."
         [[ $CLOUDFLARE_PROXIED == false ]] || echo "  * Cloudflare: set SSL/TLS mode to Full (strict)."
         [[ $CLOUDFLARE_PROXIED == false ]] || echo "  * Security group: allow ports 80 and 443 from Cloudflare's ranges only (https://www.cloudflare.com/ips/), so the origin can't be reached directly."
@@ -246,6 +250,7 @@ cmd_proxy() {
     shift 2
     parse_flags "$@"
     load_env "$env"
+    [[ $ACCESS != ip ]] || die "$env is reached by IP address (ACCESS=ip), so there is no Cloudflare proxy to switch."
     echo "Turning the Cloudflare-proxy trust ${mode} on $ENV_NAME's public hosts."
     echo "(Also set the DNS records to proxied/DNS-only in Cloudflare, and the security group to match.)"
     require_production_word || die "Cancelled."

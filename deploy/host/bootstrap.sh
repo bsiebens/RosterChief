@@ -11,6 +11,7 @@ usage() {
 Usage: sudo bootstrap.sh --role full|backend|frontend --domain BASE_DOMAIN --owner-email EMAIL [options]
 
   --proxied true|false        Is the domain proxied by Cloudflare (orange cloud)? Default true.
+  --access dns|ip             dns (default): a domain on Cloudflare. ip: no domain; reached as <ip>.sslip.io with Caddy's own certificate.
   --private-ip IP             backend: the private address Caddy listens on (required)
   --trusted-cidr CIDR         backend: the private network the frontend host(s) live in, e.g. 10.0.0.0/16 (required)
   --backend-url URL           frontend: the backend's private URL, e.g. http://10.0.1.5:8001 (required)
@@ -31,7 +32,7 @@ if [[ ${ID:-} != amzn || ${VERSION_ID:-} != 2023 ]]; then
     exit 2
 fi
 
-role='' domain='' owner_email='' proxied=true private_ip='' trusted_cidr='' backend_url='' github_repo='' caddy_binary=''
+role='' domain='' owner_email='' proxied=true access=dns private_ip='' trusted_cidr='' backend_url='' github_repo='' caddy_binary=''
 while [[ $# -gt 0 ]]; do
     [[ $# -ge 2 ]] || usage
     case $1 in
@@ -39,6 +40,7 @@ while [[ $# -gt 0 ]]; do
         --domain) domain=$2 ;;
         --owner-email) owner_email=$2 ;;
         --proxied) proxied=$2 ;;
+        --access) access=$2 ;;
         --private-ip) private_ip=$2 ;;
         --trusted-cidr) trusted_cidr=$2 ;;
         --backend-url) backend_url=$2 ;;
@@ -55,6 +57,8 @@ source "$source_dir/common.sh"
 
 rc_valid_role "$role" || usage
 [[ $proxied == true || $proxied == false ]] || usage
+[[ $access == dns || $access == ip ]] || usage
+[[ $access == dns || $proxied == false ]] || { echo "--access ip cannot be combined with the Cloudflare proxy." >&2; exit 2; }
 if [[ ! $domain =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]*[a-z0-9])?$ || ! $owner_email =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z0-9]+$ ]]; then
     echo "Supply a lowercase public DNS domain and the platform owner's email address." >&2
     exit 2
@@ -186,6 +190,7 @@ rc_set_kv "$RC_CONFIG/site.env" ROSTERCHIEF_BASE_DOMAIN "$domain"
 rc_set_kv "$RC_CONFIG/site.env" PLATFORM_OWNER_EMAIL "$owner_email"
 rc_set_kv "$RC_CONFIG/site.env" CADDY_ACME_EMAIL "$owner_email"
 rc_set_kv "$RC_CONFIG/site.env" CLOUDFLARE_PROXIED "$proxied"
+rc_set_kv "$RC_CONFIG/site.env" ACCESS_MODE "$access"
 case $role in
     full)
         grep -q '^ROSTERCHIEF_DATABASE_NAME=.\+' "$RC_CONFIG/site.env" || rc_set_kv "$RC_CONFIG/site.env" ROSTERCHIEF_DATABASE_NAME rosterchief
@@ -212,7 +217,7 @@ if rc_has_frontend "$role"; then
     [[ -f $RC_CONFIG/caddy.env ]] || install -m 0600 /dev/null "$RC_CONFIG/caddy.env"
     if [[ -n ${CLOUDFLARE_API_TOKEN:-} ]]; then
         rc_set_kv "$RC_CONFIG/caddy.env" CLOUDFLARE_API_TOKEN "$CLOUDFLARE_API_TOKEN"
-    elif ! grep -q '^CLOUDFLARE_API_TOKEN=.\+' "$RC_CONFIG/caddy.env"; then
+    elif [[ $access == dns ]] && ! grep -q '^CLOUDFLARE_API_TOKEN=.\+' "$RC_CONFIG/caddy.env"; then
         echo "WARNING: CLOUDFLARE_API_TOKEN is not set in $RC_CONFIG/caddy.env. Caddy cannot obtain certificates until it is." >&2
     fi
 fi
