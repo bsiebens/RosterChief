@@ -1,6 +1,6 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { api } from '#lib/management-api.ts';
-import { PAYMENT_TABS, type OpenMembers, type PaymentIn, type PaymentTab, type RegistrationList } from '#lib/registrations.ts';
+import { PAYMENT_TABS, type FinanceSummary, type OpenMembers, type PaymentIn, type PaymentTab, type RegistrationList } from '#lib/registrations.ts';
 import type { Actions, PageServerLoad } from './$types';
 
 const PAGE_SIZE = 25;
@@ -12,13 +12,15 @@ export const load: PageServerLoad = async ({ url, fetch, parent }) => {
 	const asked = url.searchParams.get('payment') as PaymentTab;
 	const payment: PaymentTab = PAYMENT_TABS.includes(asked) ? asked : 'open';
 	const offset = Math.max(0, parseInt(url.searchParams.get('offset') ?? '0', 10) || 0);
-	const [res, open, members] = await Promise.all([
+	const [res, open, members, summary] = await Promise.all([
 		api<RegistrationList>('GET', '/registrations', { query: { status: 'confirmed', payment: payment === 'all' ? undefined : payment, q, limit: PAGE_SIZE, offset: offset || undefined }, f: fetch }),
 		api<RegistrationList>('GET', '/registrations', { query: { status: 'confirmed', payment: 'open', limit: 1 }, f: fetch }),
 		// Members with a fee still open that did not come in through a registration (import, added by hand).
-		api<OpenMembers>('GET', '/finance/open-members', { query: { q, limit: 100 }, f: fetch })
+		api<OpenMembers>('GET', '/finance/open-members', { query: { q, limit: 100 }, f: fetch }),
+		// Totals of all confirmed invoices; the row hides when this fails.
+		api<FinanceSummary>('GET', '/finance/summary', { f: fetch })
 	]);
-	return { openMembers: members.data?.results ?? [], openMembersCount: members.data?.count ?? 0, vouchersEnabled: !!members.data?.vouchers_enabled, filters: { q, payment, offset }, rows: res.data?.results ?? [], count: res.data?.count ?? 0, openCount: open.data?.count ?? 0, pageSize: PAGE_SIZE, error: res.ok ? null : res.status };
+	return { totals: summary.ok ? (summary.data ?? null) : null, openMembers: members.data?.results ?? [], openMembersCount: members.data?.count ?? 0, vouchersEnabled: !!members.data?.vouchers_enabled, filters: { q, payment, offset }, rows: res.data?.results ?? [], count: res.data?.count ?? 0, openCount: open.data?.count ?? 0, pageSize: PAGE_SIZE, error: res.ok ? null : res.status };
 };
 
 export const actions: Actions = {

@@ -122,6 +122,8 @@ export type RegistrationSettings = { is_open: boolean; intro_text: string; terms
 
 /** A membership with a fee still open that is not part of a registration (`/finance/open-members`). */
 export type OpenMember = { membership_id: string; member: PersonRef; season_name: string; status: string; fee_status: string; fee_amount: string; amount_paid: string; balance: string; early_payment_deadline: string | null };
+/** `GET /finance/summary`: totals of the confirmed invoices (decimal strings). */
+export type FinanceSummary = { invoiced: string; received: string; open: string; overdue: string; overdue_count: number };
 export type OpenMembers = { count: number; results: OpenMember[]; vouchers_enabled: boolean };
 export const PAYMENT_TABS = ['open', 'overdue', 'installments', 'paid', 'all'] as const;
 export type PaymentTab = (typeof PAYMENT_TABS)[number];

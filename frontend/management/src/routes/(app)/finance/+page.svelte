@@ -12,8 +12,6 @@
 	import { financeHref, paymentBadge, type OpenMember } from '#lib/registrations.ts';
 	import { money } from '#lib/shop.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
-	import SampleBadge from '#lib/components/SampleBadge.svelte';
-	import { financeTotalsSample as totals } from '#lib/finance-sample.ts';
 
 	let { data, form } = $props();
 	const href = (patch: Partial<{ q: string; payment: string; offset: number }>) => {
@@ -56,21 +54,24 @@
 		{/snippet}
 	</ListFilterBar>
 
-	<div class="grid gap-4 px-7 pt-5 sm:grid-cols-3">
-		<div class="card card-body gap-1">
-			<span class="flex items-center gap-2 font-mono text-xs tracking-wide text-muted uppercase">{t('fin.kpi.invoiced')} <SampleBadge what="finance-totals" /></span>
-			<p class="font-display text-3xl font-extrabold text-ink">{money(totals.invoiced)}</p>
+	{#if data.totals}
+		{@const totals = data.totals}
+		<div class="grid gap-4 px-7 pt-5 sm:grid-cols-3">
+			<div class="card card-body gap-1">
+				<span class="font-mono text-xs tracking-wide text-muted uppercase">{t('fin.kpi.invoiced')}</span>
+				<p class="font-display text-3xl font-extrabold text-ink">{money(totals.invoiced)}</p>
+			</div>
+			<div class="card card-body gap-1">
+				<span class="font-mono text-xs tracking-wide text-muted uppercase">{t('fin.kpi.received')}</span>
+				<p class="font-display text-3xl font-extrabold text-ok-text">{money(totals.received)}</p>
+			</div>
+			<div class="card card-body gap-1">
+				<span class="font-mono text-xs tracking-wide text-muted uppercase">{t('fin.kpi.open')}</span>
+				<p class="font-display text-3xl font-extrabold text-ink">{money(totals.open)}</p>
+				<p class="text-xs text-muted">{t('fin.kpi.overdue', { amount: money(totals.overdue) })}</p>
+			</div>
 		</div>
-		<div class="card card-body gap-1">
-			<span class="font-mono text-xs tracking-wide text-muted uppercase">{t('fin.kpi.received')}</span>
-			<p class="font-display text-3xl font-extrabold text-ok-text">{money(totals.received)}</p>
-		</div>
-		<div class="card card-body gap-1">
-			<span class="font-mono text-xs tracking-wide text-muted uppercase">{t('fin.kpi.open')}</span>
-			<p class="font-display text-3xl font-extrabold text-ink">{money(totals.open)}</p>
-			<p class="text-xs text-muted">{t('fin.kpi.overdue', { amount: money(totals.overdue) })}</p>
-		</div>
-	</div>
+	{/if}
 
 	<div class="grid gap-4 px-7 py-5">
 		{#if data.error}

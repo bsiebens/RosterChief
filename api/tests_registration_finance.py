@@ -49,6 +49,29 @@ class FinanceTests(RegistrationMixin, TestCase):
         self.assertTrue(self.staff("get", "/me", user=self.finance_user).json()["can_manage_finance"])
         self.assertFalse(self.staff("get", "/me", user=self.admin_user).json()["can_manage_finance"])
 
+    def test_summary_totals_follow_the_invoices_and_the_filters(self):
+        first, second = self.two("a"), self.two("b")  # 200 each
+        self.pay(first, {"amount": "150"})
+        self.pay(second, {"amount": "200"})
+        self.batch()  # still awaiting review: not counted
+        summary = self.staff("get", "/finance/summary", user=self.finance_user)
+        self.assertEqual(summary.status_code, 200, summary.content)
+        self.assertEqual(summary.json(), {"invoiced": "400.00", "received": "350.00", "open": "50.00", "overdue": "0.00", "overdue_count": 0})
+        RegistrationBatch.objects.filter(pk=first.pk).update(invoice_due_date=datetime.date.today() - datetime.timedelta(days=3))
+        late = self.staff("get", "/finance/summary", user=self.finance_user).json()
+        self.assertEqual((late["overdue"], late["overdue_count"], late["open"]), ("50.00", 1, "50.00"))
+        first.refresh_from_db()
+        only_first = self.staff("get", f"/finance/summary?q={first.invoice_number}", user=self.finance_user).json()
+        self.assertEqual((only_first["invoiced"], only_first["received"]), ("200.00", "150.00"))
+        season = self.staff("get", f"/finance/summary?season_id={first.season_id}&from={datetime.date.today()}&to={datetime.date.today()}", user=self.finance_user).json()
+        self.assertEqual(season["invoiced"], "400.00")
+        self.assertEqual(self.staff("get", f"/finance/summary?from={datetime.date.today() + datetime.timedelta(days=1)}", user=self.finance_user).json()["invoiced"], "0.00")
+        self.staff("post", f"/registrations/{second.pk}/cancel", user=self.finance_user)
+        self.assertEqual(self.staff("get", "/finance/summary", user=self.finance_user).json()["invoiced"], "200.00")
+
+    def test_summary_needs_the_finance_permission(self):
+        self.assertEqual(self.staff("get", "/finance/summary", user=self.admin_user).status_code, 403)
+
     def test_partial_then_full_payment_spreads_over_the_people(self):
         batch = self.two()
         r = self.pay(batch, {"amount": "150.00", "method": "bank_transfer", "reference": "INV 1"})
