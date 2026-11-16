@@ -29,9 +29,10 @@
 		file_server
 	}
 
+	# Defined once per site: named matchers cannot be redeclared inside a handle.
+	@django path /healthz /admin /admin/* /accounts /accounts/* /_allauth/browser/*
 	@control host control.{$ROSTERCHIEF_BASE_DOMAIN}
 	handle @control {
-		@django path /healthz /admin /admin/* /accounts /accounts/* /_allauth/browser/*
 		handle @django {
 			reverse_proxy 127.0.0.1:8000 {
 				header_up Host {$ROSTERCHIEF_BASE_DOMAIN}
@@ -44,7 +45,6 @@
 		}
 	}
 
-	@django path /healthz /admin /admin/* /accounts /accounts/* /_allauth/browser/*
 	handle @django {
 		reverse_proxy 127.0.0.1:8000
 	}
