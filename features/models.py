@@ -1,329 +1,146 @@
-"""Club-scoped feature flags.
+"""Entitlements: what a club may use. Shared (public schema), written only by the platform.
 
-waffle's Flag model is swappable (``WAFFLE_FLAG_MODEL``, like ``AUTH_USER_MODEL``),
-so we subclass it to add the one dimension this platform actually needs: which
-*clubs* a feature is on for. The tenant middleware already puts ``request.club``
-on every request, so a flag resolves with a plain ``flag_is_active(request, "shop")``
-— no call site has to know about clubs.
-
-Everything waffle already offers (``everyone`` / ``percent`` / ``staff`` /
-``superusers`` / per-user / per-group) keeps working, with one exception: on a
-club subdomain a per-user or per-group grant is ignored. ``User`` (and Django's
-auth ``Group``) are global, so such a grant carries no club -- honouring it there
-would switch the feature on in every club that user belongs to, including ones
-that don't have it. Target clubs through ``clubs`` instead.
+A club's entitlements = the features of its current ``Subscription.plan``, then ``FeatureOverride`` rows on top.
+Billing (prices, invoices) is deliberately absent: it can later be added next to ``Plan``/``Subscription`` without
+changing how entitlements are resolved.
 """
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
-from waffle.models import CACHE_EMPTY, AbstractBaseFlag, AbstractUserFlag
-from waffle.utils import get_cache, keyfmt
 
 from rosterchief.base import UUIDModel
 
-#: Cache key template for a flag's club ids, mirroring waffle's own
-#: FLAG_USERS_CACHE_KEY / FLAG_GROUPS_CACHE_KEY.
-FLAG_CLUBS_CACHE_KEY = "flag:%s:clubs"
+from .catalog import FLAG, LIMIT, duplicate_limit_scopes
 
 
-class Flag(AbstractUserFlag):
-    clubs = models.ManyToManyField(
-        "club.Club",
-        blank=True,
-        related_name="flags",
-        help_text=_("Activate this flag for these clubs."),
-        verbose_name=_("Clubs"),
-    )
+class Feature(UUIDModel):
+    """Mirror of the code catalog (see ``sync_catalog``), so database rows can reference features."""
 
-    def get_flush_keys(self, flush_keys=None):
-        flush_keys = super().get_flush_keys(flush_keys)
-        flush_keys.append(keyfmt(FLAG_CLUBS_CACHE_KEY, self.name))
-        return flush_keys
+    code = models.SlugField(_("code"), unique=True)
+    name = models.CharField(_("name"), max_length=150)
+    description = models.TextField(_("description"), blank=True)
+    kind = models.CharField(_("kind"), max_length=10, choices=[(FLAG, _("On/off")), (LIMIT, _("Numeric limit"))], default=FLAG)
+    is_active = models.BooleanField(_("in catalog"), default=True, help_text=_("Cleared when the code no longer defines this feature."))
 
-    def _get_club_ids(self) -> set:
-        """Club ids this flag is on for, cached the way waffle caches its own M2Ms."""
-        if self.pk is None:
-            # waffle's own BaseModel.get() falls back to a transient, unsaved
-            # Flag(name=...) instance for a name nothing in the DB matches yet
-            # (see waffle/models.py) -- an M2M lookup can't run against that, and
-            # there's genuinely nothing for it to be on for anyway.
-            return set()
+    class Meta:
+        verbose_name = _("feature")
+        verbose_name_plural = _("features")
+        ordering = ["code"]
 
-        cache = get_cache()
-        cache_key = keyfmt(FLAG_CLUBS_CACHE_KEY, self.name)
+    def __str__(self) -> str:
+        return self.name
 
-        cached = cache.get(cache_key)
-        if cached == CACHE_EMPTY:
-            return set()
-        if cached:
-            return cached
 
-        club_ids = set(self.clubs.values_list("pk", flat=True))
-        if not club_ids:
-            cache.add(cache_key, CACHE_EMPTY)
-            return set()
+class Plan(UUIDModel):
+    code = models.SlugField(_("code"), unique=True)
+    name = models.CharField(_("name"), max_length=100)
+    description = models.TextField(_("description"), blank=True)
+    is_active = models.BooleanField(_("active"), default=True, help_text=_("Inactive plans cannot be chosen for new subscriptions."))
+    features = models.ManyToManyField(Feature, verbose_name=_("features"), through="PlanFeature", related_name="plans")
 
-        cache.add(cache_key, club_ids)
-        return club_ids
+    class Meta:
+        verbose_name = _("plan")
+        verbose_name_plural = _("plans")
+        ordering = ["name"]
 
-    def is_active(self, request, read_only=False):
-        # waffle's contract: `everyone` overrides *all* other settings. So a flag
-        # explicitly switched off for everyone stays off even for a targeted club,
-        # and club targeting only applies while `everyone` is left Unknown (None).
-        if self.everyone is None:
-            club = getattr(request, "club", None)
-            if club is not None and club.pk in self._get_club_ids():
-                return True
+    def __str__(self) -> str:
+        return self.name
 
-        return super().is_active(request, read_only=read_only)
 
-    def _is_active_for_user(self, request):
-        if getattr(request, "club", None) is None:
-            return super()._is_active_for_user(request)
-        user = getattr(request, "user", None)
-        if not user:
+class PlanFeature(UUIDModel):
+    plan = models.ForeignKey(Plan, verbose_name=_("plan"), on_delete=models.CASCADE, related_name="plan_features")
+    feature = models.ForeignKey(Feature, verbose_name=_("feature"), on_delete=models.PROTECT, related_name="plan_features")
+    limit = models.PositiveIntegerField(_("limit"), null=True, blank=True, help_text=_("Only for limit features. Empty = unlimited."))
+
+    class Meta:
+        verbose_name = _("plan feature")
+        verbose_name_plural = _("plan features")
+        constraints = [models.UniqueConstraint(fields=["plan", "feature"], name="uniq_plan_feature")]
+
+    def __str__(self) -> str:
+        return f"{self.plan}: {self.feature}"
+
+    def clean(self):
+        super().clean()
+        if self.plan_id and self.feature_id:
+            others = PlanFeature.objects.filter(plan_id=self.plan_id).exclude(pk=self.pk).values_list("feature__code", flat=True)
+            if duplicate_limit_scopes([*others, self.feature.code]):
+                raise ValidationError(_("A plan can only have one feature limiting the same thing (e.g. the number of members)."))
+
+
+class Subscription(UUIDModel):
+    """A club's plan over time. ``ends_at`` empty = the current subscription; a club has at most one."""
+
+    TRIAL, ACTIVE, PAST_DUE, CANCELED = "trial", "active", "past_due", "canceled"
+    STATUS_CHOICES = [(TRIAL, _("Trial")), (ACTIVE, _("Active")), (PAST_DUE, _("Past due")), (CANCELED, _("Canceled"))]
+
+    club = models.ForeignKey(settings.TENANT_MODEL, verbose_name=_("club"), on_delete=models.CASCADE, related_name="subscriptions")
+    plan = models.ForeignKey(Plan, verbose_name=_("plan"), on_delete=models.PROTECT, related_name="subscriptions")
+    status = models.CharField(_("status"), max_length=10, choices=STATUS_CHOICES, default=ACTIVE)
+    starts_at = models.DateTimeField(_("starts at"), default=timezone.now)
+    ends_at = models.DateTimeField(_("ends at"), null=True, blank=True, help_text=_("Access stops at this moment. Empty = no end."))
+    trial_ends_at = models.DateTimeField(_("trial ends at"), null=True, blank=True)
+
+    class Meta:
+        verbose_name = _("subscription")
+        verbose_name_plural = _("subscriptions")
+        ordering = ["-starts_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["club"], condition=models.Q(ends_at__isnull=True), name="one_open_subscription_per_club"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.club} - {self.plan} ({self.status})"
+
+    def grants_access(self, now=None) -> bool:
+        """Whether the plan's features apply right now. ``status`` is informational (billing); only dates decide."""
+        now = now or timezone.now()
+        if self.starts_at > now or (self.ends_at is not None and self.ends_at <= now):
             return False
-        # On a club host: only the platform-wide user dimensions (authenticated /
-        # staff / superusers), never the per-user or per-group M2Ms -- see the
-        # module docstring.
-        return AbstractBaseFlag.is_active_for_user(self, user)
-
-    def is_active_for_club(self, club) -> bool:
-        """Explicit check for code that holds a club but no request."""
-        if self.everyone is not None:
-            return self.everyone
-        return club.pk in self._get_club_ids()
+        return not (self.status == self.TRIAL and self.trial_ends_at is not None and self.trial_ends_at <= now)
 
 
-class Maintenance(UUIDModel):
-    """Platform lock-down. One row, read on every request.
+class FeatureOverride(UUIDModel):
+    """Platform exception for one club: grant or revoke a feature, optionally with a different limit and an expiry."""
 
-    Cached rather than queried per request, and the cache is the same shared Redis the flags
-    use — so turning maintenance on in the control panel takes effect on every worker and
-    every server at once. A per-process cache would leave some workers still serving clubs.
-    """
-
-    CACHE_KEY = "maintenance:current"
-
-    #: Cached, but not for ever. Write-through makes the flip instant for the process that
-    #: made it and — on the shared Redis of a real deployment — for every other one too. The
-    #: TTL is the belt to that braces: on a per-process cache (a dev box with no Redis, or a
-    #: misconfigured deploy) a lock-down that only reached one gunicorn worker would be worse
-    #: than useless, so the others notice within ten seconds regardless.
-    CACHE_SECONDS = 10
-
-    is_active = models.BooleanField(_("active"), default=False)
-    message = models.TextField(_("message"), blank=True, help_text=_("Shown to clubs while the platform is locked down."))
-    started_at = models.DateTimeField(_("started at"), null=True, blank=True)
-    started_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="maintenance_windows", verbose_name=_("started by"))
+    club = models.ForeignKey(settings.TENANT_MODEL, verbose_name=_("club"), on_delete=models.CASCADE, related_name="feature_overrides")
+    feature = models.ForeignKey(Feature, verbose_name=_("feature"), on_delete=models.PROTECT, related_name="overrides")
+    enabled = models.BooleanField(_("enabled"), default=True, help_text=_("Untick to revoke a feature the plan would give."))
+    limit = models.PositiveIntegerField(_("limit"), null=True, blank=True, help_text=_("Only for limit features. Empty = unlimited."))
+    expires_at = models.DateTimeField(_("expires at"), null=True, blank=True)
+    reason = models.CharField(_("reason"), max_length=255, blank=True)
 
     class Meta:
-        verbose_name = _("maintenance")
-        verbose_name_plural = _("maintenance")
+        verbose_name = _("feature override")
+        verbose_name_plural = _("feature overrides")
+        constraints = [models.UniqueConstraint(fields=["club", "feature"], name="uniq_override_per_club_feature")]
 
-    def __str__(self):
-        return "Maintenance on" if self.is_active else "Maintenance off"
+    def __str__(self) -> str:
+        return f"{self.club}: {self.feature} ({'on' if self.enabled else 'off'})"
 
-    def save(self, *args, **kwargs):
-        super().save(*args, **kwargs)
-        get_cache().set(self.CACHE_KEY, self, self.CACHE_SECONDS)
-
-    @classmethod
-    def current(cls) -> Maintenance:
-        """The one row, created on first read. Cached until it changes."""
-        cached = get_cache().get(cls.CACHE_KEY)
-        if cached is not None:
-            return cached
-
-        maintenance = cls.objects.first() or cls.objects.create()
-        get_cache().set(cls.CACHE_KEY, maintenance, cls.CACHE_SECONDS)
-
-        return maintenance
-
-    @classmethod
-    def is_on(cls) -> bool:
-        return cls.current().is_active
-
-    @classmethod
-    def start(cls, *, message: str = "", user=None) -> Maintenance:
-        maintenance = cls.current()
-        maintenance.is_active = True
-        maintenance.message = message
-        maintenance.started_at = timezone.now()
-        maintenance.started_by = user
-        maintenance.save()
-
-        return maintenance
-
-    @classmethod
-    def stop(cls) -> Maintenance:
-        maintenance = cls.current()
-        maintenance.is_active = False
-        maintenance.started_at = None
-        maintenance.started_by = None
-        maintenance.save()
-
-        return maintenance
+    def is_current(self, now=None) -> bool:
+        return self.expires_at is None or self.expires_at > (now or timezone.now())
 
 
-class EmailSuppression(UUIDModel):
-    """Platform-wide "pause automated email" switch. One row, cached the same
-    write-through way as Maintenance above — see that model's own docstring for
-    why (a flip has to reach every worker/server at once, not just the process
-    that made it).
+class EntitlementLog(UUIDModel):
+    """Append-only audit trail of every change to plans, subscriptions and overrides."""
 
-    Every automated send in the app routes through rosterchief.mail.send_message
-    instead of calling ``message.send()`` directly — news/event notifications,
-    billing reminders, dues invoices and reminders, claim-approval mail — so
-    turning this on actually silences all of it at once, the same "one switch,
-    everything obeys it" shape as Maintenance. Password reset is the deliberate
-    exception (see authentication.adapters.RosterChiefAccountAdapter): it has to
-    keep working while this is on, or there'd be no way back in for someone who
-    forgot their password during the very window this switch is meant to cover
-    (a bulk import, a staging rehearsal, an incident) without a database flip.
-    """
-
-    CACHE_KEY = "email_suppression:current"
-    CACHE_SECONDS = 10
-
-    is_active = models.BooleanField(_("active"), default=False)
-    started_at = models.DateTimeField(_("started at"), null=True, blank=True)
-    started_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="email_suppression_windows", verbose_name=_("started by"))
+    club = models.ForeignKey(settings.TENANT_MODEL, verbose_name=_("club"), null=True, blank=True, on_delete=models.CASCADE, related_name="entitlement_log")
+    plan = models.ForeignKey(Plan, verbose_name=_("plan"), null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    feature = models.ForeignKey(Feature, verbose_name=_("feature"), null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    action = models.CharField(_("action"), max_length=40)
+    old = models.JSONField(_("old"), null=True, blank=True)
+    new = models.JSONField(_("new"), null=True, blank=True)
+    reason = models.CharField(_("reason"), max_length=255, blank=True)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name=_("actor"), null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
 
     class Meta:
-        verbose_name = _("email suppression")
-        verbose_name_plural = _("email suppression")
+        verbose_name = _("entitlement log entry")
+        verbose_name_plural = _("entitlement log")
+        ordering = ["-created"]
 
-    def __str__(self):
-        return "Automated email paused" if self.is_active else "Automated email on"
-
-    def save(self, *args, **kwargs):
-        super().save(*args, **kwargs)
-        get_cache().set(self.CACHE_KEY, self, self.CACHE_SECONDS)
-
-    @classmethod
-    def current(cls) -> EmailSuppression:
-        """The one row, created on first read. Cached until it changes."""
-        cached = get_cache().get(cls.CACHE_KEY)
-        if cached is not None:
-            return cached
-
-        suppression = cls.objects.first() or cls.objects.create()
-        get_cache().set(cls.CACHE_KEY, suppression, cls.CACHE_SECONDS)
-
-        return suppression
-
-    @classmethod
-    def is_on(cls) -> bool:
-        return cls.current().is_active
-
-    @classmethod
-    def start(cls, *, user=None) -> EmailSuppression:
-        suppression = cls.current()
-        suppression.is_active = True
-        suppression.started_at = timezone.now()
-        suppression.started_by = user
-        suppression.save()
-
-        return suppression
-
-    @classmethod
-    def stop(cls) -> EmailSuppression:
-        suppression = cls.current()
-        suppression.is_active = False
-        suppression.started_at = None
-        suppression.started_by = None
-        suppression.save()
-
-        return suppression
-
-
-class JobToggle(UUIDModel):
-    """Per-job on/off switch for the scheduled platform jobs in features/jobs.py's
-    JOB_REGISTRY, so the control panel can pause one specific job (a runaway job, one
-    under investigation, ...) without touching the scheduler's own schedule (features/
-    scheduler.py) or reaching for the platform-wide Maintenance lock, which stands down
-    every job at once.
-
-    One row per job that's ever been toggled off; a job with no row here is enabled --
-    same "absence means default" shape as Maintenance's own singleton, but keyed instead
-    of a single row, since there's one of these per registry entry rather than one for
-    the whole platform. Cached the same write-through way for the same reason: a flip made
-    in the control panel has to reach whichever process's scheduler thread checks next
-    (or another node's, if ever scaled beyond one), not just the process that made it.
-    """
-
-    CACHE_KEY = "job_toggle:%s"
-    CACHE_SECONDS = 10
-
-    name = models.CharField(_("job name"), max_length=255, unique=True, help_text=_("Matches a features.jobs.JOB_REGISTRY key."))
-    enabled = models.BooleanField(_("enabled"), default=True)
-
-    class Meta:
-        verbose_name = _("job toggle")
-        verbose_name_plural = _("job toggles")
-
-    def __str__(self):
-        return f"{self.name} ({'on' if self.enabled else 'off'})"
-
-    def save(self, *args, **kwargs):
-        super().save(*args, **kwargs)
-        get_cache().set(self.CACHE_KEY % self.name, self.enabled, self.CACHE_SECONDS)
-
-    @classmethod
-    def is_enabled(cls, name: str) -> bool:
-        cache_key = cls.CACHE_KEY % name
-        cached = get_cache().get(cache_key)
-        if cached is not None:
-            return cached
-
-        toggle = cls.objects.filter(name=name).first()
-        enabled = toggle is None or toggle.enabled
-        get_cache().set(cache_key, enabled, cls.CACHE_SECONDS)
-
-        return enabled
-
-    @classmethod
-    def set_enabled(cls, name: str, enabled: bool) -> JobToggle:
-        toggle, _created = cls.objects.update_or_create(name=name, defaults={"enabled": enabled})
-        return toggle
-
-
-class JobRun(UUIDModel):
-    """One execution of a scheduled platform job -- see features/jobs.py for the registry
-    of what each job is, and features/scheduler.py (plus DEPLOYMENT.md's "Scheduled jobs")
-    for what decides when it runs.
-
-    Written entirely by features.commands.ScheduledJobCommand, wrapped around each
-    scheduler-invoked command's own execute(): individual commands (billing/club/events/news
-    management commands) don't touch this model themselves, so a command that raises --
-    including one stood down by Maintenance or JobToggle -- still gets a row regardless of
-    how it ended.
-    """
-
-    class Status(models.TextChoices):
-        STARTED = "started", _("Started")
-        SUCCESS = "success", _("Success")
-        FAILURE = "failure", _("Failed")
-
-    task_id = models.CharField(_("task id"), max_length=255, unique=True)
-    name = models.CharField(_("job name"), max_length=255, help_text=_("Matches a features.jobs.JOB_REGISTRY key, e.g. billing.tasks.renew_subscriptions."))
-    status = models.CharField(_("status"), max_length=10, choices=Status.choices, default=Status.STARTED)
-    started_at = models.DateTimeField(_("started at"))
-    finished_at = models.DateTimeField(_("finished at"), null=True, blank=True)
-    detail = models.TextField(_("detail"), blank=True, help_text=_("What the job returned, on success."))
-    error = models.TextField(_("error"), blank=True, help_text=_("What the job raised, on failure."))
-
-    class Meta:
-        verbose_name = _("job run")
-        verbose_name_plural = _("job runs")
-        ordering = ["-started_at"]
-
-    def __str__(self):
-        return f"{self.name} · {self.started_at:%Y-%m-%d %H:%M}"
-
-    @property
-    def duration(self):
-        return None if self.finished_at is None else self.finished_at - self.started_at
+    def __str__(self) -> str:
+        return f"{self.created:%Y-%m-%d %H:%M} {self.action}"

@@ -5,35 +5,20 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from club.models import Season
+from events.models import Season
 from members.models import Member
-from rosterchief.base import ClubScopedModel, UUIDModel, validate_club_scope
+from rosterchief.base import UUIDModel
 
 
-class NumberPool(ClubScopedModel):
-    """A club-defined jersey-number pool, e.g. "Youth", "Senior",
-    "Goalkeepers". Several teams can share one pool (Team.pool below) --
-    within a pool a number belongs to at most one holder at a time, checked
-    across every team in the pool, not just one. See teams/services/numbers.py
-    for the availability rules themselves; this model only owns the pool's
-    identity, its valid number range and how far apart in age two players
-    must be to share a number."""
-
-    name = models.CharField(_("name"), max_length=255)
+class NumberPool(UUIDModel):
+    name = models.CharField(_("name"), max_length=250)
     min_number = models.PositiveSmallIntegerField(_("minimum number"))
     max_number = models.PositiveSmallIntegerField(_("maximum number"))
-    min_age_gap_years = models.PositiveSmallIntegerField(
-        _("minimum age gap (years)"),
-        default=5,
-        help_text=_("Players born at least this many years apart may share a number. 0 = never shared."),
-    )
+    min_age_gap_years = models.PositiveSmallIntegerField(_("minimum age gap (years)"), default=5, help_text=_("Players born at least this many years apart may share a number. 0 = never shared."))
 
     class Meta:
         verbose_name = _("number pool")
         verbose_name_plural = _("number pools")
-        constraints = [
-            models.UniqueConstraint(fields=["club", "name"], name="unique_number_pool_name_per_club"),
-        ]
         ordering = ["name"]
 
     def __str__(self):
@@ -44,36 +29,14 @@ class NumberPool(ClubScopedModel):
             raise ValidationError({"max_number": _("Must be greater than or equal to the minimum number.")})
 
 
-class Team(ClubScopedModel):
-    class RefereeManagement(models.TextChoices):
+class Team(UUIDModel):
+    class Management(models.TextChoices):
         CLUB = "club", _("Club")
         FEDERATION = "federation", _("Federation")
 
-    class OfficialManagement(models.TextChoices):
-        CLUB = "club", _("Club")
-        FEDERATION = "federation", _("Federation")
-
-    name = models.CharField(_("name"), max_length=255)
+    name = models.CharField(_("name"), max_length=255, unique=True)
     short_name = models.CharField(_("short name"), max_length=255)
-    referee_management = models.CharField(
-        _("referee management"),
-        max_length=20,
-        choices=RefereeManagement.choices,
-        default=RefereeManagement.CLUB,
-        help_text=_("Who arranges referees for this team's home games. Federation-managed teams are left out of the referee tools entirely -- no eligibility, no assignment, nothing to configure."),
-    )
-    #: Independent of referee_management -- a club can need referees arranged
-    #: without needing officials (table officials, scorekeepers, ...) or vice
-    #: versa, so this isn't just a second read of the same flag. Same
-    #: CLUB/FEDERATION shape and the same "federation-managed is entirely out
-    #: of scope" reasoning as referee_management, see events.services.officials.
-    official_management = models.CharField(
-        _("official management"),
-        max_length=20,
-        choices=OfficialManagement.choices,
-        default=OfficialManagement.CLUB,
-        help_text=_("Who arranges match officials for this team's home games. Federation-managed teams are left out of the officials tools entirely -- no eligibility, no assignment, nothing to configure."),
-    )
+
     pool = models.ForeignKey(
         NumberPool,
         on_delete=models.SET_NULL,
@@ -83,35 +46,21 @@ class Team(ClubScopedModel):
         verbose_name=_("number pool"),
         help_text=_("Jersey numbers are checked for clashes against every other team sharing this pool, not just this one. Left blank, this team's numbers are only checked against itself, as before."),
     )
-    #: Purely descriptive -- unlike a bare "U14" (ambiguous: does that mean
-    #: "born this year" or "under 14 as of some cutoff"?), an explicit range
-    #: says exactly who plays here. Both blank means a senior/open team with
-    #: no age restriction; equal (age_min == age_max) is a single-age team.
-    #: Not used for anything programmatic -- see feeds_into below for that.
+
     age_min = models.PositiveSmallIntegerField(_("minimum age"), null=True, blank=True)
     age_max = models.PositiveSmallIntegerField(_("maximum age"), null=True, blank=True)
-    #: A team that only exists for tournaments (no league season). Purely a label
-    #: for consumers: the public /teams/ endpoint reports it and can leave these out.
-    tournament_only = models.BooleanField(
-        _("tournament only"),
-        default=False,
-        help_text=_("This team only plays in tournaments. The club's public website can hide tournament-only teams from its team list."),
+
+    referee_management = models.CharField(
+        _("referee management"), max_length=20, choices=Management.choices, default=Management.CLUB, help_text=_("Who arranges referees for this team's home games. Federation-managed teams are left out of the referee tools.")
     )
-    #: Display order of the team lists (management, public API): teams with an order
-    #: come first, low to high, then the rest; ties and unordered teams by name.
+    official_management = models.CharField(_("official management"), max_length=20, choices=Management.choices, default=Management.CLUB, help_text=_("Who arranges match officials for this team's home games."))
+
+    tournament_only = models.BooleanField(_("tournament only"), default=False, help_text=_("This team only plays in tournaments. The club's public website can hide tournament-only teams from its team list."))
+
     ordering = models.PositiveSmallIntegerField(
-        _("order"),
-        null=True,
-        blank=True,
-        help_text=_("Teams with an order are listed first, lowest number first; teams without one follow alphabetically. Teams with the same order are sorted alphabetically."),
+        _("order"), null=True, blank=True, help_text=_("Teams with an order are listed first, lowest number first; teams without one follow alphabetically. Teams with the same order are sorted alphabetically.")
     )
-    #: Which team this one's players typically graduate to next season --
-    #: an explicit, admin-set relationship rather than something inferred
-    #: from age_min/age_max or team naming. Several teams can share the same
-    #: feeds_into target (e.g. two parallel U13 sides both feeding one U14
-    #: team), so this lives on the *feeder* side, read back via the reverse
-    #: relation (mobile.coach_views.CoachAddPlayerView's "Suggested" filter:
-    #: active_team.feeder_teams.all()) rather than the other way around.
+
     feeds_into = models.ForeignKey(
         "self",
         on_delete=models.SET_NULL,
@@ -121,38 +70,18 @@ class Team(ClubScopedModel):
         verbose_name=_("feeds into"),
         help_text=_("The team this one's players typically graduate to next season -- used to suggest call-ups from here when adding players to that team."),
     )
-    #: The federation fixture-list URLs this team's games are imported from, one
-    #: entry per (source, season, competition label) -- written only by a
-    #: confirmed one-off import and by the weekly check's bookkeeping, never by a
-    #: form. See events.services.import_sources for the entry shape and the
-    #: "same season + competition replaces, anything else appends" rule.
+
     import_sources = models.JSONField(_("fixture import sources"), default=list, blank=True, editable=False)
 
     class Meta:
         verbose_name = _("team")
         verbose_name_plural = _("teams")
-        constraints = [
-            models.UniqueConstraint(fields=["club", "name"], name="unique_team_name_per_club"),
-        ]
         ordering = [models.F("ordering").asc(nulls_last=True), "name"]
 
     def __str__(self):
         return self.name
 
-    @property
-    def age_group_label(self):
-        """ "U13-U14"/"U14"-style display string, or "" for a team with no
-        age range set (a senior/open team)."""
-        if self.age_min is None and self.age_max is None:
-            return ""
-        if self.age_min == self.age_max or self.age_min is None or self.age_max is None:
-            return f"U{self.age_max or self.age_min}"
-        return f"U{self.age_min}-U{self.age_max}"
-
     def clean(self):
-        club_id = self.club_id
-        if club_id is not None:
-            validate_club_scope(self, club_id, same_club_fields=("pool", "feeds_into"))
         if self.feeds_into_id is not None and self.feeds_into_id == self.pk:
             raise ValidationError({"feeds_into": _("A team can't feed into itself.")})
         if self.age_min is not None and self.age_max is not None and self.age_min > self.age_max:
@@ -160,7 +89,7 @@ class Team(ClubScopedModel):
 
 
 def team_photo_path(instance, filename):
-    return f"clubs/{instance.team.club.slug}/teams/{instance.team_id}/{instance.season.name}/{filename}"
+    return f"teams/{instance.team_id}/{instance.season.name}/{filename}"
 
 
 class TeamPhoto(UUIDModel):
@@ -184,7 +113,7 @@ class TeamPhoto(UUIDModel):
         return f"{self.team} - {self.season}"
 
 
-class Position(ClubScopedModel):
+class Position(UUIDModel):
     name = models.CharField(_("name"), max_length=255)
     short_name = models.CharField(_("short name"), max_length=255)
     ordering = models.PositiveSmallIntegerField(_("ordering"), default=0, help_text=_("Lower numbers are listed first (e.g. on a team's roster). Positions with the same number are ordered by name."))
@@ -196,7 +125,6 @@ class Position(ClubScopedModel):
         verbose_name = _("position")
         verbose_name_plural = _("positions")
         constraints = [
-            models.UniqueConstraint(fields=["club", "name"], name="unique_position_name_per_club"),
             # A management position is always a staff position.
             models.CheckConstraint(condition=Q(management_position=False) | Q(staff_position=True), name="management_position_implies_staff_position"),
         ]
@@ -237,12 +165,8 @@ class TeamMembership(UUIDModel):
     def __str__(self):
         return f"{self.team} - {self.member}"
 
-    def clean(self):
-        club_id = self.team.club_id if self.team_id else None
-        validate_club_scope(self, club_id, same_club_fields=("season", "position"))
 
-
-class RefereeLevel(ClubScopedModel):
+class RefereeLevel(UUIDModel):
     """A club-defined referee qualification tier (e.g. "Regional", "National")
     -- admin-managed, like Position, so a club can name its own levels rather
     than picking from a fixed list. Owns which teams it qualifies a referee
@@ -260,7 +184,7 @@ class RefereeLevel(ClubScopedModel):
     inherits_from covered the same need without a second, independently-kept
     number to keep in sync with it."""
 
-    name = models.CharField(_("name"), max_length=255)
+    name = models.CharField(_("name"), max_length=255, unique=True)
     teams = models.ManyToManyField(Team, related_name="referee_levels", blank=True, verbose_name=_("qualifies for"), help_text=_("Members holding this level can be assigned to referee these teams' home games."))
     inherits_from = models.ForeignKey(
         "self",
@@ -276,23 +200,11 @@ class RefereeLevel(ClubScopedModel):
         verbose_name = _("referee level")
         verbose_name_plural = _("referee levels")
         ordering = ["name"]
-        constraints = [
-            models.UniqueConstraint(fields=["club", "name"], name="unique_referee_level_name_per_club"),
-        ]
 
     def __str__(self):
         return self.name
 
     def clean(self):
-        # club_id is still None here for a brand-new level: RefereeLevelCreateView
-        # (like its siblings -- PositionCreateView, GroupCreateView, ...) assigns
-        # form.instance.club in form_valid(), *after* the form's is_valid() already
-        # ran clean() -- so there's nothing to compare against yet on create. The
-        # form's own inherits_from queryset (scoped to `club`) is what actually
-        # blocks a cross-club pick there; this still catches it on every other path
-        # (update, admin, direct .full_clean()) where club_id is already set.
-        if self.club_id is not None:
-            validate_club_scope(self, self.club_id, same_club_fields=("inherits_from",))
         current = self.inherits_from
         seen = set()
         while current is not None:
@@ -329,7 +241,7 @@ class RefereeLevel(ClubScopedModel):
         return {level.pk: level.eligible_team_ids() for level in RefereeLevel.objects.filter(club=club).select_related("inherits_from")}
 
 
-class RefereeProfile(ClubScopedModel):
+class RefereeProfile(UUIDModel):
     """Marks a member as a club referee: their level (which determines which
     teams they're eligible for, via RefereeLevel.teams) and how long that
     qualification is valid. A member-level fact, not a group-level one --
@@ -364,16 +276,9 @@ class RefereeProfile(ClubScopedModel):
         verbose_name = _("referee profile")
         verbose_name_plural = _("referee profiles")
         ordering = ["member__last_name", "member__first_name"]
-        constraints = [
-            models.UniqueConstraint(fields=["club", "member"], name="unique_referee_profile_per_club_per_member"),
-        ]
 
     def __str__(self):
         return f"{self.member} (referee)"
-
-    def clean(self):
-        if self.club_id is not None:
-            validate_club_scope(self, self.club_id, same_club_fields=("level",))
 
     @property
     def is_currently_valid(self) -> bool:
@@ -411,7 +316,7 @@ class RefereeProfile(ClubScopedModel):
         return Team.objects.filter(id__in=self.eligible_team_ids())
 
 
-class OfficialLevel(ClubScopedModel):
+class OfficialLevel(UUIDModel):
     """The match-officials counterpart to RefereeLevel -- same shape, same
     eligible_team_ids()/inherits_from chaining, same reasoning throughout
     (see RefereeLevel's own docstring). Deliberately a separate model rather
@@ -421,7 +326,7 @@ class OfficialLevel(ClubScopedModel):
     officials off (see the "officials" waffle flag) never has to filter a
     shared table by kind everywhere it's read."""
 
-    name = models.CharField(_("name"), max_length=255)
+    name = models.CharField(_("name"), max_length=255, unique=True)
     teams = models.ManyToManyField(Team, related_name="official_levels", blank=True, verbose_name=_("qualifies for"), help_text=_("Members holding this level can be assigned as an official for these teams' home games."))
     inherits_from = models.ForeignKey(
         "self",
@@ -437,16 +342,11 @@ class OfficialLevel(ClubScopedModel):
         verbose_name = _("official level")
         verbose_name_plural = _("official levels")
         ordering = ["name"]
-        constraints = [
-            models.UniqueConstraint(fields=["club", "name"], name="unique_official_level_name_per_club"),
-        ]
 
     def __str__(self):
         return self.name
 
     def clean(self):
-        if self.club_id is not None:
-            validate_club_scope(self, self.club_id, same_club_fields=("inherits_from",))
         current = self.inherits_from
         seen = set()
         while current is not None:
@@ -474,7 +374,7 @@ class OfficialLevel(ClubScopedModel):
         return {level.pk: level.eligible_team_ids() for level in OfficialLevel.objects.filter(club=club).select_related("inherits_from")}
 
 
-class OfficialProfile(ClubScopedModel):
+class OfficialProfile(UUIDModel):
     """The match-officials counterpart to RefereeProfile -- same shape, same
     reasoning: a member-level fact (which level, how long it's valid), not a
     group-level one, managed from the member's own page. Club-scoped, and
@@ -489,16 +389,9 @@ class OfficialProfile(ClubScopedModel):
         verbose_name = _("official profile")
         verbose_name_plural = _("official profiles")
         ordering = ["member__last_name", "member__first_name"]
-        constraints = [
-            models.UniqueConstraint(fields=["club", "member"], name="unique_official_profile_per_club_per_member"),
-        ]
 
     def __str__(self):
         return f"{self.member} (official)"
-
-    def clean(self):
-        if self.club_id is not None:
-            validate_club_scope(self, self.club_id, same_club_fields=("level",))
 
     @property
     def is_currently_valid(self) -> bool:
@@ -532,12 +425,8 @@ class StaffAssignment(UUIDModel):
     def __str__(self):
         return f"{self.team} - {self.member}"
 
-    def clean(self):
-        club_id = self.team.club_id if self.team_id else None
-        validate_club_scope(self, club_id, same_club_fields=("season", "position"))
 
-
-class NumberReservation(ClubScopedModel):
+class NumberReservation(UUIDModel):
     """A manual block on a number within a pool, not tied to any member --
     e.g. a retired shirt. Permanent until released by staff: unlike organic
     usage (see teams/services/numbers.py's season window), a reservation
@@ -560,7 +449,5 @@ class NumberReservation(ClubScopedModel):
         return f"{self.pool} #{self.number}"
 
     def clean(self):
-        if self.club_id is not None:
-            validate_club_scope(self, self.club_id, same_club_fields=("pool",))
         if self.pool_id and self.number is not None and not (self.pool.min_number <= self.number <= self.pool.max_number):
             raise ValidationError({"number": _("Must be within the pool's number range.")})

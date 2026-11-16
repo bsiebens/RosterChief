@@ -1,695 +1,89 @@
-import os
-import time
-from io import StringIO
+"""The all_access plan: every catalog feature, no limits, and it keeps up with the catalog."""
+
 from unittest import mock
 
-from allauth.mfa.models import Authenticator
 from django.contrib.auth import get_user_model
-from django.core.cache import cache
-from django.core.management import call_command
-from django.core.management.base import CommandError
-from django.db import connection
-from django.test import RequestFactory, TestCase, override_settings
-from waffle import flag_is_active, get_waffle_flag_model
+from django.test import TestCase
 
 from club.models import Club
-
-from . import scheduler as scheduler_module
-from .jobs import JOB_REGISTRY
-from .models import EmailSuppression, JobRun, JobToggle, Maintenance
-
-Flag = get_waffle_flag_model()
-User = get_user_model()
+from features import services
+from features.catalog import ALL_ACCESS_PLAN, CATALOG, LIMIT, FeatureDef, all_access_features
+from features.entitlements import resolve_entitlements
+from features.models import EntitlementLog, Feature, Plan, PlanFeature
 
 
-class ClubScopedFlagTests(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        cls.other = Club.objects.create(name="Rival FC", slug="rival-fc")
-        cls.flag = Flag.objects.create(name="shop")
+def plan_features(plan):
+    return {pf.feature.code: pf.limit for pf in plan.plan_features.select_related("feature")}
 
+
+class AllAccessPlanTests(TestCase):
     def setUp(self):
-        # waffle caches flags by name, and its cache is NOT rolled back with the
-        # test transaction -- a flag row whose targeting changed in the previous
-        # test would otherwise be shadowed by that test's cached object. Has to
-        # stay per-test: it is the cache, not the rows, that leaks.
-        cache.clear()
-        self.addCleanup(cache.clear)
-
-    def request_for(self, club):
-        request = RequestFactory().get("/")
-        request.club = club
-        request.user = None
-        return request
-
-    def active_for(self, club):
-        return flag_is_active(self.request_for(club), "shop")
-
-    def test_off_for_every_club_by_default(self):
-        self.assertFalse(self.active_for(self.club))
-        self.assertFalse(self.active_for(self.other))
-
-    def test_on_only_for_the_targeted_club(self):
-        self.flag.clubs.add(self.club)
-
-        self.assertTrue(self.active_for(self.club))
-        self.assertFalse(self.active_for(self.other))
-
-    def test_removing_a_club_turns_it_off_again(self):
-        self.flag.clubs.add(self.club)
-        self.flag.clubs.remove(self.club)
-
-        self.assertFalse(self.active_for(self.club))
-
-    def test_everyone_true_overrides_club_targeting(self):
-        self.flag.everyone = True
-        self.flag.save()
-
-        self.assertTrue(self.active_for(self.other))  # not targeted, still on
-
-    def test_everyone_false_beats_club_targeting(self):
-        # waffle's contract: `everyone` overrides ALL other settings, so a flag
-        # switched off for everyone must stay off even for a targeted club.
-        self.flag.clubs.add(self.club)
-        self.flag.everyone = False
-        self.flag.save()
-
-        self.assertFalse(self.active_for(self.club))
-
-    def test_no_club_on_the_request_is_not_active(self):
-        # e.g. the base domain / control panel, where there is no tenant.
-        self.flag.clubs.add(self.club)
-
-        self.assertFalse(flag_is_active(self.request_for(None), "shop"))
-
-    def test_a_flag_name_with_no_matching_row_is_off_not_an_error(self):
-        # Regression: waffle's own BaseModel.get() falls back to a transient,
-        # unsaved Flag(name=...) instance when nothing in the DB matches the
-        # name -- an M2M lookup (self.clubs) against that unsaved instance used
-        # to raise ValueError instead of just resolving to "off". This is the
-        # normal state for any flag nobody has created in the control panel yet.
-        self.assertFalse(flag_is_active(self.request_for(self.club), "no-such-flag"))
-
-    def test_is_active_for_club_without_a_request(self):
-        self.flag.clubs.add(self.club)
-
-        self.assertTrue(self.flag.is_active_for_club(self.club))
-        self.assertFalse(self.flag.is_active_for_club(self.other))
-
-    def test_is_active_for_club_respects_everyone(self):
-        self.flag.everyone = False
-        self.flag.save()
-        self.assertFalse(self.flag.is_active_for_club(self.club))
-
-        self.flag.everyone = True
-        self.flag.save()
-        self.assertTrue(self.flag.is_active_for_club(self.club))
-
-    def test_cache_is_flushed_when_club_targeting_changes(self):
-        # The M2M does not call save(), so without the flush signal waffle would
-        # keep answering from a stale cached set.
-        self.assertFalse(self.active_for(self.club))  # primes the cache
-
-        self.flag.clubs.add(self.club)
-
-        self.assertTrue(self.active_for(self.club))
-
-    def test_cache_is_flushed_on_reverse_edit(self):
-        self.assertFalse(self.active_for(self.club))
-
-        self.club.flags.add(self.flag)
-
-        self.assertTrue(self.active_for(self.club))
-
-
-@override_settings(
-    ROSTERCHIEF_BASE_DOMAIN="rosterchief.app",
-    ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"],
-)
-class MaintenanceModeTests(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        cls.user = User.objects.create_user(email="root@example.com", password="pw-secret-123", is_staff=True)
-        Authenticator.objects.create(user=cls.user, type=Authenticator.Type.TOTP, data={"secret": "JBSWY3DPEHPK3PXP"})
-
-    def setUp(self):
-        # Maintenance state lives in the shared cache, which no transaction rolls
-        # back -- each test has to start from a reopened platform.
-        cache.clear()
-        self.addCleanup(cache.clear)
-
-    def club_get(self, path="/"):
-        return self.client.get(path, HTTP_HOST="ajax-united.rosterchief.app")
-
-    def platform_get(self, path):
-        return self.client.get(path, HTTP_HOST="rosterchief.app")
-
-    def test_a_club_subdomain_is_closed(self):
-        Maintenance.start(message="Upgrading the database.")
-
-        response = self.club_get("/accounts/login/")
-
-        self.assertEqual(response.status_code, 503)
-        self.assertContains(response, "Upgrading the database", status_code=503)
-        self.assertEqual(response["Retry-After"], "3600")
-
-    def test_a_club_is_open_again_when_maintenance_ends(self):
-        Maintenance.start()
-        Maintenance.stop()
-
-        self.assertEqual(self.club_get("/accounts/login/").status_code, 200)
-
-    def test_the_control_panel_stays_reachable(self):
-        Maintenance.start()
-        self.client.force_login(self.user)
-
-        self.assertEqual(self.platform_get("/control/").status_code, 200)
-
-    def test_the_control_panel_stays_reachable_without_a_trailing_slash(self):
-        # Maintenance runs before APPEND_SLASH can add the slash, and "/control" is what people type.
-        Maintenance.start()
-        self.client.force_login(self.user)
-
-        response = self.platform_get("/control")
-
-        self.assertNotEqual(response.status_code, 503)
-        self.assertRedirects(response, "/control/", fetch_redirect_response=False, status_code=301)
-
-    def test_signing_in_stays_possible(self):
-        # Close /accounts/ as well and you cannot sign in to turn maintenance off: a
-        # lock-down with no key, fixable only from a shell.
-        Maintenance.start()
-
-        self.assertEqual(self.platform_get("/accounts/login/").status_code, 200)
-
-    def test_the_club_logo_still_loads_on_the_maintenance_page(self):
-        # The maintenance page is rendered through the club's own skin specifically to show
-        # its logo -- closing /media/ on the club subdomain too would serve the maintenance
-        # page itself in place of that logo, making it look like the logo vanished.
-        Maintenance.start()
-
-        self.assertEqual(self.club_get("/media/clubs/ajax-united/crest.png").status_code, 404)
-
-    def test_the_health_check_still_answers(self):
-        # Close it and the load balancer decides the node is dead and stops routing to it —
-        # taking the control panel down with everything else.
-        Maintenance.start()
-
-        self.assertEqual(self.platform_get("/healthz").status_code, 200)
-        self.assertEqual(self.client.get("/healthz", HTTP_HOST="ajax-united.rosterchief.app").status_code, 200)
-
-    def test_the_rest_of_the_base_domain_is_closed(self):
-        Maintenance.start()
-
-        self.assertEqual(self.platform_get("/").status_code, 503)
-
-    def test_a_json_caller_gets_json(self):
-        Maintenance.start(message="Back soon.")
-
-        response = self.client.get("/", HTTP_HOST="ajax-united.rosterchief.app", headers={"accept": "application/json"})
-
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json()["status"], "maintenance")
-
-    def test_the_message_is_optional(self):
-        Maintenance.start()
-
-        self.assertContains(self.club_get("/"), "down for maintenance", status_code=503)
-
-    def test_it_says_which_state_it_is_in(self):
-        self.assertEqual(str(Maintenance.start()), "Maintenance on")
-        self.assertEqual(str(Maintenance.stop()), "Maintenance off")
-
-    def test_it_records_who_closed_the_platform_and_when(self):
-        maintenance = Maintenance.start(message="db upgrade", user=self.user)
-
-        self.assertTrue(maintenance.is_active)
-        self.assertEqual(maintenance.started_by, self.user)
-        self.assertIsNotNone(maintenance.started_at)
-
-    def test_the_state_is_shared_rather_than_per_process(self):
-        # The cache is the shared one the flags use, so closing the platform reaches every
-        # worker and every server. A per-process cache would leave some workers serving clubs.
-        Maintenance.start()
-
-        self.assertTrue(cache.get(Maintenance.CACHE_KEY).is_active)
-        self.assertTrue(Maintenance.is_on())
-
-        Maintenance.stop()
-
-        self.assertFalse(cache.get(Maintenance.CACHE_KEY).is_active)
-
-
-class EmailSuppressionTests(TestCase):
-    """features.models.EmailSuppression -- the platform-wide "pause automated
-    email" switch. Mirrors MaintenanceModeTests' own model-level coverage above;
-    see rosterchief.tests.SendMessageTests for the actual send-gating behaviour
-    and authentication.tests for the password-reset exemption."""
-
-    @classmethod
-    def setUpTestData(cls):
-        cls.user = User.objects.create_user(email="root@example.com", password="pw-secret-123", is_staff=True)
-
-    def setUp(self):
-        # Same cache-not-rolled-back-by-the-transaction reasoning as
-        # MaintenanceModeTests.setUp -- see that method's own comment.
-        cache.clear()
-        self.addCleanup(cache.clear)
-
-    def test_off_by_default(self):
-        self.assertFalse(EmailSuppression.is_on())
-
-    def test_it_says_which_state_it_is_in(self):
-        self.assertEqual(str(EmailSuppression.start()), "Automated email paused")
-        self.assertEqual(str(EmailSuppression.stop()), "Automated email on")
-
-    def test_it_records_who_paused_it_and_when(self):
-        suppression = EmailSuppression.start(user=self.user)
-
-        self.assertTrue(suppression.is_active)
-        self.assertEqual(suppression.started_by, self.user)
-        self.assertIsNotNone(suppression.started_at)
-
-    def test_stopping_clears_who_and_when(self):
-        EmailSuppression.start(user=self.user)
-
-        suppression = EmailSuppression.stop()
-
-        self.assertFalse(suppression.is_active)
-        self.assertIsNone(suppression.started_by)
-        self.assertIsNone(suppression.started_at)
-
-    def test_the_state_is_shared_rather_than_per_process(self):
-        # Same shared-cache reasoning as Maintenance's own equivalent test.
-        EmailSuppression.start()
-
-        self.assertTrue(cache.get(EmailSuppression.CACHE_KEY).is_active)
-        self.assertTrue(EmailSuppression.is_on())
-
-        EmailSuppression.stop()
-
-        self.assertFalse(cache.get(EmailSuppression.CACHE_KEY).is_active)
-
-
-class MaintenanceCommandTests(TestCase):
-    def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
-
-    def run_command(self, name, *args):
-        out = StringIO()
-        call_command(name, *args, stdout=out, stderr=out)
-        return out.getvalue()
-
-    def test_a_scheduled_job_stands_down(self):
-        Maintenance.start()
-
-        with self.assertRaises(CommandError):
-            self.run_command("archive_overdue_clubs")
-
-    def test_it_runs_again_once_the_platform_reopens(self):
-        Maintenance.start()
-        Maintenance.stop()
-
-        self.assertIn("Nothing overdue", self.run_command("archive_overdue_clubs"))
-
-    def test_an_override_exists_for_when_you_mean_it(self):
-        Maintenance.start()
-
-        self.assertIn("Nothing overdue", self.run_command("archive_overdue_clubs", "--ignore-maintenance"))
-
-    def test_migrate_is_not_blocked(self):
-        # Maintenance is usually declared IN ORDER to migrate. A guard on every command would
-        # mean turning the mode off to do the work you turned it on for.
-        Maintenance.start()
-
-        self.run_command("migrate", "--check")  # raises SystemExit only if migrations are pending
-
-
-class JobRunTests(TestCase):
-    """features.commands.ScheduledJobCommand's own JobRun bookkeeping (replaces what used to
-    be Celery signal wiring in features/signals.py -- see that module's own docstring),
-    exercised against a real registered command (archive_overdue_clubs, same as
-    MaintenanceCommandTests above -- no complex setup, "nothing overdue" is a normal, cheap
-    result) rather than a throwaway one: what matters here is that ScheduledJobCommand.execute()
-    writes a JobRun row correctly, not the domain logic of any one scheduled job (each of
-    those has its own tests alongside its own management command)."""
-
-    def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
-
-    def test_a_successful_run_is_recorded(self):
-        call_command("archive_overdue_clubs", stdout=StringIO())
-
-        run = JobRun.objects.get(name="billing.tasks.archive_overdue_clubs")
-        self.assertEqual(run.status, JobRun.Status.SUCCESS)
-        self.assertIn("Nothing overdue", run.detail)
-        self.assertEqual(run.error, "")
-        self.assertIsNotNone(run.started_at)
-        self.assertIsNotNone(run.finished_at)
-
-    def test_a_failed_run_is_recorded(self):
-        # A disabled job is a failure ScheduledJobCommand.execute() itself raises (see
-        # features/commands.py) -- convenient, deterministic way to exercise the FAILURE
-        # branch of its own bookkeeping without contriving a real domain-logic failure.
-        JobToggle.set_enabled("billing.tasks.archive_overdue_clubs", False)
-
-        with self.assertRaises(CommandError):
-            call_command("archive_overdue_clubs", stdout=StringIO())
-
-        run = JobRun.objects.get(name="billing.tasks.archive_overdue_clubs")
-        self.assertEqual(run.status, JobRun.Status.FAILURE)
-        self.assertIn("disabled", run.error)
-
-    def test_detailed_logging_logs_every_query(self):
-        # --detailed-logging is what the control panel's "Run now" button always passes
-        # (see controlpanel.views.JobRunNowView) -- features.scheduler's own ticks never
-        # do, on purpose, since every query on every scheduled run would drown the log.
-        with self.assertLogs("django.db.backends", level="DEBUG") as captured:
-            call_command("archive_overdue_clubs", "--detailed-logging", stdout=StringIO())
-
-        self.assertTrue(any("SELECT" in message for message in captured.output))
-        # Restored afterwards, not left on for whatever else shares this connection/process.
-        self.assertFalse(connection.force_debug_cursor)
-
-    def test_detailed_logging_is_off_by_default(self):
-        call_command("archive_overdue_clubs", stdout=StringIO())
-
-        self.assertFalse(connection.force_debug_cursor)
-
-
-class JobToggleTests(TestCase):
-    """Per-job pause/resume switch -- see features.models.JobToggle and its use in
-    events/billing/club's scheduled tasks (each checks JobToggle.is_enabled(name)
-    right alongside the existing Maintenance.is_on() gate)."""
-
-    def setUp(self):
-        # Same reasoning as MaintenanceModeTests -- the toggle's cache isn't
-        # rolled back with the test transaction.
-        cache.clear()
-        self.addCleanup(cache.clear)
-
-    def test_a_job_with_no_row_is_enabled_by_default(self):
-        self.assertTrue(JobToggle.is_enabled("events.tasks.extend_event_series"))
-
-    def test_disabling_a_job(self):
-        JobToggle.set_enabled("events.tasks.extend_event_series", False)
-
-        self.assertFalse(JobToggle.is_enabled("events.tasks.extend_event_series"))
-
-    def test_re_enabling_a_job(self):
-        JobToggle.set_enabled("events.tasks.extend_event_series", False)
-        JobToggle.set_enabled("events.tasks.extend_event_series", True)
-
-        self.assertTrue(JobToggle.is_enabled("events.tasks.extend_event_series"))
-
-    def test_toggling_one_job_does_not_affect_another(self):
-        JobToggle.set_enabled("events.tasks.extend_event_series", False)
-
-        self.assertTrue(JobToggle.is_enabled("events.tasks.send_deadline_reminders"))
-
-
-class BuildSchedulerTests(TestCase):
-    """features.scheduler._build_scheduler wires every JOB_REGISTRY entry into an
-    APScheduler job -- this checks the wiring itself (one job per registry entry, the
-    right trigger kwargs, overlap/misfire guards), not APScheduler's own trigger math."""
-
-    def setUp(self):
-        # Never started -- add_job() only populates the in-memory jobstore, no thread/pool
-        # spun up, so there's nothing here that needs a shutdown() to clean up after itself.
-        self.scheduler = scheduler_module._build_scheduler()
-
-    def test_one_job_per_registry_entry(self):
-        job_ids = {job.id for job in self.scheduler.get_jobs()}
-
-        self.assertEqual(job_ids, set(JOB_REGISTRY))
-
-    def test_every_job_guards_against_overlap_and_pauses_only_a_missed_run(self):
-        for job in self.scheduler.get_jobs():
-            self.assertEqual(job.max_instances, 1, job.id)
-            self.assertTrue(job.coalesce, job.id)
-            self.assertEqual(job.misfire_grace_time, scheduler_module.MISFIRE_GRACE_SECONDS, job.id)
-
-    def test_a_cron_entrys_trigger_carries_its_own_hour_and_minute(self):
-        job = self.scheduler.get_job("events.tasks.extend_event_series")
-
-        # APScheduler's CronTrigger stringifies as "cron[hour='3', minute='0', ...]" --
-        # asserting on that representation rather than reaching into private trigger
-        # internals for the same fields JOB_REGISTRY's own "trigger" dict already states.
-        self.assertIn("hour='3'", str(job.trigger))
-        self.assertIn("minute='0'", str(job.trigger))
-
-    def test_an_interval_entrys_trigger_carries_its_own_period(self):
-        job = self.scheduler.get_job("events.tasks.poll_live_game_results")
-
-        self.assertIn("0:01:00", str(job.trigger))
-
-
-class RunJobTests(TestCase):
-    """features.scheduler._run_job is what every tick actually calls -- same call_command
-    path controlpanel.views.JobRunNowView and the old crontab entries used, plus the
-    connection cleanup a thread outside the request/response cycle needs for itself.
-
-    _run_job's own `finally: connections.close_all()` is only safe called from its own
-    dedicated thread (the production case, and JobRunNowView's/the live-score loop's own
-    precedent) -- called here, inline on the test's own thread, it would tear down the
-    connection this TestCase's wrapping atomic() block depends on, the exact bug
-    controlpanel.tests._SyncThread hit against Postgres. Patched to a no-op for every test
-    in this class for that reason, not just the one that asserts on it directly.
-    """
-
-    def setUp(self):
-        self.connections_close_all = mock.patch("features.scheduler.connections.close_all").start()
-        self.addCleanup(mock.patch.stopall)
-
-    def test_calls_call_command_with_the_registrys_own_args(self):
-        with mock.patch("features.scheduler.call_command") as call_command_mock:
-            scheduler_module._run_job("billing.tasks.send_billing_reminders", "send_billing_reminders", ["--commit"])
-
-        call_command_mock.assert_called_once_with("send_billing_reminders", "--commit")
-
-    def test_a_failing_job_is_caught_and_logged_not_raised(self):
-        with mock.patch("features.scheduler.call_command", side_effect=RuntimeError("boom")):
-            # Must not raise -- an uncaught exception here would take the whole scheduler
-            # thread's job down with it, not just this one tick.
-            scheduler_module._run_job("events.tasks.extend_event_series", "extend_event_series", [])
-
-    def test_closes_connections_even_when_the_job_raises(self):
-        with mock.patch("features.scheduler.call_command", side_effect=RuntimeError("boom")):
-            scheduler_module._run_job("events.tasks.extend_event_series", "extend_event_series", [])
-
-        self.connections_close_all.assert_called_once()
-
-
-class LeaderElectionTests(TestCase):
-    """features.scheduler._try_acquire_or_renew is the cooperative lease every process
-    (only ever one today, but see that module's own docstring) uses to decide whether it's
-    the one actually running the schedule."""
-
-    def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
-
-    def test_acquires_an_unheld_lease(self):
-        self.assertTrue(scheduler_module._try_acquire_or_renew())
-        self.assertEqual(cache.get(scheduler_module.LEADER_CACHE_KEY), scheduler_module._TOKEN)
-
-    def test_renews_a_lease_it_already_holds(self):
-        scheduler_module._try_acquire_or_renew()
-
-        self.assertTrue(scheduler_module._try_acquire_or_renew())
-
-    def test_refuses_a_lease_held_by_another_token(self):
-        cache.set(scheduler_module.LEADER_CACHE_KEY, "someone-else", scheduler_module.LEASE_SECONDS)
-
-        self.assertFalse(scheduler_module._try_acquire_or_renew())
-        self.assertEqual(cache.get(scheduler_module.LEADER_CACHE_KEY), "someone-else")
-
-
-class SchedulerLifecycleTests(TestCase):
-    """start()/stop() -- the two entry points gunicorn.conf.py's post_worker_init/worker_exit
-    hooks call. Runs the real leader thread rather than mocking it: what's worth proving here is
-    that the observable state (the lease, the running scheduler) ends up right, not that
-    specific internal calls were made."""
-
-    def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
-        self.addCleanup(scheduler_module.stop)
-
-    def _wait_until(self, predicate, timeout=2.0):
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            if predicate():
-                return True
-            time.sleep(0.02)
-        return False
-
-    def test_start_acquires_leadership_and_runs_a_scheduler(self):
-        scheduler_module.start()
-
-        self.assertTrue(self._wait_until(lambda: scheduler_module._scheduler is not None))
-        self.assertEqual(cache.get(scheduler_module.LEADER_CACHE_KEY), scheduler_module._TOKEN)
-        self.assertTrue(scheduler_module._scheduler.running)
-
-    def test_stop_releases_the_lease_and_shuts_the_scheduler_down(self):
-        scheduler_module.start()
-        self.assertTrue(self._wait_until(lambda: scheduler_module._scheduler is not None))
-
-        scheduler_module.stop()
-
-        self.assertIsNone(scheduler_module._scheduler)
-        self.assertIsNone(cache.get(scheduler_module.LEADER_CACHE_KEY))
-
-    def test_each_start_takes_a_fresh_lease_token(self):
-        # With --preload the module is imported once in the master and inherited by every worker:
-        # without a per-process token they would all hold the same one and each think it leads.
-        import_time_token = scheduler_module._TOKEN
-
-        scheduler_module.start()
-
-        self.assertNotEqual(scheduler_module._TOKEN, import_time_token)
-        self.assertIn(f":{os.getpid()}:", scheduler_module._TOKEN)
-
-    def test_two_workers_never_both_lead(self):
-        scheduler_module.start()
-        self.assertTrue(self._wait_until(lambda: scheduler_module._scheduler is not None))
-        leader_token = scheduler_module._TOKEN
-
-        # A second worker has its own token and cannot take the lease the first one holds.
-        scheduler_module._TOKEN = scheduler_module._new_token()
-        self.assertFalse(scheduler_module._try_acquire_or_renew())
-        self.assertEqual(cache.get(scheduler_module.LEADER_CACHE_KEY), leader_token)
-
-    def test_start_is_a_noop_if_already_started(self):
-        scheduler_module.start()
-        self.assertTrue(self._wait_until(lambda: scheduler_module._scheduler is not None))
-        first_thread = scheduler_module._leader_thread
-
-        scheduler_module.start()
-
-        self.assertIs(scheduler_module._leader_thread, first_thread)
-
-
-class FlagPerUserGrantScopingTests(TestCase):
-    """A per-user (or per-group) waffle grant carries no club, so on a club host
-    it must not switch a feature on -- otherwise it would leak into every club
-    that user belongs to."""
-
-    @classmethod
-    def setUpTestData(cls):
-        from django.contrib.auth.models import Group
-
-        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        cls.other = Club.objects.create(name="Rival FC", slug="rival-fc")
-        cls.user = get_user_model().objects.create_user(email="beta@example.com", password="pw-secret-123")
-        cls.group = Group.objects.create(name="beta")
-        cls.flag = get_waffle_flag_model().objects.get_or_create(name="evaluations")[0]
-        cls.flag.clubs.add(cls.club)
-
-    def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
-
-    def request_for(self, club):
-        request = RequestFactory().get("/")
-        request.club = club
-        request.user = self.user
-        return request
-
-    def test_a_per_user_grant_does_not_enable_the_feature_in_an_unlicensed_club(self):
-        self.flag.users.add(self.user)
-
-        self.assertTrue(flag_is_active(self.request_for(self.club), "evaluations"))
-        self.assertFalse(flag_is_active(self.request_for(self.other), "evaluations"))
-
-    def test_a_per_group_grant_does_not_enable_the_feature_in_an_unlicensed_club(self):
-        self.flag.groups.add(self.group)
-        self.user.groups.add(self.group)
-
-        self.assertFalse(flag_is_active(self.request_for(self.other), "evaluations"))
-
-    def test_a_per_user_grant_still_applies_off_any_club(self):
-        self.flag.users.add(self.user)
-
-        self.assertTrue(flag_is_active(self.request_for(None), "evaluations"))
-
-
-class GunicornConfigTests(TestCase):
-    """gunicorn.conf.py: the scheduler runs in the WORKERS. A master-side hook that starts a thread
-    makes every worker fork a gamble -- a lock the thread holds at that instant (the DNS resolver's,
-    a Redis pool's) is copied locked into the child, which then hangs forever on first use. That cost
-    a production worker (every thread stuck in getaddrinfo, ~half of all requests hanging)."""
-
-    def load_config(self):
-        import importlib.util
-        from pathlib import Path
-
-        spec = importlib.util.spec_from_file_location("gunicorn_conf_hooks_under_test", Path(__file__).resolve().parent.parent / "gunicorn.conf.py")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-
-    def test_no_hook_runs_code_in_the_master_that_could_start_a_thread(self):
-        config = self.load_config()
-
-        # when_ready fires in the master BEFORE the workers are forked; the others run in the master too.
-        for master_hook in ("when_ready", "on_starting", "on_reload", "on_exit", "pre_fork"):
-            self.assertFalse(hasattr(config, master_hook), f"gunicorn.conf.py defines {master_hook}: it runs in the process that forks the workers")
-
-    def test_the_scheduler_is_started_in_the_worker_and_stopped_when_it_exits(self):
-        config = self.load_config()
-        worker = mock.Mock()
-
-        with mock.patch("features.scheduler.start") as start, mock.patch("features.scheduler.stop") as stop:
-            config.post_worker_init(worker)
-            start.assert_called_once_with()
-            stop.assert_not_called()
-
-            config.worker_exit(server=None, worker=worker)
-            stop.assert_called_once_with()
-
-
-class GunicornPostForkTests(TestCase):
-    """gunicorn.conf.py's post_fork: a worker must not inherit the master's cache clients (the
-    master's scheduler thread may hold the Redis pool's lock when the worker is forked, which
-    wedges every Redis call in that worker with ChildDeadlockedError)."""
-
-    def load_config(self):
-        import importlib.util
-        from pathlib import Path
-
-        spec = importlib.util.spec_from_file_location("gunicorn_conf_under_test", Path(__file__).resolve().parent.parent / "gunicorn.conf.py")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-
-    def test_post_fork_replaces_the_inherited_cache_clients(self):
-        from django.core.cache import caches
-
-        inherited = caches["default"]
-
-        self.load_config().post_fork(server=None, worker=None)
-
-        self.assertIsNot(caches["default"], inherited)
-
-    def test_post_fork_drops_the_inherited_redis_pools(self):
-        from django_redis.pool import ConnectionFactory
-
-        ConnectionFactory._pools["inherited-from-master"] = object()
-        self.addCleanup(ConnectionFactory._pools.pop, "inherited-from-master", None)
-
-        self.load_config().post_fork(server=None, worker=None)
-
-        self.assertNotIn("inherited-from-master", ConnectionFactory._pools)
-
-    def test_the_cache_still_works_after_post_fork(self):
-        from django.core.cache import cache
-
-        self.load_config().post_fork(server=None, worker=None)
-
-        cache.set("post-fork-check", "ok", 5)
-        self.assertEqual(cache.get("post-fork-check"), "ok")
+        services.sync_catalog()
+        self.plan = Plan.objects.get(code=ALL_ACCESS_PLAN)
+
+    def test_it_is_seeded_with_every_feature_and_no_limits(self):
+        self.assertEqual(plan_features(self.plan), dict.fromkeys(all_access_features()))
+        self.assertEqual(set(plan_features(self.plan)), set(CATALOG))  # nothing in the catalog shares a limit scope yet
+        self.assertTrue(any(f.kind == LIMIT for f in CATALOG.values()))  # and the limit features are there, unlimited
+
+    def test_syncing_again_changes_nothing(self):
+        before = plan_features(self.plan)
+        logs = EntitlementLog.objects.count()
+        services.sync_catalog()
+        self.assertEqual(plan_features(self.plan), before)
+        self.assertEqual(EntitlementLog.objects.count(), logs)
+
+    def test_a_new_catalog_feature_is_added_without_a_limit(self):
+        extra = {"reports": FeatureDef("reports", "Reports", "Club reports."), "max_teams": FeatureDef("max_teams", "Team limit", kind=LIMIT, limit_scope="teams")}
+        with mock.patch.dict(CATALOG, extra):
+            services.sync_catalog()
+            features = plan_features(self.plan)
+        self.assertIn("reports", features)
+        self.assertIn("max_teams", features)
+        self.assertIsNone(features["reports"])
+        self.assertIsNone(features["max_teams"])  # unlimited
+        entry = EntitlementLog.objects.filter(plan=self.plan, action="plan_feature_added", feature__code="max_teams").first()
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry.new, {"feature": "max_teams", "limit": None})
+
+    def test_a_limit_set_by_an_admin_survives_a_sync(self):
+        PlanFeature.objects.filter(plan=self.plan, feature__code="max_members").update(limit=500)
+        with mock.patch.dict(CATALOG, {"reports": FeatureDef("reports", "Reports")}):
+            services.sync_catalog()
+        self.assertEqual(plan_features(self.plan)["max_members"], 500)
+        self.assertEqual(self.plan.plan_features.filter(feature__code="max_members").count(), 1)
+
+    def test_a_feature_an_admin_removed_is_added_back_only_if_it_is_still_missing(self):
+        # The plan is "every feature": removing one is undone by the next sync, which is the point of the plan.
+        PlanFeature.objects.filter(plan=self.plan, feature__code="sponsoring").delete()
+        services.sync_catalog()
+        self.assertIn("sponsoring", plan_features(self.plan))
+
+    def test_a_second_limit_feature_in_the_same_scope_is_skipped(self):
+        extra = {"max_players": FeatureDef("max_players", "Player limit", kind=LIMIT, limit_scope="members")}
+        with mock.patch.dict(CATALOG, extra):
+            self.assertNotIn("max_players", all_access_features())  # the first feature of a scope wins
+            services.sync_catalog()
+            self.assertNotIn("max_players", plan_features(self.plan))
+
+    def test_inactive_features_are_ignored_by_entitlements(self):
+        with mock.patch.dict(CATALOG, {"reports": FeatureDef("reports", "Reports")}):
+            services.sync_catalog()
+        services.sync_catalog()  # "reports" left the catalog again: its Feature row is deactivated
+        self.assertFalse(Feature.objects.get(code="reports").is_active)
+
+    def test_a_club_on_the_plan_has_every_feature_and_no_limits(self):
+        owner = get_user_model().objects.create(email="owner@allaccess.test", is_active=True)
+        club = Club(owner=owner, name="All Access FC", schema_name="all_access_fc")
+        club.auto_create_schema = False
+        club.save()
+        services.subscribe(club, self.plan, reason="test")
+        ent = resolve_entitlements(club)
+        for code, definition in CATALOG.items():
+            self.assertTrue(ent.has(code), code)
+            if definition.kind == LIMIT:
+                self.assertIsNone(ent.limit(code), code)
+        ent.check_limit("max_members", 10_000_000)  # never raises
+
+    def test_the_default_plan_is_still_free_with_its_limit(self):
+        self.assertEqual(plan_features(Plan.objects.get(code="free")), {"max_members": 50})

@@ -1,100 +1,61 @@
-"""Emailing a club's admins about money it owes the platform.
+"""Payment reminders: one email per escalation level per period."""
 
-Built on the same BillingNotice the on-screen banner uses (notices.py), so the email and the
-banner can never disagree about how much is owed or how long is left.
+import datetime
 
-**Sent once per escalation level, not once per run.** The command is on a daily cron; a club
-that owes money for a month must not receive thirty identical emails. ``Due.last_reminder_level``
-records the level last mailed, so an escalation (info -> warning -> error) always gets through
-and a repeat of the same level never does.
-"""
-
-from dataclasses import dataclass
-
-from django.conf import settings
-from django.core.mail import EmailMultiAlternatives
-from django.template.loader import render_to_string
 from django.utils import timezone
-from django.utils.translation import gettext as _
 
-from billing.services.notices import BillingNotice, club_billing_notice
-from club.models import ClubRole
-from rosterchief.mail import send_message
+from billing.emails import send_branded, texts
 
+from ..models import BillingSettings, Due
+from .dues import dues_overdue, owing_dues, today
+from .invoices import club_recipients
 
-@dataclass(frozen=True)
-class ReminderResult:
-    club: object
-    notice: BillingNotice
-    recipients: list[str]
-    sent: bool
-    skipped_reason: str = ""
+INFO, WARNING, ERROR = "info", "warning", "error"
+RANK = {"": 0, INFO: 1, WARNING: 2, ERROR: 3}
+URGENT_DAYS = 7  # this close to the end of grace the reminder escalates to "error"
 
 
-def admin_emails(club) -> list[str]:
-    """Every club admin we can actually reach, de-duplicated and order-stable.
-
-    A club with admins but no email addresses returns empty — the caller reports that rather
-    than silently counting it as reminded.
-    """
-    roles = ClubRole.objects.filter(club=club, role=ClubRole.Roles.ADMIN).select_related("member", "member__user").order_by("member__last_name", "member__first_name")
-
-    seen, emails = set(), []
-    for role in roles:
-        email = role.member.contact_email
-        if email and email not in seen:
-            seen.add(email)
-            emails.append(email)
-
-    return emails
+def level_for(due: Due, day: datetime.date | None = None) -> str:
+    day = day or today()
+    if due.is_issued_ahead(day):
+        return INFO
+    if due.grace_until < day or (due.grace_until - day).days <= URGENT_DAYS:
+        return ERROR
+    return WARNING
 
 
-def needs_reminder(due, notice: BillingNotice) -> bool:
-    """True when this due has not yet been mailed at its current level."""
-    return due.last_reminder_level != notice.level
+def reminders_to_send(day: datetime.date | None = None, *, force: bool = False):
+    """``[(due, level)]`` for owing periods of active clubs whose level is higher than the last reminder sent."""
+    day = day or today()
+    out = []
+    for due in owing_dues().filter(club__archived_at__isnull=True).exclude(amount=0, vat_amount=0):
+        level = level_for(due, day)
+        if force or RANK[level] > RANK.get(due.last_reminder_level, 0):
+            out.append((due, level))
+    return out
 
 
-def send_reminder(club, notice: BillingNotice, *, recipients: list[str]) -> None:
-    """Render and send one reminder, then record the level so it is not repeated."""
-    context = {
-        "club": club,
-        "notice": notice,
-        "due": notice.due,
-        "billing_contact": settings.BILLING_CONTACT_EMAIL,
-    }
-    subject = render_to_string("billing/email/reminder_subject.txt", context).strip()
-    text_body = render_to_string("billing/email/reminder.txt", context)
+def send_reminder(due: Due, level: str) -> bool:
+    recipients = club_recipients(due.club)
+    if not recipients:
+        return False
+    subject = {INFO: "Upcoming invoice", WARNING: "Payment due", ERROR: "Payment overdue"}[level]
+    body = f"{subject}: EUR {due.balance} is open for {due.club.name} ({due.period_start} to {due.period_end}). Grace ends {due.grace_until}."
+    extra = ""
+    if level == ERROR:
+        if due.club.billing.auto_archive:
+            days = BillingSettings.current().archive_after_days
+            extra = f"If it stays unpaid the club is first moved to the free plan and archived {days} days later."
+        else:
+            extra = "If it stays unpaid the club is moved to the free plan."
+        body += f" {extra}"
+    summary = [("Club", due.club.name), ("Period", f"{due.period_start} to {due.period_end}"), ("Grace ends", str(due.grace_until)), ("Open balance", f"EUR {due.balance}")]
+    ctx = {"t": texts(), "title": subject, "intro": f"{subject}: EUR {due.balance} is open for {due.club.name}.", "rows": summary, "extra": extra}
+    if not send_branded(subject=f"{subject} - {due.club.name}", text=body, template="billing/email/reminder.html", ctx=ctx, to=recipients, fail_silently=True):
+        return False
+    due.last_reminder_level, due.last_reminder_sent_at = level, timezone.now()
+    due.save(update_fields=["last_reminder_level", "last_reminder_sent_at", "modified"])
+    return True
 
-    message = EmailMultiAlternatives(subject=subject, body=text_body, from_email=settings.DEFAULT_FROM_EMAIL, to=recipients)
-    if not send_message(message, fail_silently=False):
-        return
 
-    notice.due.last_reminder_level = notice.level
-    notice.due.last_reminder_sent_at = timezone.now()
-    notice.due.save(update_fields=["last_reminder_level", "last_reminder_sent_at", "modified"])
-
-
-def reminders_to_send(clubs, today=None, *, force: bool = False) -> list[ReminderResult]:
-    """Work out who would be reminded, without sending anything.
-
-    Returned whether or not each one is actually sendable, so the command can report a club
-    with no reachable admin instead of skipping it in silence — an unreachable club is exactly
-    the one that gets archived without ever having been told.
-    """
-    results = []
-    for club in clubs:
-        notice = club_billing_notice(club, today)
-        if notice is None:
-            continue
-
-        recipients = admin_emails(club)
-        if not recipients:
-            results.append(ReminderResult(club=club, notice=notice, recipients=[], sent=False, skipped_reason=_("no club admin with an email address")))
-            continue
-        if not force and not needs_reminder(notice.due, notice):
-            results.append(ReminderResult(club=club, notice=notice, recipients=recipients, sent=False, skipped_reason=_("already reminded at this level")))
-            continue
-
-        results.append(ReminderResult(club=club, notice=notice, recipients=recipients, sent=True))
-
-    return results
+__all__ = ["dues_overdue", "level_for", "reminders_to_send", "send_reminder"]

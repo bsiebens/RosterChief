@@ -1,0 +1,5 @@
+{% extends "club/email/layout.html" %}
+{% block heading %}{{ title }}{% endblock %}
+{% block intro %}{{ intro }}{% endblock %}
+{% block action %}{% include "billing/email/_summary.html" with rows=rows highlight=True %}{% endblock %}
+{% block details %}{% if extra %}<tr><td style="padding:12px 32px 0;font-size:13px;line-height:1.5;color:#64748b;">{{ extra }}</td></tr>{% endif %}{% endblock %}

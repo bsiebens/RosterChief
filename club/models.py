@@ -1,33 +1,17 @@
 import datetime
-from decimal import Decimal
+import logging
+import uuid
 
-from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
-from django.db import IntegrityError, models, transaction
-from django.db.models import Q, UniqueConstraint
-from django.utils import timezone
+from django.db import models
 from django.utils.translation import gettext_lazy as _
+from django_countries.fields import CountryField
+from django_extensions.db.fields import AutoSlugField
+from django_tenants.models import DomainMixin
+from tenant_users.tenants.models import TenantBase, UserProfile
 
-from members.models import Member
-from rosterchief.base import ClubScopedModel, UUIDModel, unique_slugify, validate_club_scope
-from rosterchief.storage import get_private_storage
-
-from .validators import LOGO_EXTENSIONS, NewUploadExtensionValidator
-
-
-class ClubManager(models.Manager):
-    def current(self):
-        """Return the club for the active tenant context, if any."""
-        from .tenancy import get_current_club
-
-        return get_current_club()
-
-    def active(self):
-        return self.filter(archived_at__isnull=True)
-
-    def archived(self):
-        return self.filter(archived_at__isnull=False)
+from rosterchief.base import UUIDModel
 
 
 def club_logo_path(instance: Club, filename: str) -> str:
@@ -38,85 +22,35 @@ def club_event_background_path(instance: Club, filename: str) -> str:
     return f"clubs/{instance.slug}/event-background/{filename}"
 
 
-class Sport(models.Model):
-    """A sport clubs and competitions can be assigned to. Platform-wide and maintained from the control
-    panel's Features page; ``Club.sport_type`` / ``Competition.sport_type`` store its ``code`` (the
-    value the apps' API also reports), so a code never changes once created."""
+class User(UserProfile):
+    """Platform user (public schema). Email is the username."""
 
-    code = models.SlugField(_("code"), max_length=20, unique=True, help_text=_("Stored on clubs and competitions and reported by the API; can't be changed after creating."))
-    name = models.CharField(_("name"), max_length=100)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    first_name = models.CharField(_("first name"), max_length=75)
+    last_name = models.CharField(_("last name"), max_length=75)
 
-    class Meta:
-        ordering = ["name"]
-        verbose_name = _("sport")
-        verbose_name_plural = _("sports")
-
-    def __str__(self):
-        return self.name
-
-    @property
-    def is_protected(self):
-        """The fallback every club/competition defaults to; it always has to exist."""
-        return self.code == Club.SportType.OTHER
-
-    def usage(self) -> tuple[int, int]:
-        """(clubs, competitions) currently using this sport."""
-        from events.models import Competition
-
-        return Club.objects.filter(sport_type=self.code).count(), Competition.objects.filter(sport_type=self.code).count()
-
-
-class RefereeType(models.Model):
-    """A kind of referee (or match official) a sport has, e.g. "Referee" / "Linesman". Platform-wide like
-    Sport and maintained from its control-panel settings page. ``ordering`` sets the order of referees on
-    the referee form (PDF) and the assignment panel; ``kind`` keeps referee and official types apart."""
-
-    class Kind(models.TextChoices):
-        REFEREE = "referee", _("Referee")
-        OFFICIAL = "official", _("Official")
-
-    sport = models.ForeignKey(Sport, on_delete=models.CASCADE, related_name="referee_types", verbose_name=_("sport"))
-    kind = models.CharField(_("kind"), max_length=10, choices=Kind.choices, default=Kind.REFEREE)
-    name = models.CharField(_("name"), max_length=100)
-    ordering = models.PositiveSmallIntegerField(_("ordering"), default=0, help_text=_("Lower first on the referee form."))
+    def __str__(self) -> str:
+        return self.email
 
     class Meta:
-        ordering = ["sport", "kind", "ordering", "name"]
-        verbose_name = _("referee type")
-        verbose_name_plural = _("referee types")
-        constraints = [models.UniqueConstraint(fields=["sport", "kind", "name"], name="unique_referee_type_name_per_sport_kind")]
-
-    def __str__(self):
-        return self.name
+        verbose_name = _("user")
+        verbose_name_plural = _("users")
+        ordering = ["last_name", "first_name"]
 
 
-def sport_choices():
-    """Live choices for ``sport_type`` fields: the Sport rows, or the built-ins before the table exists/is seeded."""
-    from django.db import DatabaseError
+class Club(TenantBase):
+    """A club is a tenant. TenantBase provides owner, slug, created and modified."""
 
-    try:
-        choices = list(Sport.objects.values_list("code", "name"))
-    except DatabaseError:
-        choices = []
-    return choices or list(Club.SportType.choices)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(_("name"), max_length=100)
+    slug = AutoSlugField(_("slug"), unique=True, populate_from=["name"], overwrite_on_add=False)
 
+    sport = models.ForeignKey("club.Sport", verbose_name=_("sport"), null=True, on_delete=models.PROTECT, related_name="clubs")
 
-class Club(UUIDModel):
-    class SportType(models.TextChoices):
-        """The built-in sports (seeded as Sport rows) that code refers to by name; the full, editable
-        list lives in the Sport table."""
+    archived_at = models.DateTimeField(_("archived at"), null=True, blank=True, db_index=True, help_text=_("Set while the club is archived: its subdomain stops resolving but all data is kept."))
 
-        ICE_HOCKEY = "ice_hockey", _("Ice hockey")
-        OTHER = "other", _("Other")
-
-    name = models.CharField(_("name"), max_length=255)
     legal_name = models.CharField(_("legal name"), max_length=255, blank=True, help_text=_("Full registered name (e.g. including a legal form like VZW/ASBL), used on official documents. Falls back to club name if blank."))
-    slug = models.SlugField(_("slug"), max_length=255, unique=True, blank=True, help_text=_("Drives subdomain / path resolution (e.g. ajax-united.rosterchief.app)."))
-    contact_email = models.EmailField(
-        _("contact email"),
-        blank=True,
-        help_text=_("The club's public address, shown to people the club writes to or asks to get in touch. Falls back to nothing being shown at all, so it's worth setting."),
-    )
+    contact_email = models.EmailField(_("contact email"), blank=True, help_text=_("The club's public address, shown to people the club writes to or asks to get in touch. Falls back to nothing being shown at all, so it's worth setting."))
     website = models.URLField(_("website"), blank=True, help_text=_("The club's own site, if it has one -- shown alongside its RosterChief pages, not used for anything else yet."))
 
     legal_address = models.CharField(
@@ -127,6 +61,7 @@ class Club(UUIDModel):
     )
     legal_zip_code = models.CharField(_("legal zip code"), max_length=255, blank=True)
     legal_city = models.CharField(_("legal city"), max_length=255, blank=True)
+    legal_country = CountryField(_("legal country"), blank=True)
     vat_id = models.CharField(_("VAT ID"), max_length=32, blank=True, help_text=_("VAT/tax registration number, if the club has one. Shown on invoices sent to or by the club when set."))
 
     payment_instructions = models.TextField(
@@ -135,34 +70,16 @@ class Club(UUIDModel):
         help_text=_("How to pay a fee (e.g. bank account/IBAN, or a preferred method) -- shown on the mobile Payments & dues page and the registration status page, and included on registration invoices. Falls back to nothing shown when left blank."),
     )
 
-    logo = models.FileField(
-        _("logo"),
-        upload_to=club_logo_path,
-        blank=True,
-        # A plain FileField, not ImageField: SVG logos uploaded before raster-only uploads
-        # were enforced still exist and must keep saving, and Pillow can't read those.
-        # New uploads are raster-only (see club.validators).
-        validators=[NewUploadExtensionValidator(allowed_extensions=LOGO_EXTENSIONS)],
-        help_text=_("Shown on the club's own pages. Without one, the club's initials are used."),
-    )
+    logo = models.ImageField(_("logo"), upload_to=club_logo_path, blank=True, help_text=_("Shown on the club's own pages. Without one, the club's initials are used."))
     event_background = models.ImageField(
         _("event background"),
         upload_to=club_event_background_path,
         blank=True,
-        # A real photo, unlike logo -- shown in black & white under a dark
-        # gradient (see mobile/templates/mobile/event_detail.html), so an
-        # ImageField (Pillow-validated, unlike logo's plain FileField) is the
-        # right fit here: this is never a vector crest.
         help_text=_("A generic background photo for event screens in the mobile app, shown in black & white under a dark gradient. Without one, a plain dark background is used."),
     )
     primary_color = models.CharField(
-        _("primary colour"),
-        max_length=7,
-        blank=True,
-        validators=[RegexValidator(r"^#[0-9a-fA-F]{6}$", _("Enter a colour as a hex value, e.g. #1e40af."))],
-        help_text=_("Hex colour for buttons and links on the club's pages, e.g. #1e40af."),
+        _("primary colour"), max_length=7, blank=True, validators=[RegexValidator(r"^#[0-9a-fA-F]{6}$", _("Enter a colour as a hex value, e.g. #1e40af."))], help_text=_("Hex colour for buttons and links on the club's pages, e.g. #1e40af.")
     )
-
     secondary_color = models.CharField(
         _("secondary colour"),
         max_length=7,
@@ -170,11 +87,6 @@ class Club(UUIDModel):
         validators=[RegexValidator(r"^#[0-9a-fA-F]{6}$", _("Enter a colour as a hex value, e.g. #be185d."))],
         help_text=_("Hex colour for highlights on the club's pages, e.g. avatar initials. Defaults to the theme's secondary colour."),
     )
-    #: Text drawn *on* the primary/secondary colour. Blank (the default) keeps the
-    #: automatic black-or-white contrast pick (_content_color_for); set, it wins --
-    #: but only while the matching colour itself is set, since without it the
-    #: app's own default colour is showing and the automatic pick fits that one.
-    #: Read through primary_content_color/secondary_content_color, never directly.
     primary_text_color = models.CharField(
         _("text colour on primary"),
         max_length=7,
@@ -190,51 +102,43 @@ class Club(UUIDModel):
         help_text=_("Text colour on top of the secondary colour, e.g. #ffffff. Leave blank to pick black or white automatically."),
     )
 
-    sport_type = models.CharField(
-        _("sport"),
-        max_length=20,
-        choices=sport_choices,
-        default=SportType.OTHER,
-        help_text=_("Which sport this club plays -- determines which competitions and score fetchers are relevant to it."),
-    )
+    shop_enabled = models.BooleanField(_("shop enabled"), default=False, help_text=_("Shop status that controls when orders are accepted and the shop can be browsed by members. When closed items can be managed."))
+    season_start = models.DateField(_("season start"), default=datetime.date(2000, 8, 1), help_text=_("Which day of the year a season begins — only the month and day are used, the year is ignored."))
+    season_duration_months = models.PositiveSmallIntegerField(_("season duration (months)"), default=12, validators=[MinValueValidator(1), MaxValueValidator(24)], help_text=_("How many months a season lasts, counted from its start date."))
 
-    archived_at = models.DateTimeField(_("archived at"), null=True, blank=True, help_text=_("Archived clubs stop resolving on their subdomain, but their data is retained."))
+    auto_create_schema = True
 
-    shop_open = models.BooleanField(
-        _("shop open"),
-        default=False,
-        help_text=_("While off, the shop is hidden from the member app entirely and the management panel's shop screens are read-only for browsing but refuse new orders."),
-    )
+    def __str__(self) -> str:
+        return self.name
 
-    season_start = models.DateField(
-        _("season start"),
-        default=datetime.date(2000, 8, 1),
-        help_text=_("Which day of the year a season begins — only the month and day are used, the year is ignored."),
-    )
-    season_duration_months = models.PositiveSmallIntegerField(
-        _("season duration (months)"),
-        default=12,
-        validators=[MinValueValidator(1), MaxValueValidator(24)],
-        help_text=_("How many months a season lasts, counted from its start date."),
-    )
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # The logo as loaded, to notice a change on save (None while deferred).
+        loaded = self.__dict__.get("logo")
+        self._loaded_logo = str(loaded) if loaded is not None else None
 
-    objects = ClubManager()
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        logo = str(self.__dict__.get("logo") or "")
+        if self._loaded_logo is not None and logo != self._loaded_logo:
+            from .icons import generate_icons
+
+            try:
+                generate_icons(self)  # builds the new set, or only removes the old one when the logo was cleared
+            except Exception:  # an unreadable image must not fail the save; the branding endpoint retries lazily
+                logging.getLogger(__name__).exception("Icon generation failed for club %s", self.slug)
+        self._loaded_logo = logo
+
+    @property
+    def is_archived(self) -> bool:
+        return self.archived_at is not None
 
     class Meta:
         verbose_name = _("club")
         verbose_name_plural = _("clubs")
         ordering = ["name"]
 
-    def __str__(self):
-        return self.name
-
     def clean(self):
-        # Blocked outright, not just discouraged: a handful of hand-authored CSS
-        # components (button/badge/avatar fills) still assume there's *some*
-        # visible edge between the club's colour and the app's own white
-        # backgrounds, which pure white erases regardless of how correct the
-        # text-contrast math is. Lift this once every such surface has been
-        # audited -- see the 2026-09-12 white-secondary-colour bug reports.
         errors = {}
         if self.primary_color.lower() == "#ffffff":
             errors["primary_color"] = _("White can't be used as the primary colour yet -- it breaks the contrast of several buttons and badges. Pick a different shade for now.")
@@ -242,27 +146,6 @@ class Club(UUIDModel):
             errors["secondary_color"] = _("White can't be used as the secondary colour yet -- it breaks the contrast of several buttons and badges. Pick a different shade for now.")
         if errors:
             raise ValidationError(errors)
-
-    def save(self, *args, **kwargs):
-        if not self.slug:
-            self.slug = unique_slugify(self, self.name)
-        super().save(*args, **kwargs)
-
-    @property
-    def is_archived(self) -> bool:
-        return self.archived_at is not None
-
-    @property
-    def official_name(self) -> str:
-        """The name official documents (e.g. the referee payment form) should
-        show -- `legal_name` when the club has set one, else the everyday `name`."""
-        return self.legal_name or self.name
-
-    @property
-    def initials(self) -> str:
-        """Stand-in for a missing logo. Never the RosterChief mark — that would
-        pass our branding off as the club's own."""
-        return "".join(word[0] for word in self.name.split()[:2]).upper()
 
     @property
     def primary_content_color(self) -> str:
@@ -299,523 +182,66 @@ class Club(UUIDModel):
 
         return "#000000" if luminance > 0.179 else "#ffffff"
 
-    def archive(self):
-        """Soft-delete: the club stops resolving, but nothing is destroyed.
 
-        Clubs are never hard-deleted — a club with any data cannot be removed
-        anyway (ClubMembership PROTECTs its Season), and financial records must
-        be retained.
-        """
-        if not self.is_archived:
-            self.archived_at = timezone.now()
-            self.save(update_fields=["archived_at"])
-
-    def restore(self):
-        if self.is_archived:
-            self.archived_at = None
-            self.save(update_fields=["archived_at"])
+class Domain(DomainMixin):
+    pass
 
 
-def sponsor_logo_path(instance: Sponsor, filename: str) -> str:
-    return f"clubs/{instance.club.slug}/sponsors/{instance.pk}/{filename}"
+# Some other general models that will be used later on for different parts of the platform
+class Sport(UUIDModel):
+    """A club can be marked as belonging to a given sport. This would enable further things like specific competitions etc."""
 
-
-class Sponsor(ClubScopedModel):
-    name = models.CharField(_("name"), max_length=255)
-    logo = models.FileField(
-        _("logo"),
-        upload_to=sponsor_logo_path,
-        blank=True,
-        # A plain FileField, not ImageField: same reasoning as Club.logo.
-        validators=[NewUploadExtensionValidator(allowed_extensions=LOGO_EXTENSIONS)],
+    name = models.CharField(_("name"), max_length=250)
+    slug = AutoSlugField(_("slug"), unique=True, populate_from=["name"])
+    lineup_slots_enabled = models.BooleanField(
+        _("line-up lines"), default=False, help_text=_("Game line-ups of this sport can place picked players in lines/slots (set by platform admins). Informational only, never used for statistics.")
     )
-    # Not user-editable: recomputed from the logo file itself on every save, same reasoning
-    # NewsPhoto/TeamPhoto don't need this -- FileField (not ImageField) means Django never
-    # populates width/height on its own. The public API exposes these so a consumer can lay
-    # out a sponsor strip without waiting on the image to load.
-    logo_width = models.PositiveIntegerField(_("logo width"), null=True, blank=True, editable=False)
-    logo_height = models.PositiveIntegerField(_("logo height"), null=True, blank=True, editable=False)
-    url = models.URLField(_("URL"), blank=True, help_text=_("The sponsor's own website, if they have one."))
+    lineup_template = models.JSONField(
+        _("line-up template"), default=list, blank=True, help_text=_('Ordered groups: [{"key", "label", "slots": [{"key", "label"}]}]. A slot is stored as "<group key>.<slot key>".')
+    )
 
-    start_date = models.DateField(_("start date"))
-    end_date = models.DateField(_("end date"), null=True, blank=True, help_text=_("Leave blank to keep this sponsor active indefinitely once it starts."))
+    def __str__(self) -> str:
+        return self.name
 
     class Meta:
-        verbose_name = _("sponsor")
-        verbose_name_plural = _("sponsors")
+        verbose_name = _("sport")
+        verbose_name_plural = _("sports")
         ordering = ["name"]
 
-    def __str__(self):
-        return self.name
 
-    def clean(self):
-        if self.end_date is not None and self.start_date is not None and self.end_date < self.start_date:
-            raise ValidationError({"end_date": _("End date can't be before the start date.")})
+class RefereeType(UUIDModel):
+    """A type of referee or official for one sport (shared reference data, ordered for display)."""
 
-    def save(self, *args, **kwargs):
-        # Deferred: club.services (via its __init__) imports back from club.models, so a
-        # module-level import here would be circular.
-        from club.services.images import get_image_dimensions
+    REFEREE, OFFICIAL = "referee", "official"
+    KIND_CHOICES = [(REFEREE, _("Referee")), (OFFICIAL, _("Official"))]
 
-        self.logo_width, self.logo_height = get_image_dimensions(self.logo) if self.logo else (None, None)
-        super().save(*args, **kwargs)
-
-
-class Season(ClubScopedModel):
-    start_date = models.DateField(_("start date"))
-    end_date = models.DateField(_("end date"))
-
-    def __str__(self):
-        return self.name
-
-    class Meta:
-        verbose_name = _("season")
-        verbose_name_plural = _("seasons")
-        constraints = [
-            models.UniqueConstraint(fields=["club", "start_date", "end_date"], name="unique_season_dates_per_club"),
-        ]
-
-    @property
-    def name(self):
-        """Short label built from the start/end years, e.g. "25-26"."""
-        return f"{self.start_date:%y}-{self.end_date:%y}"
-
-    @classmethod
-    def get_current(cls, date: datetime.date | None = None):
-        """Return the current club's season covering ``date`` (today by default)."""
-        if date is None:
-            date = timezone.now().date()
-
-        return cls.objects.current_club().filter(start_date__lte=date, end_date__gte=date).first()
-
-    @classmethod
-    def covering(cls, club, date: datetime.date):
-        """Return ``club``'s season covering ``date`` (no tenant context needed)."""
-        return cls.objects.filter(club=club, start_date__lte=date, end_date__gte=date).first()
-
-    @classmethod
-    def next_after(cls, club, date: datetime.date):
-        """Return ``club``'s soonest season starting after ``date`` (no tenant
-        context needed) -- the season that follows the one covering ``date``."""
-        return cls.objects.filter(club=club, start_date__gt=date).order_by("start_date").first()
-
-    @classmethod
-    def before(cls, club, season):
-        """Return ``club``'s most recent season starting before ``season`` --
-        e.g. the management dashboard's member-count trend compares against
-        this. Mirrors next_after's own "adjacent by date" reasoning, just
-        looking the other way."""
-        return cls.objects.filter(club=club, start_date__lt=season.start_date).order_by("-start_date").first()
-
-
-class ClubMembership(ClubScopedModel):
-    class Kind(models.TextChoices):
-        MEMBER = "member", _("Member")
-        GUARDIAN = "guardian", _("Guardian")
-        #: Attached to the club as staff (a trainer, a volunteer, a board member ...) without
-        #: playing. Like a guardian: not a member, left out of every member
-        #: list/KPI and of the "member without a team" checks. Grants no access by itself
-        #: -- that stays with ClubRole / StaffAssignment.
-        STAFF = "staff", _("Staff")
-
-    class StatusChoices(models.TextChoices):
-        ACTIVE = "active", _("active")
-        PENDING = "pending", _("pending")
-        LAPSED = "lapsed", _("lapsed")
-        CANCELLED = "cancelled", _("cancelled")
-
-    class FeeStatus(models.TextChoices):
-        UNPAID = "unpaid", _("unpaid")
-        PAID = "paid", _("paid")
-        PARTIALLY_PAID = "partially_paid", _("partially paid")
-        WAIVED = "waived", _("waived")
-
-    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="member_of", verbose_name=_("member"))
-    season = models.ForeignKey(Season, on_delete=models.PROTECT, related_name="memberships", verbose_name=_("season"))
-
-    kind = models.CharField(
-        _("kind"),
-        max_length=20,
-        choices=Kind.choices,
-        default=Kind.MEMBER,
-        help_text=_(
-            "A guardian is attached to the club only as a parent of a member -- they hold the login, but don't count as a member themselves and owe no fee."
-            " A parent who also plays is a member. Staff are attached without playing: not counted as members, no access rights by themselves."
-        ),
-    )
-
-    license = models.CharField(_("license"), max_length=250, blank=True)
-    status = models.CharField(_("status"), max_length=250, choices=StatusChoices.choices, default=StatusChoices.PENDING)
-    fee_status = models.CharField(_("fee status"), max_length=250, choices=FeeStatus.choices, default=FeeStatus.UNPAID)
-
-    fee_amount = models.DecimalField(_("fee amount"), max_digits=10, decimal_places=2, default=Decimal("0.00"), blank=True)
-    amount_paid = models.DecimalField(_("amount paid"), max_digits=10, decimal_places=2, default=Decimal("0.00"), blank=True, help_text=_("Kept in step with payments by the fee service; not hand-edited."))
-
-    #: An early-payment discount, e.g. from shop.models.Product.early_bird_discount_*
-    #: at registration time (registration.services.pricing) -- knocked off
-    #: fee_amount only if the balance is settled on or before the deadline.
-    #: Re-evaluated at the moment a payment is recorded (club.services.fees.
-    #: effective_fee_amount), not baked into fee_amount up front, since
-    #: whether it applies isn't known until the member actually pays.
-    early_payment_deadline = models.DateField(_("early payment deadline"), blank=True, null=True)
-    early_payment_discount = models.DecimalField(_("early payment discount"), max_digits=10, decimal_places=2, default=Decimal("0.00"), blank=True)
-
-    signed_up_at = models.DateField(_("signed up at"), blank=True, null=True)
-    activated_at = models.DateField(_("activated at"), blank=True, null=True)
-
-    class Meta:
-        verbose_name = _("club membership")
-        verbose_name_plural = _("club memberships")
-        ordering = ["club", "member__last_name", "member__first_name"]
-        constraints = [
-            models.UniqueConstraint(fields=["club", "member", "season"], name="unique_member_per_club_per_season"),
-        ]
-        indexes = [
-            # The hottest multi-tenant lookup shape in the codebase -- onboarding,
-            # fees, the sign-up queue, the dashboard, mobile coach mode, and form
-            # audience resolution all filter this exact triple together.
-            models.Index(fields=["club", "season", "kind"]),
-            # The dashboard's own status breakdowns filter this triple instead.
-            models.Index(fields=["club", "season", "status"]),
-        ]
-
-    def __str__(self):
-        return f"{self.club} - {self.member}"
-
-    @property
-    def is_guardian(self) -> bool:
-        """Attached to the club as a parent of a member, not as one themselves.
-
-        Guardians are deliberately kept as ClubMembership rows rather than given
-        their own model: everything that answers "is this person attached to this
-        club" (tenancy scoping, group membership, the event audience) already
-        reads through this table, and a second kind of link would need a parallel
-        path through all of it. What changes is only who *counts* -- the member
-        list, the fee list and every member KPI filter on ``kind``.
-        """
-        return self.kind == self.Kind.GUARDIAN
-
-    @property
-    def is_member(self) -> bool:
-        """Counts as a member: holds a membership and may owe a fee. A guardian or a staff
-        entry is attached to the club without being one."""
-        return self.kind == self.Kind.MEMBER
-
-    @property
-    def open_requirement_count(self) -> int:
-        """How many active onboarding requirements this membership hasn't resolved
-        yet (completed or bypassed) -- see OnboardingRequirement's docstring for why
-        this is separate from status/fee_status. One query per call; for a list of
-        memberships, annotate with club.services.onboarding.annotate_onboarding_status
-        instead."""
-        met = set(self.requirement_statuses.filter(Q(is_complete=True) | Q(is_bypassed=True)).values_list("requirement_id", flat=True))
-        required = set(OnboardingRequirement.objects.filter(club_id=self.club_id, is_active=True).values_list("pk", flat=True))
-        return len(required - met)
-
-    @property
-    def onboarding_complete(self) -> bool:
-        return self.open_requirement_count == 0
-
-    def clean(self):
-        validate_club_scope(self, self.club_id, same_club_fields=("season",))
-        # A guardian owes nothing -- they're not a member. Caught here rather than
-        # silently zeroed on save so a mistaken import row says so out loud.
-        if not self.is_member and self.fee_amount:
-            raise ValidationError({"fee_amount": _("A guardian or staff entry doesn't hold a membership, so it can't owe a fee.")})
-
-
-class FeePayment(UUIDModel):
-    """Money received against one membership's fee. Several may land on one
-    membership: a family paying in two installments must not read as unpaid, and
-    the part that did arrive has to be recorded somewhere. Not itself club-scoped
-    -- its club is reached through ``membership``, same as DuePayment/Due."""
-
-    class Method(models.TextChoices):
-        BANK_TRANSFER = "bank_transfer", _("bank transfer")
-        CASH = "cash", _("cash")
-        CARD = "card", _("card")
-        OTHER = "other", _("other")
-
-    membership = models.ForeignKey(ClubMembership, on_delete=models.CASCADE, related_name="payments", verbose_name=_("membership"))
-    amount = models.DecimalField(_("amount"), max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
-    method = models.CharField(_("method"), max_length=20, choices=Method.choices, default=Method.BANK_TRANSFER)
-    reference = models.CharField(_("reference"), max_length=255, blank=True, help_text=_("Bank reference, transaction id — whatever lets you find this again."))
-    paid_at = models.DateTimeField(_("paid at"), default=timezone.now)
-    note = models.TextField(_("note"), blank=True)
-    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="recorded_fee_payments", verbose_name=_("recorded by"))
-
-    class Meta:
-        verbose_name = _("fee payment")
-        verbose_name_plural = _("fee payments")
-        ordering = ["-paid_at"]
-
-    def __str__(self):
-        return f"{self.membership} — {self.amount}"
-
-
-class DuesInvoice(ClubScopedModel):
-    """A record of asking one membership's fee to be paid — not itself the source of
-    truth for what's owed or settled (that's still ``ClubMembership.fee_amount``/
-    ``amount_paid``/``fee_status``, via ``club.services.fees``). Sending one snapshots
-    the outstanding balance and a due date so a later fee change or reminder never
-    silently rewrites a bill someone already received; whether it still needs chasing
-    is read live off the membership's own ``fee_status``, since a payment recorded
-    through any route settles the same balance this invoice asked for.
-
-    One per membership (see ``club.services.invoicing``): "send" creates it if
-    missing, "resend" re-snapshots the balance and pushes the due date out again on
-    the existing row, so a membership never accumulates a history of stale invoices.
-    """
-
-    membership = models.OneToOneField(ClubMembership, on_delete=models.CASCADE, related_name="dues_invoice", verbose_name=_("membership"))
-    number = models.CharField(_("number"), max_length=255, blank=True)
-
-    amount = models.DecimalField(_("amount"), max_digits=10, decimal_places=2, help_text=_("The outstanding balance at the time this was sent — not re-read from the membership afterwards."))
-    due_date = models.DateField(_("due date"))
-
-    sent_at = models.DateTimeField(_("sent at"), null=True, blank=True)
-    sent_to_email = models.EmailField(_("sent to"), blank=True)
-    sent_to_guardian = models.BooleanField(_("sent to a parent/guardian"), default=False, help_text=_("The member had no email on file, so a parent/guardian's was used instead."))
-
-    last_reminder_sent_at = models.DateTimeField(_("last reminder sent at"), null=True, blank=True)
-    reminder_count = models.PositiveIntegerField(_("reminders sent"), default=0)
-
-    class Meta:
-        verbose_name = _("dues invoice")
-        verbose_name_plural = _("dues invoices")
-        ordering = ["-sent_at"]
-        constraints = [
-            UniqueConstraint(fields=["club", "number"], name="unique_dues_invoice_number_per_club"),
-        ]
-        indexes = [
-            # invoices_due_for_reminder's own club + sent_at__isnull filter --
-            # unindexed before this.
-            models.Index(fields=["club", "sent_at"]),
-        ]
-
-    def __str__(self):
-        return self.number or _("Unsent invoice for %(member)s") % {"member": self.membership.member}
-
-    def clean(self):
-        validate_club_scope(self, self.club_id, same_club_fields=("membership",))
-
-    @property
-    def is_paid(self) -> bool:
-        return self.membership.fee_status == ClubMembership.FeeStatus.PAID
-
-    @property
-    def is_overdue(self) -> bool:
-        return bool(self.sent_at) and not self.is_paid and self.due_date < timezone.now().date()
-
-    def generate_number(self) -> str:
-        """Next per-club invoice number for the current year: ``DUE-<year>-<seq>``.
-        Same shape as shop.models.Invoice's numbering, duplicated rather than shared
-        across the two apps — see that module's own numbering helpers."""
-        prefix = f"DUE-{timezone.now().year}-"
-        sequences = [int(suffix) for existing in DuesInvoice.objects.filter(club=self.club, number__startswith=prefix).values_list("number", flat=True) if (suffix := existing.removeprefix(prefix)).isdigit()]
-        return f"{prefix}{max(sequences, default=0) + 1:05d}"
-
-    def save(self, *args, **kwargs):
-        if self.number:
-            return super().save(*args, **kwargs)
-
-        # Retrying on a numbering collision (two invoices allocated the same
-        # sequence in the same instant) rather than locking: this only ever
-        # fires once, on first send, so a rare retry is cheaper than a lock
-        # held around every save.
-        for attempt in range(5):
-            self.number = self.generate_number()
-            try:
-                with transaction.atomic():
-                    return super().save(*args, **kwargs)
-            except IntegrityError:
-                self.number = ""
-                if attempt == 4:
-                    raise
-
-
-def onboarding_document_path(instance: MemberRequirementStatus, filename: str) -> str:
-    return f"clubs/{instance.membership.club.slug}/onboarding/{instance.membership_id}/{filename}"
-
-
-class OnboardingRequirement(ClubScopedModel):
-    """A club-defined item every member must satisfy after signing up or renewing --
-    e.g. "provide a medical certificate", "upload a photo".
-
-    ``ClubMembership.fee_status`` is still driven by payment alone (see
-    ``club.services.fees.sync_fee_status``) and this never touches it -- a member
-    reads as paid *and* still has an open checklist, both true at once. ``status``
-    is different: paying in full only ever settles ``fee_status`` now -- it never
-    flips ``status`` to ACTIVE by itself. The only path there is the deliberately
-    manual one, ``club.services.onboarding.approve_one``/``approve_all_clean``, run
-    by an admin from the Sign-up page, which additionally requires every blocking
-    requirement to be resolved first. Nothing flips status automatically just
-    because the fee cleared or the last checklist item was ticked (checklist actions
-    aren't even admin-gated); activation is always that one deliberate admin step,
-    so a membership can be fully paid *and* fully checked off and still sit PENDING
-    until someone actually clicks Approve.
-
-    ``blocked_event_kinds`` is what makes a specific requirement matter before that
-    point: a club can decide e.g. a medical certificate blocks GAME invitations/
-    selection but not TRAINING ones, so a provisionally-rostered member (see
-    ``events.services.attendance.effective_members``) can still be invited to practice
-    while their paperwork is outstanding. Empty means "informational only" -- open or
-    not, it never blocks anything. Stored as a plain list of ``events.models.Event.
-    EventKind`` values (not a FK/enum at the DB layer) specifically to avoid a
-    club -> events import cycle (events already imports club for Event.club); the
-    form layer (management/forms.py) is what actually validates against EventKind.
-
-    ``MemberRequirementStatus`` tracks completion per ``ClubMembership`` (so a fresh
-    checklist starts each season, matching how membership itself is season-scoped).
-    """
-
+    sport = models.ForeignKey(Sport, verbose_name=_("sport"), on_delete=models.CASCADE, related_name="referee_types")
+    kind = models.CharField(_("kind"), max_length=10, choices=KIND_CHOICES, default=REFEREE)
     name = models.CharField(_("name"), max_length=100)
-    description = models.TextField(_("description"), blank=True, help_text=_("Shown to staff on the member's checklist."))
-    requires_document = models.BooleanField(_("requires a document"), default=False, help_text=_("Staff can attach a file (e.g. the certificate itself) when marking this complete."))
-    blocked_event_kinds = models.JSONField(_("blocks selection for"), default=list, blank=True, help_text=_("Event kinds a member can't be invited to or selected for while this is open. Empty means purely informational."))
-    is_active = models.BooleanField(_("active"), default=True, help_text=_("Inactive requirements no longer apply to new memberships, but existing statuses are kept."))
+    ordering = models.PositiveSmallIntegerField(_("ordering"), default=0, help_text=_("Lower comes first."))
 
     class Meta:
-        verbose_name = _("onboarding requirement")
-        verbose_name_plural = _("onboarding requirements")
-        # Alphabetical, not a configurable sequence: every active requirement
-        # blocks equally and there's no set order to complete them in, so
-        # ordering here is purely for a stable, predictable listing.
-        ordering = ["name"]
-        constraints = [
-            models.UniqueConstraint(fields=["club", "name"], name="unique_onboarding_requirement_name_per_club"),
-        ]
+        verbose_name = _("referee type")
+        verbose_name_plural = _("referee types")
+        ordering = ["sport", "kind", "ordering", "name"]
+        constraints = [models.UniqueConstraint(fields=["sport", "kind", "name"], name="unique_referee_type_name_per_sport_kind")]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
 
-class MemberRequirementStatus(UUIDModel):
-    """Whether one ``ClubMembership`` has satisfied one ``OnboardingRequirement``,
-    this season. Not itself club-scoped -- its club is reached through ``membership``,
-    same reasoning as ``FeePayment`` above."""
+class Competition(UUIDModel):
+    """A competition clubs can import fixtures from. Which clubs may use it is decided by ``feature`` (a catalog feature)."""
 
-    membership = models.ForeignKey(ClubMembership, on_delete=models.CASCADE, related_name="requirement_statuses", verbose_name=_("membership"))
-    requirement = models.ForeignKey(OnboardingRequirement, on_delete=models.CASCADE, related_name="statuses", verbose_name=_("requirement"))
-    is_complete = models.BooleanField(_("complete"), default=False)
-    #: Distinct from is_complete -- "confirmed, not needed for this person" (e.g. they
-    #: already have a recent photo on file) reads differently from "actually received"
-    #: on a checklist/audit, even though both equally stop this item from blocking
-    #: anything (see club.services.onboarding.is_open). Mutually exclusive with
-    #: is_complete in practice (mark_bypassed/mark_complete each clear the other).
-    is_bypassed = models.BooleanField(_("bypassed"), default=False)
-    completed_at = models.DateTimeField(_("completed at"), null=True, blank=True)
-    completed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("completed by"))
-    document = models.FileField(_("document"), storage=get_private_storage, upload_to=onboarding_document_path, blank=True, help_text=_("Stored privately -- readable only through this member's own page, never a direct link."))
-    note = models.TextField(_("note"), blank=True, help_text=_("Staff-only, e.g. how or when this was received."))
+    name = models.CharField(_("name"), max_length=250)
+    module = models.CharField(_("module"), max_length=250, help_text=_("Dotted path of the module with the class that fetches fixtures."))
+    sport = models.ForeignKey(Sport, verbose_name=_("sport"), null=True, blank=True, on_delete=models.PROTECT, related_name="competitions")
+    feature = models.ForeignKey("features.Feature", verbose_name=_("feature"), null=True, blank=True, on_delete=models.PROTECT, related_name="competitions", help_text=_("Clubs need this feature to use the competition."))
 
     class Meta:
-        verbose_name = _("member requirement status")
-        verbose_name_plural = _("member requirement statuses")
-        constraints = [
-            models.UniqueConstraint(fields=["membership", "requirement"], name="unique_requirement_status_per_membership"),
-        ]
+        verbose_name = _("competition")
+        verbose_name_plural = _("competitions")
+        ordering = ["name"]
 
-    def __str__(self):
-        return f"{self.membership} — {self.requirement}"
-
-    def clean(self):
-        validate_club_scope(self, self.membership.club_id, same_club_fields=("requirement",))
-
-
-class ClubRole(ClubScopedModel):
-    class Roles(models.TextChoices):
-        ADMIN = "admin", _("admin")
-        MEMBER = "member", _("member")
-        EDITOR = "editor", _("editor")
-        #: Full read/write on people (members, families, groups,
-        #: teams, referee setup, onboarding requirements) without Finance/Shop,
-        #: Club identity, Sponsors, or the ability to grant/revoke ClubRole itself
-        #: -- see club.services.access.can_manage_members and
-        #: club.mixins.MemberAdminRequiredMixin for exactly what that covers.
-        MEMBER_ADMIN = "member_admin", _("member admin")
-
-    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="roles", verbose_name=_("member"))
-    role = models.CharField(_("role"), max_length=250, choices=Roles.choices, default=Roles.MEMBER)
-
-    class Meta:
-        verbose_name = _("club role")
-        verbose_name_plural = _("club roles")
-        ordering = ["club", "member__last_name", "member__first_name"]
-        constraints = [
-            models.UniqueConstraint(fields=["club", "member"], name="unique_member_per_club"),
-        ]
-
-    def __str__(self):
-        return f"{self.club} - {self.member}"
-
-
-class ShopManager(ClubScopedModel):
-    """An additive grant, not a ClubRole value -- a member holds at most one
-    ClubRole per club (see its own unique constraint above), so "shop admin"
-    couldn't be a ClubRole option without forcing a choice between it and
-    whatever other role someone already holds. Same shape as StaffAssignment
-    granting coach access on top of a member's own ClubRole, just club-wide
-    and season-independent (shop administration isn't tied to a team or a
-    season the way coaching is) -- see club.services.access.can_manage_shop.
-    """
-
-    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="shop_manager_grants", verbose_name=_("member"))
-
-    class Meta:
-        verbose_name = _("shop manager")
-        verbose_name_plural = _("shop managers")
-        ordering = ["club", "member__last_name", "member__first_name"]
-        constraints = [
-            models.UniqueConstraint(fields=["club", "member"], name="unique_shop_manager_per_club"),
-        ]
-
-    def __str__(self):
-        return f"{self.club} - {self.member}"
-
-
-class RefereeManager(ClubScopedModel):
-    """An additive grant, not a ClubRole value -- same shape as ShopManager, and
-    for the same reason: arranging referees for home games (the referee
-    management dashboard, confirming who referees, the payment form) is its own
-    job that a volunteer can hold without full people-management access, and
-    can't cost someone their existing ClubRole. Club-wide and season-independent
-    -- see club.services.access.can_manage_referees.
-    """
-
-    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="referee_manager_grants", verbose_name=_("member"))
-
-    class Meta:
-        verbose_name = _("referee manager")
-        verbose_name_plural = _("referee managers")
-        ordering = ["club", "member__last_name", "member__first_name"]
-        constraints = [
-            models.UniqueConstraint(fields=["club", "member"], name="unique_referee_manager_per_club"),
-        ]
-
-    def __str__(self):
-        return f"{self.club} - {self.member}"
-
-
-class EvaluationManager(ClubScopedModel):
-    """An additive grant, not a ClubRole value -- same shape as ShopManager, and
-    for the same reason: evaluating players is its own trust boundary (a
-    technical director might get this without full people-management access;
-    a team's own coach doesn't get it just for coaching that team), so it
-    can't cost someone their existing ClubRole to hold it. Club-wide and
-    season-independent, layered on top of whatever ClubRole/StaffAssignment a
-    member already holds -- see club.services.access.can_manage_evaluations.
-    """
-
-    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="evaluation_manager_grants", verbose_name=_("member"))
-
-    class Meta:
-        verbose_name = _("evaluation manager")
-        verbose_name_plural = _("evaluation managers")
-        ordering = ["club", "member__last_name", "member__first_name"]
-        constraints = [
-            models.UniqueConstraint(fields=["club", "member"], name="unique_evaluation_manager_per_club"),
-        ]
-
-    def __str__(self):
-        return f"{self.club} - {self.member}"
+    def __str__(self) -> str:
+        return self.name

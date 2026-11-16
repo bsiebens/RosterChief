@@ -5,4 +5,7 @@ class ShopConfig(AppConfig):
     name = "shop"
 
     def ready(self):
-        from . import signals  # noqa: F401
+        from . import (
+            settings_models,  # noqa: F401  (registers ShopSettings)
+            signals,  # noqa: F401  (removes product picture and file data with their rows)
+        )

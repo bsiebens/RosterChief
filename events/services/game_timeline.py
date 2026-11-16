@@ -2,13 +2,17 @@
 ...) -- see GAME_TIMELINE.md for the design and events.services.timeline_parsers
 for turning each source's payload into the one normalized document.
 
-Rides along with the existing score fetch: events.services.competitions.
-fetch_game_info calls ``refresh_timeline`` right after a successful score
-update, with the same competition instance (so CEHL/IJNL can reuse the payload
-the score fetch already downloaded). Gated on the "game_timeline" flag on top
-of the competition's own flag, and never allowed to break the score update: a
-failure is recorded on the GameTimeline row (``last_error``, previous data
+Rides along with the score fetch: ``fetch_game`` asks the game's competition
+(an events.competition class, resolved by ``competition_for``) to update the
+score, then calls ``refresh_timeline`` with the same competition instance (so
+CEHL/IJNL can reuse the payload the score fetch already downloaded). Which clubs
+may use a competition is its feature (club.Competition.feature); there is no
+separate timeline switch any more. A timeline failure never breaks the score
+update: it is recorded on the GameTimeline row (``last_error``, previous data
 kept) and logged.
+
+The scheduled work (events.tasks) is ``poll_live_games`` (every minute: games
+about to start, live, or just finished) and ``settle_timelines`` (nightly).
 
 Every stored timeline also has its per-player GameStat rows (events.services.game_stats):
 written when a changed document is stored, and re-checked when a game settles.
@@ -19,12 +23,15 @@ seen finishing -- ``settle_timelines`` (the nightly settle_game_timelines job)
 re-fetches recently finished games until their timeline stops changing.
 """
 
+import datetime
 import hashlib
+import importlib
 import json
 import logging
 from dataclasses import dataclass
 from datetime import timedelta
 
+from django.core.cache import cache
 from django.utils import timezone
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy as _lazy
@@ -35,8 +42,6 @@ from events.services.game_stats import ensure_game_stats, sync_game_stats
 from events.services.timeline_parsers import SERIOUS_PENALTIES, finalize_document, parse_cehl, parse_hockeydata, parse_ijnl
 
 logger = logging.getLogger(__name__)
-
-FLAG = "game_timeline"
 
 #: A game is only settled once it's surely over...
 SETTLE_AFTER = timedelta(hours=3)
@@ -51,13 +56,6 @@ class TimelineFetch:
 
     document: dict
     raw: str = ""
-
-
-def timeline_enabled(club) -> bool:
-    from features.models import Flag  # deferred: features imports back into club/events models
-
-    flag = Flag.objects.filter(name=FLAG).first()
-    return flag is not None and flag.is_active_for_club(club)
 
 
 def document_hash(document: dict) -> str:
@@ -157,11 +155,10 @@ def fetch_and_store(event, competition) -> str:
     return CHANGED if changed else UNCHANGED
 
 
-def refresh_timeline(event, competition) -> str | None:
-    """fetch_game_info's hook: fetch and store, but only for clubs with the
-    "game_timeline" flag."""
-    if not timeline_enabled(event.club):
-        return None
+def refresh_timeline(event, competition) -> str:
+    """The score fetch's hook (``fetch_game``, and the competitions service's
+    "fetch game info"): fetch and store the timeline with the same competition
+    instance. Never raises."""
     return fetch_and_store(event, competition)
 
 
@@ -169,7 +166,8 @@ def settle_candidates(now=None):
     """Finished games whose timeline may still be corrected: started at least
     SETTLE_AFTER ago, within SETTLE_WINDOW, not yet finalized."""
     now = now or timezone.now()
-    return GameTimeline.objects.filter(finalized_at__isnull=True, event__cancelled=False, event__start__lte=now - SETTLE_AFTER, event__start__gte=now - SETTLE_WINDOW).select_related("event", "event__club", "event__location").order_by("event__start")
+    timelines = GameTimeline.objects.filter(finalized_at__isnull=True, event__cancelled=False, event__start__lte=now - SETTLE_AFTER, event__start__gte=now - SETTLE_WINDOW)
+    return timelines.select_related("event", "event__location", "event__opponent").order_by("event__start")
 
 
 FINALIZED = "finalized"
@@ -200,13 +198,10 @@ def settle(timeline: GameTimeline, competition) -> str:
     return FINALIZED
 
 
-def games_for_backfill(*, since, club=None):
-    """Played games with a competition game id, for the manual
-    fetch_game_timelines command."""
+def games_for_backfill(*, since):
+    """Played games with a competition game id (for a manual backfill)."""
     games = Event.objects.filter(kind=Event.EventKind.GAME, cancelled=False, start__gte=since, start__lte=timezone.now()).exclude(competition="").exclude(external_game_id="")
-    if club is not None:
-        games = games.filter(club=club)
-    return games.select_related("club", "location").order_by("start")
+    return games.select_related("location", "opponent").order_by("start")
 
 
 def _person(person) -> str:
@@ -280,7 +275,7 @@ def display_timeline(timeline: GameTimeline, event) -> dict:
     data = timeline.data or {}
     our_side = "home" if event.is_home_game else "away"
     their_side = "away" if our_side == "home" else "home"
-    ours_label = ", ".join(team.short_name or team.name for team in event.teams.all()) or event.club.name
+    ours_label = ", ".join(team.name for team in event.teams.all()) or _club_name()
     theirs_label = event.opponent.name if event.opponent_id else _("Opponent")
 
     period_scores = {str(period.get("label")): f"{period.get(our_side, 0)}{EN_DASH}{period.get(their_side, 0)}" for period in data.get("periods", [])}
@@ -363,3 +358,229 @@ def timeline_for_api(timeline: GameTimeline, event, *, show_names: bool) -> dict
         "final": timeline.finalized_at is not None,
         "events": events,
     }
+
+
+def _club_name() -> str:
+    from events.services.attendance import current_club  # deferred: a sibling service with heavier imports
+
+    club = current_club()
+    return club.name if club is not None else ""
+
+
+# -- resolving a game's competition and fetching it ----------------------------------------------------------------------
+
+
+class CompetitionFetchError(Exception):
+    """A game's info could not be fetched from its competition's data source (or the competition is misconfigured)."""
+
+
+def _own_competition_for(event):
+    """Fallback resolver while events.services.competitions doesn't exist: club.Competition by name (public schema), the
+    club's entitlement to its feature, then ``<module>.<name>`` instantiated."""
+    from club.models import Competition
+    from events.services.attendance import current_club
+
+    competition = Competition.objects.filter(name=event.competition).select_related("feature").first()
+    club = current_club()
+    if competition is None or club is None:
+        return None
+    if competition.feature_id is not None:
+        from features.entitlements import resolve_entitlements
+
+        if not resolve_entitlements(club).has(competition.feature.code):
+            return None
+    try:
+        module = importlib.import_module(competition.module)
+        competition_class = getattr(module, competition.name)
+    except (ImportError, AttributeError) as error:
+        raise CompetitionFetchError(f"“{competition.name}” isn't wired up to a real data source yet.") from error
+    return competition_class()
+
+
+def competition_for(event):
+    """An instance of ``event``'s competition class (events.competition.*: ``update_game_information(event=)`` for the
+    score and live flag, ``fetch_timeline(event) -> TimelineFetch | None``), or None when there is no data source this
+    club may use. Delegates to events.services.competitions.competition_for when that service exists (its
+    ``CompetitionFetchError`` is raised as ours). Tests patch this function to inject a fake competition."""
+    if not event.competition or not event.external_game_id:
+        return None
+    try:
+        from events.services import competitions
+    except ImportError:
+        return _own_competition_for(event)
+    try:
+        return competitions.competition_for(event)
+    except Exception as error:
+        if error.__class__.__name__ == "CompetitionFetchError":
+            raise CompetitionFetchError(str(error)) from error
+        raise
+
+
+#: A source's "live" flag can read false for a moment mid-game (a stopped clock, a time-out), so a live game only counts
+#: as ended after this many consecutive not-live reads -- one blip must not mark it final or stop the live poll.
+NOT_LIVE_READS_TO_END = 3
+NOT_LIVE_READS_TTL = 60 * 60
+
+
+def _debounce_not_live(event, was_live: bool) -> None:
+    """Keeps a live game live until the source said "not live" NOT_LIVE_READS_TO_END times in a row (the source's update
+    has already saved False by now, so it is put back)."""
+    key = f"events:not-live-reads:{event.pk}"
+    if event.is_live or not was_live:
+        cache.delete(key)
+        return
+    cache.add(key, 0, NOT_LIVE_READS_TTL)
+    if cache.incr(key) < NOT_LIVE_READS_TO_END:
+        event.is_live = True
+        event.save(update_fields=["is_live"])
+    else:
+        cache.delete(key)
+
+
+def fetch_game(event, competition=None) -> str | None:
+    """Score, live flag and timeline of one game in one go: ``competition.update_game_information(event=event)`` (raises
+    CompetitionFetchError on failure), the not-live debounce, then the timeline (never raises). ``competition`` defaults
+    to ``competition_for(event)``; returns None when the game has no usable data source, else the timeline outcome."""
+    source = competition if competition is not None else competition_for(event)
+    if source is None:
+        return None
+    was_live = event.is_live
+    try:
+        source.update_game_information(event=event)
+    except Exception as error:
+        raise CompetitionFetchError(f"Could not fetch game info from “{event.competition}”: {error}") from error
+    _debounce_not_live(event, was_live)
+    return refresh_timeline(event, source)
+
+
+# -- the scheduled sweeps -------------------------------------------------------------------------------------------------
+
+#: How long before kickoff / after the planned end a game is worth polling.
+POLL_LEAD_TIME = datetime.timedelta(minutes=20)
+POLL_TRAIL_TIME = datetime.timedelta(hours=1)
+
+
+def poll_candidates(now=None):
+    """Games due to start within POLL_LEAD_TIME, under way, or within POLL_TRAIL_TIME of their planned end, that have a
+    competition game id and haven't been seen finishing yet (``live_score_polling_done_at``). A game still flagged live
+    is always polled, however late it runs."""
+    from django.db.models import Q
+
+    now = now or timezone.now()
+    window = Q(start__lte=now + POLL_LEAD_TIME, end__gte=now - POLL_TRAIL_TIME) | Q(is_live=True)
+    return list(Event.objects.filter(window, kind=Event.EventKind.GAME, cancelled=False, live_score_polling_done_at__isnull=True).exclude(competition="").exclude(external_game_id="").select_related("location", "opponent").order_by("start"))
+
+
+def _game_finished(event) -> None:
+    """Hook for when a polled game is seen finishing: the league standings of its teams are recomputed when the standings
+    service exists (events.services.rbihf_standings; a no-op otherwise)."""
+    try:
+        from events.services.rbihf_standings import refresh_for_finished_game
+    except ImportError:
+        return
+    try:
+        refresh_for_finished_game(event)
+    except Exception:
+        logger.warning("game_timeline.standings_failed event_id=%s", event.pk, exc_info=True)
+
+
+def poll_live_games(now=None) -> dict:
+    """One live-score sweep of the active club schema (the every-minute task): each candidate is fetched (score, live
+    flag, timeline). A game that was live and no longer is gets ``live_score_polling_done_at`` -- it is finished, the
+    nightly settle takes over -- and its standings are refreshed. One failing game never stops the sweep. Returns
+    counts: ``{"checked", "fetched", "failed", "finished"}``."""
+    now = now or timezone.now()
+    counts = {"checked": 0, "fetched": 0, "failed": 0, "finished": 0}
+    for event in poll_candidates(now):
+        counts["checked"] += 1
+        was_live = event.is_live
+        try:
+            if fetch_game(event) is None:
+                continue
+        except CompetitionFetchError:
+            counts["failed"] += 1
+            logger.warning("game_timeline.poll_failed event_id=%s", event.pk, exc_info=True)
+            continue
+        except Exception:
+            counts["failed"] += 1
+            logger.exception("game_timeline.poll_crashed event_id=%s", event.pk)
+            continue
+        counts["fetched"] += 1
+        if was_live and not event.is_live:
+            event.live_score_polling_done_at = now
+            event.save(update_fields=["live_score_polling_done_at"])
+            counts["finished"] += 1
+            _game_finished(event)
+    return counts
+
+
+def settle_timelines(now=None) -> dict:
+    """The nightly sweep of the active club schema: re-fetches each ``settle_candidates`` game until its timeline stops
+    changing (then FINALIZED). Returns counts per outcome (``finalized``, ``changed``, ``unchanged``, ``failed``,
+    ``unavailable``, ``skipped``)."""
+    counts: dict = {}
+    for timeline in settle_candidates(now):
+        event = timeline.event
+        try:
+            source = competition_for(event)
+        except CompetitionFetchError:
+            logger.warning("game_timeline.settle_misconfigured event_id=%s competition=%s", event.pk, event.competition)
+            source = None
+        if source is None:
+            counts["skipped"] = counts.get("skipped", 0) + 1
+            continue
+        outcome = settle(timeline, source)
+        counts[outcome] = counts.get(outcome, 0) + 1
+    return counts
+
+
+def backfill_timelines(*, since, refetch=False, dry_run=False, now=None) -> dict:
+    """Fetches the timelines of played games since ``since`` in the active club schema (a manual backfill, the old
+    fetch_game_timelines command). Games already holding a timeline are skipped unless ``refetch``; games older than the
+    settle window are finalized right away (no moments are recorded for them: a first fetch is always silent). Returns
+    ``{"games", "changed", "unchanged", "failed", "unavailable", "skipped", "finalized"}``."""
+    now = now or timezone.now()
+    counts = {"games": 0, CHANGED: 0, UNCHANGED: 0, FAILED: 0, UNAVAILABLE: 0, "skipped": 0, FINALIZED: 0}
+    for event in games_for_backfill(since=since):
+        if not refetch and GameTimeline.objects.filter(event=event).exclude(data_hash="").exists():
+            continue
+        counts["games"] += 1
+        if dry_run:
+            continue
+        try:
+            source = competition_for(event)
+        except CompetitionFetchError:
+            source = None
+        if source is None:
+            counts["skipped"] += 1
+            continue
+        outcome = fetch_and_store(event, source)
+        counts[outcome] += 1
+        if outcome in (CHANGED, UNCHANGED) and event.start < now - SETTLE_WINDOW:
+            GameTimeline.objects.filter(event=event, finalized_at__isnull=True).update(finalized_at=now)
+            counts[FINALIZED] += 1
+    return counts
+
+
+def update_past_games(team) -> dict:
+    """Score, live flag and game sheet of every played, imported game of ``team`` (the import page's "update past
+    games"). A game whose source fails is counted and skipped. Returns counts."""
+    now = timezone.now()
+    games = Event.objects.filter(teams=team, kind=Event.EventKind.GAME, cancelled=False, start__lte=now).exclude(competition="").exclude(external_game_id="").select_related("location", "opponent").order_by("start")
+    counts = {"games": 0, "updated": 0, "failed": 0, "skipped": 0, "with_score": 0}
+    for event in games:
+        counts["games"] += 1
+        try:
+            outcome = fetch_game(event)
+        except CompetitionFetchError:
+            counts["failed"] += 1
+            continue
+        if outcome is None:
+            counts["skipped"] += 1
+            continue
+        counts["updated"] += 1
+        if event.start < now - SETTLE_WINDOW:  # long over: the source won't change it any more, like the backfill
+            GameTimeline.objects.filter(event=event, finalized_at__isnull=True).update(finalized_at=now)
+        event.refresh_from_db(fields=["score_for", "score_against"])
+        counts["with_score"] += event.score_for is not None
+    return counts

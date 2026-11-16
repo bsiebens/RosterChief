@@ -1,0 +1,11 @@
+{% autoescape off %}{{ t.heading }}
+
+{{ t.intro }}{% if email %}
+{{ email }}{% endif %}
+
+{{ t.button }}: {{ password_reset_url }}
+
+--
+{{ club_name }}
+{{ t.footer }}
+{% endautoescape %}

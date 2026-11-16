@@ -1,0 +1,12 @@
+{% autoescape off %}{{ t.heading }}
+
+{{ t.intro }}
+
+{{ code }}
+
+{{ t.code_note }}
+
+--
+{{ club_name }}
+{{ t.footer }}
+{% endautoescape %}

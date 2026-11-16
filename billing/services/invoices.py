@@ -1,143 +1,250 @@
-"""Invoice PDFs.
+"""Invoices: numbering, PDF rendering, and sending."""
 
-The PDF is rendered on demand from the Due's frozen snapshot (plan, amount, dates), so it
-carries no state of its own beyond the number. Only the number is stored — an accountant
-reconciles against it, so it is allocated once, never recomputed. The rendered PDF is cached
-to storage, same shape as club.services.invoicing/shop.services.invoices' own -- see
-invoice_pdf's own docstring for why it still needs invalidating despite the "frozen snapshot"
-above.
-"""
+import datetime
+import re
+from decimal import Decimal
 
-from django.conf import settings
-from django.contrib.auth import get_user_model
-from django.core.mail import EmailMultiAlternatives
+from django.db import IntegrityError, transaction
 from django.template.loader import render_to_string
 from django.utils import timezone
 
-from billing.models import Due, Invoice
-from billing.services import BillingError
-from billing.services.reminders import admin_emails
-from rosterchief.mail import send_message
-from rosterchief.pdf import pdf_url_fetcher
-from rosterchief.storage import drop_cached_invoice_pdf, read_cached_invoice_pdf, write_cached_invoice_pdf
+from billing.emails import send_branded, texts
+
+from ..models import BillingSettings, Due, Invoice, InvoiceSequence
+from . import BillingError, numbering
+
+NUMBER_MAX_LENGTH = 32
+LEGACY_AUTO_FORMAT = re.compile(r"^INV-\d{4}-\d+$")  # the original fixed format; always reserved, whatever the current pattern
 
 
-def issue_invoice(due: Due) -> Invoice:
-    """One invoice per due, allocated once. Re-issuing returns the existing one rather than
-    burning a number — a gap in an invoice series is a question you do not want to answer.
+def next_automatic_number(on_date: datetime.date | None = None) -> str:
+    """Allocate the next automatic invoice number from the configured pattern. Must run inside the transaction that
+    creates the invoice (see ``numbering.allocate``)."""
+    on_date = on_date or timezone.localdate()
+    pattern = BillingSettings.current().invoice_number_pattern
+    return numbering.allocate(InvoiceSequence, pattern, on_date, lambda n: Invoice.objects.filter(number=n).exists())
 
-    The moment one is actually created (not re-fetched), platform admins get told about it --
-    see notify_admins_of_new_invoice. This is the one choke point both the daily renewal
-    command and a platform admin's manual "Open period"/"Reactivate" click go through
-    (billing.services.dues.open_period), so it's the right place for that, not either caller."""
-    invoice, created = Invoice.objects.get_or_create(due=due)
-    if created:
-        notify_admins_of_new_invoice(invoice)
 
+def peek_next_automatic_number(pattern: str | None = None, on_date: datetime.date | None = None) -> str:
+    """The number the next automatic invoice would get right now. Writes nothing."""
+    pattern = pattern or BillingSettings.current().invoice_number_pattern
+    return numbering.peek(InvoiceSequence, pattern, on_date or timezone.localdate(), lambda n: Invoice.objects.filter(number=n).exists())[0]
+
+
+def clean_number(raw: str) -> str:
+    """Validate a custom invoice number: trimmed, not blank, at most 32 characters, not in the automatic format, unique.
+
+    Reserved (automatic-looking) are numbers matching the CURRENT invoice number pattern and the legacy ``INV-YYYY-n``
+    format. Unique across ALL invoices, voided ones included.
+
+    ``ValueError`` = invalid format (422); ``BillingError`` = already taken (409).
+    """
+    number = (raw or "").strip()
+    if not number:
+        raise ValueError("The invoice number cannot be blank.")
+    if len(number) > NUMBER_MAX_LENGTH:
+        raise ValueError(f"The invoice number can be at most {NUMBER_MAX_LENGTH} characters.")
+    pattern = BillingSettings.current().invoice_number_pattern
+    if numbering.matches_pattern(pattern, number) or LEGACY_AUTO_FORMAT.match(number):
+        raise ValueError(f"This format is reserved for the automatic sequence (pattern {pattern}); use another format.")
+    if Invoice.objects.filter(number=number).exists():
+        raise BillingError(f"Invoice number {number} is already in use.")
+    return number
+
+
+def issuer_snapshot(settings: BillingSettings | None = None) -> dict:
+    settings = settings or BillingSettings.current()
+    return {
+        "legal_name": settings.legal_name,
+        "address": settings.address,
+        "zip_code": settings.zip_code,
+        "city": settings.city,
+        "country": str(settings.country or ""),
+        "country_name": settings.country.name if settings.country else "",
+        "vat_id": settings.vat_id,
+        "iban": settings.iban,
+        "bic": settings.bic,
+        "contact_email": settings.contact_email,
+        "website": settings.website,
+        "invoice_footer": settings.invoice_footer,
+        "payment_terms": settings.payment_terms,
+    }
+
+
+def bill_to_snapshot(club) -> dict:
+    return {
+        "name": club.legal_name or club.name,
+        "address": club.legal_address,
+        "zip_code": club.legal_zip_code,
+        "city": club.legal_city,
+        "country": str(club.legal_country or ""),
+        "country_name": club.legal_country.name if club.legal_country else "",
+        "vat_id": club.vat_id,
+    }
+
+
+def split_description(description: str) -> tuple[str, str]:
+    """``"Pro - platform subscription"`` -> ``("Pro", "platform subscription")``: the plan name is shown bold, the rest as a sub-line."""
+    name, _, detail = description.partition(" - ")
+    return name.strip(), detail.strip()
+
+
+def build_snapshot(due: Due) -> dict:
+    """Everything printed on the invoice, frozen: issuer, bill-to, line and amounts."""
+    return {
+        "issuer": issuer_snapshot(),
+        "bill_to": bill_to_snapshot(due.club),
+        "description": f"{due.plan.name} - platform subscription",
+        "period_start": due.period_start.isoformat(),
+        "period_end": due.period_end.isoformat(),
+        "due_date": due.grace_until.isoformat(),
+        "net": f"{due.amount:.2f}",
+        "vat": f"{due.vat_amount:.2f}",
+        "total": f"{due.total:.2f}",
+        "vat_rate": f"{due.vat_rate:.2f}",
+        "reverse_charge": due.reverse_charge,
+    }
+
+
+def issue_invoice(due: Due, *, number: str | None = None) -> Invoice:
+    """Create the invoice for a period (idempotent). Automatic numbers come from the gapless counter; ``number`` sets a
+    custom one (only possible here, numbers never change afterwards) without touching the counter."""
+    existing = Invoice.objects.filter(due=due, voided_at__isnull=True).first()
+    if existing:
+        return existing
+    custom = clean_number(number) if number is not None else None
+    today = timezone.localdate()
+    snapshot = build_snapshot(due)
+    try:
+        with transaction.atomic():
+            invoice = Invoice.objects.create(due=due, number=custom or next_automatic_number(today), custom_number=custom is not None, issued_at=today, snapshot=snapshot)
+    except IntegrityError:
+        existing = Invoice.objects.filter(due=due, voided_at__isnull=True).first()
+        if existing:
+            return existing
+        raise BillingError(f"Invoice number {custom} is already in use.") from None
+    _notify_platform_admins(invoice)
     return invoice
 
 
-def _platform_admin_emails() -> list[str]:
-    User = get_user_model()
-    return list(User.objects.platform_admins().exclude(email="").order_by("email").values_list("email", flat=True))
-
-
-def notify_admins_of_new_invoice(invoice: Invoice) -> None:
-    """Tell every platform admin a club's invoice is ready to send out by hand -- see
-    Invoice.needs_sending and billing/templates/controlpanel's "Owed" table (Send/Mark as
-    sent buttons). Skipped for a zero-amount period: open_period() auto-marks those PAID
-    immediately, so there's nothing to invoice.
-
-    fail_silently -- unlike send_invoice below, a hiccup here must never block opening the
-    period itself (this runs inside open_period()'s own transaction, from both the daily
-    renewal cron and a platform admin's manual click)."""
-    if not invoice.needs_sending:
+def _notify_platform_admins(invoice: Invoice) -> None:
+    if invoice.due.total == 0:
         return
+    from controlpanel.services.platform_admins import platform_admins
 
-    recipients = _platform_admin_emails()
-    if not recipients:
+    emails = [p.profile.email for p in platform_admins() if p.profile.email]
+    if not emails:
         return
-
     due = invoice.due
-    context = {"club": due.club, "due": due, "invoice": invoice}
-    subject = render_to_string("billing/email/new_period_subject.txt", context).strip()
-    text_body = render_to_string("billing/email/new_period.txt", context)
-
-    message = EmailMultiAlternatives(subject=subject, body=text_body, from_email=settings.DEFAULT_FROM_EMAIL, to=recipients)
-    send_message(message, fail_silently=True)
+    t = texts(number=invoice.number, club=due.club.name)
+    rows = [("Club", due.club.name), ("Period", f"{due.period_start} to {due.period_end}"), ("Due date", str(due.grace_until)), ("Total incl. VAT", f"EUR {due.total}")]
+    body = f"Invoice {invoice.number} was issued for {due.club.name}: EUR {due.total} for {due.period_start} to {due.period_end}."
+    send_branded(subject=t["notice_subject"], text=body, template="billing/email/notice.html", ctx={"t": t, "rows": rows}, to=emails, fail_silently=True)
 
 
-def send_invoice(invoice: Invoice, *, actor=None) -> None:
-    """Email the invoice (PDF attached) to the club's own admins, then record it as sent.
-    Raises BillingError if there's nobody reachable to send it to -- surfaced to the admin
-    who clicked "Send", not silently dropped."""
+def invoice_context(invoice: Invoice) -> dict:
     due = invoice.due
-    recipients = admin_emails(due.club)
-    if not recipients:
-        raise BillingError(f"{due.club} has no reachable admin to send the invoice to.")
+    snap = invoice.snapshot or build_snapshot(due)  # invoices from before snapshots render from live data
+    payments = list(due.payments.all())
+    paid = sum((p.amount for p in payments), Decimal("0"))
+    replaced_by = invoice.replaced_by if invoice.replaced_by_id else None
+    replaces = invoice.replaces
+    void_note = invoice.credit_notes.filter(kind="void").first() if invoice.voided_at else None
+    return {
+        "voided": invoice.voided_at is not None,
+        "voided_on": timezone.localtime(invoice.voided_at).date() if invoice.voided_at else None,
+        "replaced_by_number": replaced_by.number if replaced_by else None,
+        "void_credit_note_number": void_note.number if void_note else None,
+        "replaces_number": replaces.number if replaces else None,
+        "invoice": invoice,
+        "snap": snap,
+        "line_name": split_description(snap["description"])[0],
+        "line_detail": split_description(snap["description"])[1],
+        "issuer": snap["issuer"],
+        "bill_to": snap["bill_to"],
+        "period_start": datetime.date.fromisoformat(snap["period_start"]),
+        "period_end": datetime.date.fromisoformat(snap["period_end"]),
+        "due_date": datetime.date.fromisoformat(snap["due_date"]),
+        "net": Decimal(snap["net"]),
+        "vat": Decimal(snap["vat"]),
+        "total": Decimal(snap["total"]),
+        "vat_rate": Decimal(snap["vat_rate"]),
+        "payments": payments,
+        "balance": Decimal(snap["total"]) - paid,
+    }
 
-    context = {"club": due.club, "due": due, "invoice": invoice, "billing_contact": settings.BILLING_CONTACT_EMAIL}
-    subject = render_to_string("billing/email/invoice_subject.txt", context).strip()
-    text_body = render_to_string("billing/email/invoice.txt", context)
 
-    message = EmailMultiAlternatives(subject=subject, body=text_body, from_email=settings.DEFAULT_FROM_EMAIL, to=recipients)
-    message.attach(f"{invoice.number}.pdf", invoice_pdf(invoice), "application/pdf")
-    send_message(message, fail_silently=False)
-
-    invoice.sent_at = timezone.now()
-    invoice.sent_method = Invoice.SentMethod.EMAIL
-    invoice.sent_by = actor
-    invoice.save(update_fields=["sent_at", "sent_method", "sent_by"])
+def invoice_html(invoice: Invoice) -> str:
+    return render_to_string("billing/invoice.html", invoice_context(invoice))
 
 
-def mark_invoice_sent_manually(invoice: Invoice, *, actor=None) -> None:
-    """Record that this invoice went out some other way (e.g. e-invoicing) -- no email sent
-    from here, just the same "sent" bookkeeping send_invoice leaves behind."""
-    invoice.sent_at = timezone.now()
-    invoice.sent_method = Invoice.SentMethod.MANUAL
-    invoice.sent_by = actor
-    invoice.save(update_fields=["sent_at", "sent_method", "sent_by"])
-
-
-def render_pdf(html: str) -> bytes:
-    """HTML to PDF.
-
-    WeasyPrint is imported here, not at module scope: it binds to native pango/cairo
-    libraries, and a machine without them must still be able to run the app, the tests and
-    every other page — it should only fail when someone actually asks for a PDF, and say why.
-    """
+def invoice_pdf(invoice: Invoice) -> bytes:
     try:
         from weasyprint import HTML
-    except (ImportError, OSError) as error:
-        raise BillingError("PDF rendering needs the native pango/cairo libraries (on macOS: brew install pango).") from error
-
-    return HTML(string=html, url_fetcher=pdf_url_fetcher()).write_pdf()
-
-
-def _cache_path(invoice: Invoice) -> str:
-    return f"clubs/{invoice.due.club.slug}/billing/invoices/cache/{invoice.pk}.pdf"
+    except (ImportError, OSError) as e:  # system libraries (pango) missing
+        raise BillingError("PDF rendering is not available on this server.") from e
+    return HTML(string=invoice_html(invoice)).write_pdf()
 
 
-def invalidate_cached_invoice_pdf(invoice: Invoice) -> None:
-    """Drop invoice's cached PDF, if any -- called from billing.signals the
-    moment its due's status/amount_paid actually changes (a payment
-    recorded or removed, or the period waived). Despite the module
-    docstring's "frozen snapshot", the PDF itself renders the running list
-    of payments and the current balance/status (see billing/invoice.html),
-    so unlike the number and the period's own amount/dates, those two
-    genuinely go stale. A no-op when nothing was cached yet."""
-    drop_cached_invoice_pdf(_cache_path(invoice))
+def snap_reverse(ctx: dict) -> bool:
+    return bool(ctx["snap"].get("reverse_charge"))
 
 
-def invoice_pdf(invoice: Invoice, base_url: str | None = None) -> bytes:
-    # Cached to disk, same reasoning/shape as club.services.invoicing.invoice_pdf /
-    # shop.services.invoices.render_invoice_pdf -- see those modules' own docstrings.
-    cache_path = _cache_path(invoice)
-    cached = read_cached_invoice_pdf(cache_path)
-    if cached is not None:
-        return cached
+def club_recipients(club) -> list[str]:
+    from club.services import club_admins
 
-    html = render_to_string("billing/invoice.html", {"invoice": invoice, "due": invoice.due, "club": invoice.due.club, "payments": invoice.due.payments.all()})
-    pdf_bytes = render_pdf(html)
-    write_cached_invoice_pdf(cache_path, pdf_bytes)
-    return pdf_bytes
+    return sorted({u.email for u in club_admins(club) if u.email})
+
+
+@transaction.atomic
+def send_invoice(invoice: Invoice, *, actor=None) -> Invoice:
+    """Email the PDF to the club's administrators."""
+    _refuse_if_voided(invoice)
+    recipients = club_recipients(invoice.due.club)
+    if not recipients:
+        raise BillingError("This club has no administrator with an email address.")
+    ctx = invoice_context(invoice)
+    club_name = invoice.due.club.name
+    period = f"{ctx['period_start']} to {ctx['period_end']}"
+    t = texts(number=invoice.number, club=club_name, period=period)
+    issuer = ctx["issuer"]
+    rows = [
+        ("Invoice number", invoice.number),
+        ("Period", period),
+        ("Total excl. VAT", f"EUR {ctx['net']}"),
+        ("VAT" + ("" if snap_reverse(ctx) else f" {ctx['vat_rate'].normalize():f}%"), f"EUR {ctx['vat']}"),
+        ("Due date", str(ctx["due_date"])),
+        ("Total incl. VAT", f"EUR {ctx['total']}"),
+    ]
+    pay_rows = []
+    if issuer.get("iban") or issuer.get("bic"):
+        pay_rows = [(label, value) for label, value in [("Beneficiary", issuer.get("legal_name")), ("IBAN", issuer.get("iban")), ("BIC", issuer.get("bic")), ("Reference", invoice.number), ("Amount", f"EUR {ctx['balance']}"), ("Pay before", str(ctx["due_date"]))] if value]
+    text = f"{t['invoice_intro']}\n\n" + "\n".join(f"{label}: {value}" for label, value in rows)
+    if pay_rows:
+        text += "\n\nPayment\n" + "\n".join(f"{label}: {value}" for label, value in pay_rows)
+    text += f"\n\nPlease find attached invoice {invoice.number} for {club_name}."
+    sent = send_branded(
+        subject=t["invoice_subject"],
+        text=text,
+        template="billing/email/invoice.html",
+        ctx={"t": t, "rows": rows, "pay_rows": pay_rows, "terms": issuer.get("payment_terms", "")},
+        to=recipients,
+        attachments=[(f"{invoice.number}.pdf", invoice_pdf(invoice), "application/pdf")],
+    )
+    if not sent:
+        raise BillingError("Automated email is paused, so the invoice was not sent.")
+    invoice.sent_at, invoice.sent_method, invoice.sent_by = timezone.now(), Invoice.EMAIL, actor
+    invoice.save(update_fields=["sent_at", "sent_method", "sent_by", "modified"])
+    return invoice
+
+
+def _refuse_if_voided(invoice: Invoice) -> None:
+    if invoice.voided_at is not None:
+        raise BillingError(f"Invoice {invoice.number} was voided; it can no longer be sent.")
+
+
+def mark_invoice_sent_manually(invoice: Invoice, *, actor=None) -> Invoice:
+    _refuse_if_voided(invoice)
+    invoice.sent_at, invoice.sent_method, invoice.sent_by = timezone.now(), Invoice.MANUAL, actor
+    invoice.save(update_fields=["sent_at", "sent_method", "sent_by", "modified"])
+    return invoice

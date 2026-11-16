@@ -1,175 +1,134 @@
-"""Who wants what: the per-account switches (notifications.models.NotificationPreference) behind
-"don't push me news" / "don't email me reminders".
+"""Who wants what. No row means on; the most specific scope wins: the club's row, then the all-clubs row (``club`` empty).
+A master switch ("all push" / "all email") sits on top of the category switches. Quiet hours and the email mode live here too."""
 
-The rule everything shares: **no row means on**. Three scopes, most specific wins:
-
-1. one *person* in one club (``member`` set: "for Lou only");
-2. one club (``club`` set, ``member`` empty);
-3. every club (both empty).
-
-Channels ask ``users_with_disabled`` once per batch, never per recipient.
-"""
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.db.models import Q
+from django.utils import timezone
 
-from .models import NotificationCategory, NotificationMasterSwitch, NotificationPreference
+from .models import Category, Channel, MasterSwitch, NotificationPreference, PushDevice, PushSettings, QuietHours, UserNotificationSettings
 
-Channel = NotificationPreference.Channel
-
-
-def users_with_disabled(user_ids, club, category: str, channel: str, member=None) -> set:
-    """Of ``user_ids``, the accounts that switched ``category`` off on ``channel`` for ``club`` --
-    for notifications *about* ``member`` when given (their per-person rows win over the club's)."""
-    user_ids = {user_id for user_id in user_ids if user_id}
-    if not user_ids:
-        return set()
-    club_id = getattr(club, "pk", club)
-    member_id = getattr(member, "pk", member)
-    scope = Q(club__isnull=True, member__isnull=True)
-    if club_id:
-        scope |= Q(club_id=club_id, member__isnull=True)
-        if member_id:
-            scope |= Q(club_id=club_id, member_id=member_id)
-    decided: dict = {}  # user_id -> (specificity, enabled)
-    for row in NotificationPreference.objects.filter(scope, user_id__in=user_ids, category=category, channel=channel):
-        specificity = 2 if row.member_id else 1 if row.club_id else 0
-        if row.user_id not in decided or specificity > decided[row.user_id][0]:
-            decided[row.user_id] = (specificity, row.enabled)
-    off = {user_id for user_id, (_specificity, enabled) in decided.items() if not enabled}
-    return off | masters_off(user_ids, club_id, channel, [member_id])[member_id]
+EmailMode = UserNotificationSettings.EmailMode
 
 
-def masters_off(user_ids, club, channel: str, member_ids) -> dict:
-    """``{member_id: {user_id, ...}}``: of ``user_ids``, the accounts whose "All <channel>" master is off
-    for notifications about each of ``member_ids`` (``None`` = not about a specific person). The most
-    specific scope's row decides; one query however many members."""
-    user_ids = {user_id for user_id in user_ids if user_id}
-    member_ids = list(member_ids)
-    if not user_ids:
-        return {member_id: set() for member_id in member_ids}
-    club_id = getattr(club, "pk", club)
-    real_members = {member_id for member_id in member_ids if member_id}
-    scope = Q(club__isnull=True, member__isnull=True)
-    if club_id:
-        scope |= Q(club_id=club_id, member__isnull=True)
-        if real_members:
-            scope |= Q(club_id=club_id, member_id__in=real_members)
-    base: dict = {}  # user_id -> (specificity, enabled)
-    personal: dict = {}  # member_id -> {user_id: enabled}
-    for row in NotificationMasterSwitch.objects.filter(scope, user_id__in=user_ids, channel=channel):
-        if row.member_id:
-            personal.setdefault(row.member_id, {})[row.user_id] = row.enabled
-            continue
-        specificity = 1 if row.club_id else 0
-        if row.user_id not in base or specificity > base[row.user_id][0]:
-            base[row.user_id] = (specificity, row.enabled)
-    base_off = {user_id for user_id, (_specificity, enabled) in base.items() if not enabled}
-    result = {}
-    for member_id in member_ids:
-        own = personal.get(member_id, {}) if member_id else {}
-        result[member_id] = {user_id for user_id in base_off if user_id not in own} | {user_id for user_id, enabled in own.items() if not enabled}
-    return result
+def _club_id(club):
+    return getattr(club, "pk", club)
 
 
-def users_with_disabled_by_member(user_ids, club, category: str, channel: str, member_ids) -> dict:
-    """``{member_id: {user_id, ...}}``: ``users_with_disabled`` for several subject people at once --
-    ONE query however many members the batch is about (a club-wide notification makes one per child)."""
-    user_ids = {user_id for user_id in user_ids if user_id}
-    member_ids = {member_id for member_id in member_ids if member_id}
-    if not user_ids or not member_ids:
-        return {member_id: set() for member_id in member_ids}
-    club_id = getattr(club, "pk", club)
-    scope = Q(club__isnull=True, member__isnull=True)
-    if club_id:
-        scope |= Q(club_id=club_id, member__isnull=True) | Q(club_id=club_id, member_id__in=member_ids)
-    base: dict = {}  # user_id -> (specificity, enabled), club/all-clubs rows
-    personal: dict = {}  # member_id -> {user_id: enabled}
-    for row in NotificationPreference.objects.filter(scope, user_id__in=user_ids, category=category, channel=channel):
-        if row.member_id:
-            personal.setdefault(row.member_id, {})[row.user_id] = row.enabled
-            continue
-        specificity = 1 if row.club_id else 0
-        if row.user_id not in base or specificity > base[row.user_id][0]:
-            base[row.user_id] = (specificity, row.enabled)
-    base_off = {user_id for user_id, (_specificity, enabled) in base.items() if not enabled}
-    result = {}
-    master = masters_off(user_ids, club_id, channel, member_ids)
-    for member_id in member_ids:
-        own = personal.get(member_id, {})
-        result[member_id] = {user_id for user_id in base_off if user_id not in own} | {user_id for user_id, enabled in own.items() if not enabled} | master[member_id]
-    return result
+def _scope(club_id) -> Q:
+    return Q(club_id=club_id) | Q(club__isnull=True) if club_id else Q(club__isnull=True)
 
 
-def is_enabled(user, club, category: str, channel: str, member=None) -> bool:
-    return user.pk not in users_with_disabled([user.pk], club, category, channel, member=member)
+def _resolve(rows, club_id) -> bool:
+    """``rows`` already filtered to the user, channel (and category): club row > all-clubs row > on."""
+    by_scope = {row.club_id: row.enabled for row in rows}
+    if club_id is not None and club_id in by_scope:
+        return by_scope[club_id]
+    return by_scope.get(None, True)
 
 
-def matrix(user, club=None, member=None) -> dict:
-    """``{category: {channel: bool}}`` as ``user`` has it for ``club`` (``None`` = the all-clubs defaults),
-    for notifications about ``member`` when given."""
-    result = {category: dict.fromkeys(Channel.values, True) for category in NotificationCategory.values}
-    rows = list(NotificationPreference.objects.filter(user=user, club__isnull=True, member__isnull=True))
-    if club is not None:
-        rows += list(NotificationPreference.objects.filter(user=user, club=club, member__isnull=True))
-        if member is not None:
-            rows += list(NotificationPreference.objects.filter(user=user, club=club, member=member))  # later = more specific
-    for row in rows:
-        result[row.category][row.channel] = row.enabled
-    return result
+def master_enabled(user, channel: str, club=None) -> bool:
+    club_id = _club_id(club)
+    rows = MasterSwitch.objects.filter(_scope(club_id), user=user, channel=channel)
+    return _resolve(rows, club_id)
 
 
-def overrides(user, club=None, member=None) -> dict:
-    """Only the explicitly stored switches for exactly this scope: ``{category: {channel: bool}}``."""
-    found: dict = {}
-    for row in NotificationPreference.objects.filter(user=user, club=club, member=member):
-        found.setdefault(row.category, {})[row.channel] = row.enabled
-    return found
-
-
-def master_matrix(user, club=None, member=None) -> dict:
-    """``{channel: bool}``: the "All push" / "All emails" masters as ``user`` has them for this scope
-    (the most specific stored row wins; none means on)."""
-    result = dict.fromkeys(Channel.values, True)
-    rows = list(NotificationMasterSwitch.objects.filter(user=user, club__isnull=True, member__isnull=True))
-    if club is not None:
-        rows += list(NotificationMasterSwitch.objects.filter(user=user, club=club, member__isnull=True))
-        if member is not None:
-            rows += list(NotificationMasterSwitch.objects.filter(user=user, club=club, member=member))
-    for row in rows:
-        result[row.channel] = row.enabled
-    return result
-
-
-def master_overrides(user, club=None, member=None) -> dict:
-    """Only the master switches stored for exactly this scope: ``{channel: bool}``."""
-    return {row.channel: row.enabled for row in NotificationMasterSwitch.objects.filter(user=user, club=club, member=member)}
-
-
-def set_master(user, club, channel: str, enabled: bool, member=None) -> NotificationMasterSwitch:
+def is_enabled(user, category: str, channel: str, club=None) -> bool:
+    """Whether ``user`` wants ``category`` on ``channel`` ("push" or "email") for ``club`` (None = no particular club)."""
     if channel not in Channel.values:
         raise ValueError(f"unknown channel: {channel}")
-    if member is not None and club is None:
-        raise ValueError("a per-person switch needs a club")
-    row, _created = NotificationMasterSwitch.objects.update_or_create(user=user, club=club, member=member, channel=channel, defaults={"enabled": enabled})
-    return row
+    if not master_enabled(user, channel, club):
+        return False
+    club_id = _club_id(club)
+    rows = NotificationPreference.objects.filter(_scope(club_id), user=user, category=category, channel=channel)
+    return _resolve(rows, club_id)
 
 
-def set_preference(user, club, category: str, channel: str, enabled: bool, member=None) -> NotificationPreference:
-    if category not in NotificationCategory.values or channel not in Channel.values:
+def set_preference(user, category: str, channel: str, enabled: bool, club=None) -> NotificationPreference:
+    if category not in Category.values or channel not in Channel.values:
         raise ValueError(f"unknown category/channel: {category}/{channel}")
-    if member is not None and club is None:
-        raise ValueError("a per-person switch needs a club")
-    row, _created = NotificationPreference.objects.update_or_create(user=user, club=club, member=member, category=category, channel=channel, defaults={"enabled": enabled})
+    row, _created = NotificationPreference.objects.update_or_create(user=user, club=club, category=category, channel=channel, defaults={"enabled": enabled})
     return row
 
 
-def reset(user, club=None, category: str | None = None, member=None) -> int:
-    """Forget the stored switches for this exact scope (back to the inherited default)."""
-    rows = NotificationPreference.objects.filter(user=user, club=club, member=member)
-    if category:
-        rows = rows.filter(category=category)
-    count, _deleted = rows.delete()
-    if not category:  # "reset everything" drops the master switches of this scope too
-        masters, _deleted = NotificationMasterSwitch.objects.filter(user=user, club=club, member=member).delete()
-        count += masters
-    return count
+def set_master_switch(user, channel: str, enabled: bool, club=None) -> MasterSwitch:
+    if channel not in Channel.values:
+        raise ValueError(f"unknown channel: {channel}")
+    row, _created = MasterSwitch.objects.update_or_create(user=user, club=club, channel=channel, defaults={"enabled": enabled})
+    return row
+
+
+# --- email mode -------------------------------------------------------------------------------------------------------------
+
+
+def get_email_mode(user) -> str:
+    row = UserNotificationSettings.objects.filter(user=user).first()
+    return row.email_mode if row else EmailMode.ALWAYS.value
+
+
+def set_email_mode(user, mode: str) -> UserNotificationSettings:
+    if mode not in EmailMode.values:
+        raise ValueError(f"unknown email mode: {mode}")
+    row, _created = UserNotificationSettings.objects.update_or_create(user=user, defaults={"email_mode": mode})
+    return row
+
+
+def has_active_app(user, now=None) -> bool:
+    """An enabled native device seen within ``PushSettings.stale_device_days``: the app can notify this account."""
+    now = now or timezone.now()
+    cutoff = now - timedelta(days=PushSettings.get().stale_device_days)
+    return PushDevice.objects.filter(user=user, enabled=True, last_seen__gte=cutoff).exists()
+
+
+def should_email(user, category: str, club=None, now=None) -> bool:
+    """Email switches, then the email mode: ``unless_app`` skips email while the app can reach the account."""
+    if not is_enabled(user, category, Channel.EMAIL, club):
+        return False
+    return not (get_email_mode(user) == EmailMode.UNLESS_APP and has_active_app(user, now))
+
+
+# --- quiet hours --------------------------------------------------------------------------------------------------------------
+
+
+def _zone(name: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(name)
+    except ZoneInfoNotFoundError, ValueError:
+        return ZoneInfo("UTC")
+
+
+def set_quiet_hours(user, start, end, timezone_name: str = "Europe/Brussels", enabled: bool = True) -> QuietHours:
+    if start == end:
+        raise ValueError("The window can't be empty.")
+    try:
+        ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, ValueError) as error:
+        raise ValueError(f"unknown time zone: {timezone_name}") from error
+    row, _created = QuietHours.objects.update_or_create(user=user, defaults={"start": start, "end": end, "timezone": timezone_name, "enabled": enabled})
+    return row
+
+
+def clear_quiet_hours(user) -> bool:
+    count, _deleted = QuietHours.objects.filter(user=user).delete()
+    return bool(count)
+
+
+def quiet_state(user, now=None) -> tuple[bool, datetime | None]:
+    """``(active, until)``: whether ``now`` is inside the account's quiet hours, and when the window ends (an aware datetime).
+    The window may cross midnight and is evaluated in its own time zone."""
+    row = QuietHours.objects.filter(user=user, enabled=True).first()
+    if row is None:
+        return False, None
+    zone = _zone(row.timezone)
+    local = (now or timezone.now()).astimezone(zone)
+    time_now = local.timetz().replace(tzinfo=None)
+    if row.start < row.end:
+        active = row.start <= time_now < row.end
+        end_day = local.date()
+    else:  # crosses midnight
+        active = time_now >= row.start or time_now < row.end
+        end_day = local.date() + timedelta(days=1) if time_now >= row.start else local.date()
+    if not active:
+        return False, None
+    return True, datetime.combine(end_day, row.end, tzinfo=zone)

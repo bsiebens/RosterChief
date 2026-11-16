@@ -1,0 +1,50 @@
+export default {
+	en: {
+		'publicstats.kicker': 'Player stats',
+		'publicstats.empty': 'No game stats yet.',
+		'publicstats.footer': 'Figures come from the official game sheets.',
+		'publicstats.share.title': 'Public link',
+		'publicstats.share.hint': 'A personal link to this person’s game stats only (no attendance, no team figures). Anyone with the link can see it.',
+		'publicstats.share.create': 'Create link',
+		'publicstats.share.copy': 'Copy',
+		'publicstats.share.copied': 'Copied',
+		'publicstats.share.rotate': 'Replace link',
+		'publicstats.share.rotate_hint': 'The old link stops working.',
+		'publicstats.share.off': 'Switch off',
+		'publicstats.share.open': 'Open',
+		'publicstats.share.link_label': 'Public link to the game stats',
+		'publicstats.share.failed': 'The link could not be changed.'
+	},
+	nl: {
+		'publicstats.kicker': 'Spelersstatistieken',
+		'publicstats.empty': 'Nog geen wedstrijdstatistieken.',
+		'publicstats.footer': 'De cijfers komen uit de officiële wedstrijdbladen.',
+		'publicstats.share.title': 'Openbare link',
+		'publicstats.share.hint': 'Een persoonlijke link naar enkel de wedstrijdstatistieken van deze persoon (geen aanwezigheden, geen ploegcijfers). Iedereen met de link kan ze zien.',
+		'publicstats.share.create': 'Link maken',
+		'publicstats.share.copy': 'Kopiëren',
+		'publicstats.share.copied': 'Gekopieerd',
+		'publicstats.share.rotate': 'Link vervangen',
+		'publicstats.share.rotate_hint': 'De oude link werkt dan niet meer.',
+		'publicstats.share.off': 'Uitschakelen',
+		'publicstats.share.open': 'Openen',
+		'publicstats.share.link_label': 'Openbare link naar de wedstrijdstatistieken',
+		'publicstats.share.failed': 'De link kon niet worden aangepast.'
+	},
+	fr: {
+		'publicstats.kicker': 'Statistiques du joueur',
+		'publicstats.empty': 'Pas encore de statistiques de match.',
+		'publicstats.footer': 'Les chiffres proviennent des feuilles de match officielles.',
+		'publicstats.share.title': 'Lien public',
+		'publicstats.share.hint': 'Un lien personnel vers les seules statistiques de match de cette personne (ni présences, ni chiffres d’équipe). Toute personne disposant du lien peut les voir.',
+		'publicstats.share.create': 'Créer le lien',
+		'publicstats.share.copy': 'Copier',
+		'publicstats.share.copied': 'Copié',
+		'publicstats.share.rotate': 'Remplacer le lien',
+		'publicstats.share.rotate_hint': 'L’ancien lien ne fonctionnera plus.',
+		'publicstats.share.off': 'Désactiver',
+		'publicstats.share.open': 'Ouvrir',
+		'publicstats.share.link_label': 'Lien public vers les statistiques de match',
+		'publicstats.share.failed': 'Le lien n’a pas pu être modifié.'
+	}
+};

@@ -1,0 +1,200 @@
+import uuid
+from datetime import datetime
+
+from django.db.models import Q
+from django.utils import timezone
+from ninja import Field, Router, Schema
+from ninja.errors import HttpError
+
+from api.legacy.scope import current_season, require_club
+from events.models import ASSUMED_EVENT_DURATION, Event
+from teams.models import Team
+
+router = Router(tags=["games"])
+
+DEFAULT_UPCOMING_COUNT = 10
+MAX_UPCOMING_COUNT = 50
+
+DEFAULT_PAST_COUNT = 10
+MAX_PAST_COUNT = 50
+
+#: /games/upcoming/ covers anything worth putting on a public fixture list --
+#: not just Game, but Tournament too. The other game endpoints (live,
+#: per-team) stay Game-only: is_live/score_for/score_against are genuinely
+#: game-specific (events/models.py), so a tournament wouldn't have anything
+#: meaningful to show there anyway.
+UPCOMING_KINDS = [Event.EventKind.GAME, Event.EventKind.TOURNAMENT]
+
+
+class LocationOut(Schema):
+    name: str
+    address: str
+    city: str
+    zip_code: str
+    country: str
+    is_home: bool
+
+
+class TeamRefOut(Schema):
+    id: uuid.UUID
+    name: str
+    logo_url: str | None
+
+
+class GameOut(Schema):
+    id: uuid.UUID
+    start: datetime
+    end: datetime
+    location: LocationOut | None
+    # home_team/away_team only ever carry ONE of our own teams (the opponent on
+    # the other side) -- an Event can be assigned to several teams at once, so
+    # `teams` below is the complete list. The single-team pair is kept as-is
+    # for the external sites already reading it.
+    home_team: TeamRefOut | None = Field(description="Home side. For our club, only ONE of its teams (the requested one on /teams/{id}/games/, else the first by name). Kept for compatibility; read `teams`.")
+    away_team: TeamRefOut | None = Field(description="Away side. For our club, only ONE of its teams (the requested one on /teams/{id}/games/, else the first by name). Kept for compatibility; read `teams`.")
+    teams: list[TeamRefOut] = Field(description="Every one of our own club's teams assigned to this game, ordered by name. Use this rather than home_team/away_team when a game can involve more than one team.")
+    competition: str
+    is_friendly: bool
+    is_live: bool
+    status: str  # "upcoming" | "live" | "finished"
+    home_score: int | None
+    away_score: int | None
+
+
+def _to_team_ref_out(request, *, id, name, logo) -> TeamRefOut:
+    return TeamRefOut(id=id, name=name, logo_url=request.build_absolute_uri(logo.url) if logo else None)
+
+
+def _to_game_out(event, request, club, team=None) -> GameOut:
+    related_teams = list(event.teams.all())
+    if team is None:
+        team = related_teams[0] if related_teams else None
+
+    # Our own team has no logo of its own -- it's shown under the club's badge. The
+    # opponent is an events.models.Opponent, which does carry its own logo.
+    team_ref = _to_team_ref_out(request, id=team.pk, name=team.name, logo=club.logo) if team is not None else None
+    opponent_ref = _to_team_ref_out(request, id=event.opponent_id, name=event.opponent.name, logo=event.opponent.logo) if event.opponent_id else None
+
+    if event.is_home_game:
+        home_team, away_team = team_ref, opponent_ref
+        home_score, away_score = event.score_for, event.score_against
+    else:
+        home_team, away_team = opponent_ref, team_ref
+        home_score, away_score = event.score_against, event.score_for
+
+    now = timezone.now()
+    effective_end = event.end or (event.start + ASSUMED_EVENT_DURATION)
+
+    if event.is_live:
+        status = "live"
+    elif event.start > now:
+        status = "upcoming"
+    elif effective_end > now:
+        # Started, not manually flagged live, but our own assumed/explicit
+        # window says it isn't over yet -- matches list_upcoming_games'
+        # "not finished" inclusion below, so a game returned there never
+        # turns around and calls itself "finished".
+        status = "live"
+    else:
+        status = "finished"
+
+    location = None
+    if event.location_id:
+        location = LocationOut(name=event.location.name, address=event.location.address, city=event.location.city, zip_code=event.location.zip_code, country=str(event.location.country), is_home=event.location.is_home)
+
+    return GameOut(
+        id=event.pk,
+        start=event.start,
+        end=effective_end,
+        location=location,
+        home_team=home_team,
+        away_team=away_team,
+        teams=[_to_team_ref_out(request, id=related.pk, name=related.name, logo=club.logo) for related in related_teams],
+        competition=event.competition,
+        is_friendly=event.is_friendly,
+        is_live=event.is_live,
+        status=status,
+        home_score=home_score,
+        away_score=away_score,
+    )
+
+
+def _games(queryset):
+    """``queryset`` with what _to_game_out reads."""
+    return queryset.select_related("opponent", "location").prefetch_related("teams")
+
+
+@router.get("/games/upcoming/", response=list[GameOut], summary="Upcoming games", operation_id="events_api_list_upcoming_games")
+def list_upcoming_games(request, count: int = DEFAULT_UPCOMING_COUNT):
+    """The next `count` non-cancelled games and tournaments that aren't finished
+    yet, club-wide -- a game already in progress (started, not yet past its
+    explicit or assumed end) still counts, not just ones that haven't started."""
+    club = require_club(request)
+    count = max(1, min(count, MAX_UPCOMING_COUNT))
+
+    now = timezone.now()
+    events = _games(Event.objects.filter(kind__in=UPCOMING_KINDS, cancelled=False).filter(Q(end__gte=now) | Q(end__isnull=True, start__gte=now - ASSUMED_EVENT_DURATION)))
+    return [_to_game_out(event, request, club) for event in events.order_by("start")[:count]]
+
+
+@router.get("/games/past/", response=list[GameOut], summary="Past games", operation_id="events_api_list_past_games")
+def list_past_games(request, count: int = DEFAULT_PAST_COUNT):
+    """The most recent `count` fully completed games, club-wide, newest first --
+    Game-only (like /games/live/: scores are game-specific), not cancelled, not
+    flagged live, both scores filled in, and finished by the exact complement of
+    list_upcoming_games' "not finished" filter, so every row here reports
+    status "finished". A finished game with no score entered yet is left out
+    rather than shown as a result without one. Current season only, never an
+    older one -- same "explicit season, else derived from start date" scoping
+    as list_team_games; empty when the club has no current season."""
+    club = require_club(request)
+    count = max(1, min(count, MAX_PAST_COUNT))
+
+    season = current_season()
+    if season is None:
+        return []
+
+    now = timezone.now()
+    events = _games(
+        Event.objects.filter(kind=Event.EventKind.GAME, cancelled=False, is_live=False, score_for__isnull=False, score_against__isnull=False)
+        .filter(Q(season=season) | Q(season__isnull=True, start__date__gte=season.start_date, start__date__lte=season.end_date))
+        .filter(Q(end__lte=now) | Q(end__isnull=True, start__lte=now - ASSUMED_EVENT_DURATION)),
+    )
+    return [_to_game_out(event, request, club) for event in events.order_by("-start")[:count]]
+
+
+@router.get("/games/live/", response=list[GameOut], summary="Live games", operation_id="events_api_list_live_games")
+def list_live_games(request):
+    club = require_club(request)
+    events = _games(Event.objects.filter(kind=Event.EventKind.GAME, cancelled=False, is_live=True))
+
+    return [_to_game_out(event, request, club) for event in events.order_by("start")]
+
+
+@router.get("/teams/{team_id}/games/", response=list[GameOut], summary="A team's current-season games", operation_id="events_api_list_team_games")
+def list_team_games(request, team_id: uuid.UUID):
+    """Current-season games, using the start date when a game has no assigned season."""
+    club = require_club(request)
+
+    team = Team.objects.filter(pk=team_id).first()
+    if team is None:
+        raise HttpError(404, "No such team.")
+
+    season = current_season()
+    if season is None:
+        return []
+
+    events = _games(
+        Event.objects.filter(teams=team, kind=Event.EventKind.GAME, cancelled=False).filter(Q(season=season) | Q(season__isnull=True, start__date__gte=season.start_date, start__date__lte=season.end_date)),
+    )
+    return [_to_game_out(event, request, club, team=team) for event in events.order_by("start")]
+
+
+@router.get("/games/{game_id}/", response=GameOut, summary="One game", operation_id="events_api_get_game")
+def get_game(request, game_id: uuid.UUID):
+    """One non-cancelled game with the same fields as the game lists."""
+    club = require_club(request)
+    event = _games(Event.objects.filter(pk=game_id, kind=Event.EventKind.GAME, cancelled=False)).first()
+    if event is None:
+        raise HttpError(404, "No such game.")
+    return _to_game_out(event, request, club)

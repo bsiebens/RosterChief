@@ -14,9 +14,9 @@ so those few games are checked against the game's own per-period overview.
 A team's league is found from the RBIHF team page already remembered by the
 fixture import (Team.import_sources, see events.services.import_sources), and
 the result is stored back on that same entry under ``standings`` -- so the
-public API (teams/api.py) only ever reads the database. Refreshed when a game of
-the team finishes (events.management.commands.poll_live_game_results) and once a
-night (refresh_standings).
+public views only ever read the database (``standings_for``). Refreshed when a game of
+the team finishes (``refresh_for_finished_game``) and once a night
+(the ``events.refresh_standings`` task).
 """
 
 import logging
@@ -28,7 +28,8 @@ import requests
 from bs4 import BeautifulSoup
 from django.core.cache import cache
 from django.utils import timezone
-from django.utils.translation import gettext_lazy as _
+from django.utils.dateparse import parse_datetime
+from django.utils.translation import gettext as _
 
 from events.services import import_sources
 from events.services.rbihf_import import REQUEST_HEADERS, REQUEST_TIMEOUT_SECONDS, RBIHFImportError, extract_team_id, fetch_html
@@ -347,7 +348,7 @@ def refresh_entry(team, entry: dict, *, fresh: bool = False) -> bool:
     return ok
 
 
-def refresh_team(club, team, season, *, fresh: bool = False, source_id: str | None = None) -> tuple[int, int]:
+def refresh_team(team, season, *, fresh: bool = False, source_id: str | None = None) -> tuple[int, int]:
     """Refreshes ``team``'s RBIHF entries for ``season`` (only the one whose RBIHF
     team id is ``source_id``, when given). Returns (refreshed, failed)."""
     refreshed = failed = 0
@@ -367,16 +368,67 @@ def refresh_team(club, team, season, *, fresh: bool = False, source_id: str | No
     return refreshed, failed
 
 
-def refresh_for_finished_game(event) -> None:
-    """Called once a polled RBIHF game is seen finishing: refreshes the standings
-    of every team playing it, bypassing the league page cache so the new result
-    is picked up straight away."""
-    from club.models import Season  # deferred: club imports back into events
+def refresh_for_finished_game(event, club_or_features=None) -> None:
+    """Called once a polled RBIHF game is seen finishing (inside the club's schema):
+    refreshes the standings of every team playing it, bypassing the league page
+    cache so the new result is picked up straight away. Needs the RBIHF feature."""
+    from events.models import Season
 
-    if event.competition != import_sources.SOURCE_RBIHF or not import_sources.source_enabled(event.club, import_sources.SOURCE_RBIHF):
+    if event.competition != import_sources.SOURCE_RBIHF or not import_sources.source_enabled(import_sources.SOURCE_RBIHF, club_or_features):
         return
-    season = Season.covering(event.club, timezone.localdate(event.start))
+    season = Season.covering(None, timezone.localdate(event.start))
     if season is None:
         return
     for team in event.teams.all():
-        refresh_team(event.club, team, season, fresh=True, source_id=event.external_source_id or None)
+        refresh_team(team, season, fresh=True, source_id=event.external_source_id or None)
+
+
+def refresh_club(club, *, today=None) -> tuple[int, int]:
+    """The nightly refresh for one club (inside its schema): every team's RBIHF entries for the current season.
+    Clubs without the RBIHF feature are skipped. Returns (refreshed, failed); one failing team never stops the rest."""
+    from events.models import Season
+    from teams.models import Team
+
+    season = Season.covering(club, today or timezone.localdate())
+    if season is None or not import_sources.source_enabled(import_sources.SOURCE_RBIHF, club):
+        return 0, 0
+    refreshed = failed = 0
+    for team in Team.objects.order_by("name"):
+        try:
+            ok, errors = refresh_team(team, season)
+        except Exception:
+            logger.exception("rbihf_standings.team_failed club=%s team=%s", club.slug, team.pk)
+            failed += 1
+            continue
+        refreshed += ok
+        failed += errors
+    return refreshed, failed
+
+
+def standings_for(team, season) -> list[dict]:
+    """``team``'s stored league standings for ``season`` (never fetched here), one dict per ranked competition, each
+    row flagged ``is_own_team``: what a team page or the public API shows."""
+    competitions = []
+    if season is None:
+        return competitions
+    for entry in import_sources.sources_for(team, season):
+        standings = entry.get("standings") or {}
+        if entry.get("source") != import_sources.SOURCE_RBIHF or not standings.get("competitions"):
+            continue
+        own_id = standings.get("rbihf_team_id")
+        updated_at = parse_datetime(standings["updated_at"]) if standings.get("updated_at") else None
+        for competition in standings["competitions"]:
+            competitions.append(
+                {
+                    "league": standings.get("league", ""),
+                    "league_url": standings.get("league_url", ""),
+                    "competition": competition.get("name", ""),
+                    "competition_label": entry.get("competition_label", ""),
+                    "points_rule": competition.get("points_rule", ""),
+                    "has_overtime": competition.get("has_overtime", False),
+                    "updated_at": updated_at,
+                    "error": standings.get("error", ""),
+                    "rows": [{**row, "is_own_team": row.get("team_id") == own_id} for row in competition.get("rows", [])],
+                }
+            )
+    return competitions
