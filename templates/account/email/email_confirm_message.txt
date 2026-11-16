@@ -1,0 +1,18 @@
+{% autoescape off %}{{ t.heading }}
+
+{{ t.intro }}
+{% if from_email %}
+{{ t.from }}: {{ from_email }}
+{{ t.to }}: {{ to_email }}{% endif %}{% if deleted_email %}
+{{ t.removed }}: {{ deleted_email }}{% endif %}
+
+{{ t.security }}
+{% if ip %}
+{{ t.ip }}: {{ ip }}{% endif %}{% if user_agent %}
+{{ t.browser }}: {{ user_agent }}{% endif %}{% if timestamp %}
+{{ t.date }}: {{ timestamp|date:"j M Y, H:i T" }}{% endif %}
+
+--
+{{ club_name }}
+{{ t.footer }}
+{% endautoescape %}

@@ -1,97 +1,152 @@
-"""Member-facing shop notifications -- app + email, one function per event.
-Kept out of checkout.py (cart -> Order is that module's own job) and out of
-management/views.py (a view shouldn't own what an email says).
+"""Telling the purchaser (and, for a child, the guardians) about their order: inbox + push, category "shop".
 
-Each event is a notify_*/dispatch_* pair, same shape as events.services.
-notifications.notify_new_event/dispatch_notify_new_event: notify_* does the
-actual work synchronously (and is what tests call directly, for a
-deterministic assertion), dispatch_* re-fetches the order by id and runs
-notify_* on a daemon background thread instead, so the checkout/pickup
-request doesn't wait on notify_members's email+push fan-out. The two used to
-be one function, misleadingly already named dispatch_* while actually
-running inline -- see rosterchief.concurrency.run_in_background for why a
-plain thread and not a task queue.
-"""
+``dispatch(kind, order_id)`` queues a Celery task (tenant-aware); ``send(kind, order)`` does the work. Each recipient gets the
+text in their own language (``Member.language``; empty/unknown means the club's own, Dutch). Kinds: ``placed``, ``ready``,
+``cancelled``, ``payment_received``, ``production`` (all made-to-order items of the order are now ordered from the supplier) and
+``production_partial`` (some of them; the others wait for another batch). The production kinds carry ``extra['items']``."""
 
-from django.utils.translation import gettext_lazy as _
+import logging
 
-from notifications.models import NotificationCategory
-from notifications.services import notify_members
-from rosterchief.concurrency import run_in_background
+logger = logging.getLogger(__name__)
 
-from .invoices import ShopInvoicePDFError, render_invoice_pdf
+CATEGORY = "shop"
+DEFAULT_LANGUAGE = "nl"
+EMAIL_KINDS = ("placed", "ready", "charge", "charge_reminder")  # these also get the club-branded email (shop.services.emails)
+#: Charge invoices (Finance -> Invoices): the member app's payments tab is where they are read.
+CHARGE_KINDS = ("charge", "charge_reminder", "charge_cancelled")
+
+TEXTS = {
+    "nl": {
+        "placed": ("Bestelling {number} geplaatst", "Je bestelling is geregistreerd. Totaal: EUR {total}."),
+        "ready": ("Bestelling {number} ligt klaar", "Je bestelling kan worden opgehaald. {instructions}"),
+        "charge": ("Factuur {number}", "Je hebt een factuur ontvangen: {description}. Totaal: EUR {total}. Te betalen voor {due}."),
+        "charge_reminder": ("Herinnering: factuur {number} is vervallen", "Factuur {number} (EUR {total}) moest betaald zijn op {due} en staat nog open."),
+        "charge_cancelled": ("Factuur {number} geannuleerd", "Deze factuur werd geannuleerd. Je hoeft niets te betalen."),
+        "cancelled": ("Bestelling {number} geannuleerd", "Je bestelling werd geannuleerd."),
+        "payment_received": ("Betaling ontvangen voor {number}", "Bedankt, we hebben je betaling ontvangen."),
+        "production": ("Bestelling {number} is in productie", "Je bestelling werd naar de leverancier gestuurd en wordt nu gemaakt: {items}. We verwittigen je zodra hij klaarligt."),
+        "production_partial": (
+            "Een deel van bestelling {number} is in productie",
+            "Deze artikelen worden nu gemaakt: {items}. "
+            "Voor de rest van je bestelling laten we je later weten wanneer ze in productie gaat. We verwittigen je zodra alles klaarligt.",
+        ),
+    },
+    "en": {
+        "placed": ("Order {number} placed", "Your order is registered. Total: EUR {total}."),
+        "ready": ("Order {number} is ready for pickup", "Your order is ready to collect. {instructions}"),
+        "charge": ("Invoice {number}", "You received an invoice: {description}. Total: EUR {total}. Please pay by {due}."),
+        "charge_reminder": ("Reminder: invoice {number} is overdue", "Invoice {number} (EUR {total}) was due on {due} and is still open."),
+        "charge_cancelled": ("Invoice {number} cancelled", "This invoice was cancelled. You do not need to pay it."),
+        "cancelled": ("Order {number} cancelled", "Your order was cancelled."),
+        "payment_received": ("Payment received for {number}", "Thank you, we received your payment."),
+        "production": ("Order {number} is in production", "Your order was sent to the supplier and is now being made: {items}. We will let you know when it is ready."),
+        "production_partial": ("Part of order {number} is in production", "These items are now being made: {items}. We will let you know when the rest of your order goes into production. We will tell you when everything is ready."),
+    },
+    "fr": {
+        "placed": ("Commande {number} enregistree", "Votre commande est enregistree. Total : EUR {total}."),
+        "ready": ("Commande {number} prete", "Votre commande peut etre retiree. {instructions}"),
+        "charge": ("Facture {number}", "Vous avez recu une facture : {description}. Total : EUR {total}. A payer avant le {due}."),
+        "charge_reminder": ("Rappel : la facture {number} est echue", "La facture {number} (EUR {total}) etait a payer le {due} et reste ouverte."),
+        "charge_cancelled": ("Facture {number} annulee", "Cette facture a ete annulee. Vous n'avez rien a payer."),
+        "cancelled": ("Commande {number} annulee", "Votre commande a ete annulee."),
+        "payment_received": ("Paiement recu pour {number}", "Merci, nous avons recu votre paiement."),
+        "production": ("Commande {number} en production", "Votre commande a ete envoyee au fournisseur et est en cours de fabrication : {items}. Nous vous previendrons quand elle sera prete."),
+        "production_partial": (
+            "Une partie de la commande {number} est en production",
+            "Ces articles sont en cours de fabrication : {items}. "
+            "Nous vous previendrons quand le reste de votre commande sera en production. Nous vous previendrons quand tout sera pret.",
+        ),
+    },
+}
 
 
-def _invoice_attachment(order):
-    """Best-effort: a club running without WeasyPrint's native libraries still
-    gets the notification itself, just without the PDF -- same reasoning as
-    club.services.invoicing._attach_pdf."""
-    invoice = getattr(order, "invoice", None)
-    if invoice is None:
-        return None
+PAYMENT_LABEL = {"nl": "Betalen:", "en": "How to pay:", "fr": "Comment payer :"}
+
+
+def _how_to_pay(extra: dict | None) -> str:
+    """The payment instructions to tell: the text given with the notification (edited in the pickup workflow, possibly empty on
+    purpose), else the club-level default."""
+    from shop.services import defaults
+
+    if extra and extra.get("payment_instructions") is not None:
+        return str(extra["payment_instructions"]).strip()
+    return defaults.payment_instructions().strip()
+
+
+def _lang(code) -> str:
+    code = (code or "").split("-")[0].lower()
+    return code if code in TEXTS else DEFAULT_LANGUAGE
+
+
+def send(kind: str, order, extra: dict | None = None) -> int:
+    from events.services.attendance import current_club
+    from members.services import recipients
+    from notifications import inbox
+
+    club = current_club()
+    if club is None or kind not in TEXTS["nl"]:
+        return 0
+    member = order.purchaser
+    language = _lang(member.language)
+    told = 0
+    mail_to = []  # (user, on behalf of, language) for the branded email of the placed / ready events
+    entries = recipients.recipients(member)
+    for user, child in entries:
+        # a guardian reads in their own language
+        from members.models import Member
+
+        own = Member.objects.filter(user=user).values_list("language", flat=True).first() if child else member.language
+        title, body = TEXTS[_lang(own or language)][kind]
+        values = {"number": order.number, "total": order.total, "instructions": order.pickup_instructions, "items": (extra or {}).get("items", "")}
+        if kind in CHARGE_KINDS:
+            values.update(_charge_values(order))
+        title, body = title.format(**values), body.format(**values).strip()
+        if kind in ("placed", "ready", "charge", "charge_reminder") and order.payment_status != "paid":
+            how_to_pay = (order.payment_instructions or "").strip() or _how_to_pay(extra)
+            if how_to_pay:
+                body = f"{body}\n\n{PAYMENT_LABEL[_lang(own or language)]}\n{how_to_pay}"
+        if child is not None:
+            title = recipients.on_behalf_title(title, child)
+        href = "/parent?tab=payments" if kind in CHARGE_KINDS else f"/shop/orders/{order.pk}"
+        inbox.notify(user, club, title=title, body=body, href=href, push=True, category=CATEGORY)
+        mail_to.append((user, child, _lang(own or language)))
+        told += 1
+    if kind in EMAIL_KINDS:
+        if not entries:  # no login to notify: still mail a purchaser who has an address
+            mail_to.append((None, None, language))
+        _email(kind, order, extra, mail_to)
+    return told
+
+
+def _charge_values(order) -> dict:
+    """What the charge texts name: the invoice number (not the internal order number), the first line, the due date."""
+    from shop.models import Invoice
+
+    invoice = Invoice.objects.filter(order=order).first()
+    line = order.lines.order_by("created").first()
+    description = (line.description if line else "") or ""
+    if order.lines.count() > 1:
+        description = f"{description} +{order.lines.count() - 1}"
+    return {
+        "number": invoice.number if invoice else order.number,
+        "description": description,
+        "due": invoice.due_date.strftime("%d/%m/%Y") if invoice and invoice.due_date else "",
+    }
+
+
+def _email(kind: str, order, extra: dict | None, mail_to: list) -> None:
+    from shop.services import emails
+
     try:
-        pdf_bytes = render_invoice_pdf(invoice)
-    except ShopInvoicePDFError:
-        return None
-    return [(f"{invoice.number}.pdf", pdf_bytes, "application/pdf")]
+        emails.send_order_emails(kind, order, extra, mail_to)
+    except Exception:  # an email problem never fails the notification
+        logger.exception("shop.email_failed %s", kind)
 
 
-def notify_order_placed(order) -> None:
-    """The purchaser, and only the purchaser (not every shop admin), told
-    their order is in and payable on pickup -- app + email, invoice PDF
-    attached to the email."""
+def dispatch(kind: str, order_id, extra: dict | None = None) -> None:
+    from shop import tasks
 
-    def title():
-        return _("Order %(number)s placed") % {"number": order.number}
-
-    def body():
-        return _("Your order is in — pay when you pick it up. Total: €%(total)s.") % {"total": order.total}
-
-    notify_members([order.purchaser], club=order.club, title=title, body=body, source=order, attachments=_invoice_attachment(order), category=NotificationCategory.SHOP)
-
-
-def _notify_order_placed_by_id(order_id) -> None:
-    from ..models import Order
-
-    order = Order.objects.filter(pk=order_id).select_related("club", "purchaser", "invoice").first()
-    if order is not None:
-        notify_order_placed(order)
-
-
-def dispatch_order_placed_notification(order_id) -> None:
-    """Runs notify_order_placed on a daemon background thread so the request that just
-    checked out doesn't wait on it."""
-    run_in_background(_notify_order_placed_by_id, order_id)
-
-
-def notify_order_ready_for_pickup(order) -> None:
-    """Told the moment a shop admin flips the order to READY_FOR_PICKUP
-    (ManageOrderMarkReadyForPickupView) -- app + email. order.pickup_instructions,
-    when set, is folded into the body rather than passed separately: it's
-    exactly what the member needs to actually go collect the thing, not an
-    aside."""
-
-    def title():
-        return _("Order %(number)s is ready for pickup") % {"number": order.number}
-
-    def body():
-        text = _("Your order is ready to collect — pay when you pick it up.")
-        if order.pickup_instructions:
-            text = f"{text} {order.pickup_instructions}"
-        return text
-
-    notify_members([order.purchaser], club=order.club, title=title, body=body, source=order, category=NotificationCategory.SHOP)
-
-
-def _notify_order_ready_for_pickup_by_id(order_id) -> None:
-    from ..models import Order
-
-    order = Order.objects.filter(pk=order_id).select_related("club", "purchaser").first()
-    if order is not None:
-        notify_order_ready_for_pickup(order)
-
-
-def dispatch_order_ready_for_pickup_notification(order_id) -> None:
-    """Runs notify_order_ready_for_pickup on a daemon background thread so the request
-    that just marked the order ready doesn't wait on it."""
-    run_in_background(_notify_order_ready_for_pickup_by_id, order_id)
+    try:
+        tasks.notify_order.delay(kind, str(order_id), extra or {})
+    except Exception:  # a broker hiccup must not fail the request
+        logger.exception("shop.enqueue_failed %s", kind)

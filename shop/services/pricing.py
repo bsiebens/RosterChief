@@ -1,54 +1,18 @@
-"""Cart/order totals -- one place both checkout (shop.services.checkout) and any
-future "preview my total before I commit" screen compute from, so the two can
-never disagree about what a discount is actually worth.
-"""
+"""Order totals and discount validation; framework-free so checkout and the order API compute the same numbers."""
 
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.db.models import Sum
+from django.utils import timezone
 
-from shop.models import DiscountType
+from shop.models import AppliedDiscount, DiscountType, Order
 
-#: Every currency amount in this app is 2 decimal places (every DecimalField
-#: storing one is decimal_places=2) -- a percentage discount is the one place
-#: that math can produce more (33.33% of €80.00 is €26.6640), so this is the
-#: one place that needs rounding back down to what a euro amount actually is.
 _CENTS = Decimal("0.01")
 
 
-def cart_subtotal(cart) -> Decimal:
-    return sum((item.unit_price * item.quantity for item in cart.items.all()), Decimal("0"))
-
-
-def order_total(order) -> Decimal:
-    """Recomputed from the order's own line items and applied discounts --
-    the same subtotal-minus-discount shape cart_totals uses at checkout, but
-    read back from what's actually on the order rather than a live cart.
-    Used after a staff edit to an existing OrderLine (management.views.
-    OrderLineUpdateView) changes what the order is actually worth.
-
-    Each AppliedDiscount is re-evaluated from its own snapshot
-    (discount_type + discount_amount) against the new lines total -- a
-    percentage stays a percentage, a fixed amount stays that many euros --
-    and its stored ``amount`` (the euros actually deducted) is updated to
-    match, so the order's discount rows and its total never disagree."""
-    lines_total = order.order_items.aggregate(total=Sum("line_total"))["total"] or Decimal("0")
-    discount_total = Decimal("0")
-    for applied in order.applied_discounts.all():
-        amount = discount_amount_for(lines_total, applied)
-        if applied.amount != amount:
-            applied.amount = amount
-            applied.save(update_fields=["amount"])
-        discount_total += amount
-    return max(Decimal("0"), lines_total - discount_total)
-
-
 def discount_amount_for(subtotal: Decimal, discount) -> Decimal:
-    """The actual currency amount ``discount`` is worth against ``subtotal`` --
-    never more than the subtotal itself, so a fixed-amount discount larger
-    than the cart can't push the total negative. Rounded to the nearest cent
-    (half up) -- a percentage of an odd subtotal otherwise carries however
-    many decimal places Decimal division happens to produce."""
+    """What ``discount`` (a Discount or AppliedDiscount snapshot) is worth against ``subtotal``: rounded half up, never above
+    the subtotal, never negative."""
     if discount.discount_type == DiscountType.PERCENTAGE:
         amount = (subtotal * discount.discount_amount / Decimal("100")).quantize(_CENTS, rounding=ROUND_HALF_UP)
     else:
@@ -56,7 +20,45 @@ def discount_amount_for(subtotal: Decimal, discount) -> Decimal:
     return max(Decimal("0"), min(amount, subtotal))
 
 
-def cart_totals(cart, discount=None) -> dict:
-    subtotal = cart_subtotal(cart)
-    discount_amount = discount_amount_for(subtotal, discount) if discount is not None else Decimal("0")
-    return {"subtotal": subtotal, "discount_amount": discount_amount, "total": subtotal - discount_amount}
+def order_total(order) -> Decimal:
+    """Recomputed from the order's lines and applied discounts; refreshes each AppliedDiscount.amount."""
+    lines_total = order.lines.aggregate(total=Sum("line_total"))["total"] or Decimal("0")
+    discount_total = Decimal("0")
+    for applied in order.applied_discounts.all():
+        amount = discount_amount_for(lines_total, applied)
+        if applied.amount != amount:
+            applied.amount = amount
+            applied.save(update_fields=["amount", "modified"])
+        discount_total += amount
+    return max(Decimal("0"), lines_total - discount_total)
+
+
+def discount_uses(discount) -> int:
+    """Non-cancelled orders that used the discount."""
+    return AppliedDiscount.objects.filter(discount=discount).exclude(order__fulfillment_status=Order.FulfillmentStatus.CANCELLED).count()
+
+
+def discount_status(discount, today=None) -> str:
+    today = today or timezone.localdate()
+    if not discount.is_active:
+        return "inactive"
+    if discount.valid_from and discount.valid_from > today:
+        return "scheduled"
+    if discount.valid_until and discount.valid_until < today:
+        return "expired"
+    return "active"
+
+
+def validate_discount(discount, member=None, today=None) -> str | None:
+    """None when ``discount`` can be used by ``member`` now, else a user-facing reason."""
+    if not discount.is_active:
+        return "This discount code is not active."
+    if not discount.is_within_validity(today):
+        return "This discount code is not valid today."
+    if discount.max_uses is not None and discount_uses(discount) >= discount.max_uses:
+        return "This discount code has been used the maximum number of times."
+    if discount.once_per_member and member is not None:
+        used = AppliedDiscount.objects.filter(discount=discount, order__purchaser=member).exclude(order__fulfillment_status=Order.FulfillmentStatus.CANCELLED).exists()
+        if used:
+            return "This member already used this discount code."
+    return None

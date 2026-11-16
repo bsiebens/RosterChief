@@ -1,254 +1,252 @@
-import datetime
-import uuid
+"""Push notifications. A shared app: every table lives in the public schema because devices, preferences and quiet hours belong to
+the *account* (club.User), which signs in to any number of clubs. A club only appears as an optional scope on a preference or a delivery."""
 
 from django.conf import settings
-from django.contrib.contenttypes.fields import GenericForeignKey
-from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import ValidationError
 from django.db import models
-from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from members.models import Member
-from rosterchief.base import ClubScopedModel, validate_club_scope
+from rosterchief.base import UUIDModel
+
+USER = settings.AUTH_USER_MODEL
 
 
-class NotificationCategory(models.TextChoices):
-    """What a notification is *about*: the unit a person switches on or off
-    (``NotificationPreference``). The value is stored and sent to the apps, the label is for people."""
-
+class Category(models.TextChoices):
     NEWS = "news", _("News")
-    EVENT = "event", _("New and changed events")
-    REMINDER = "reminder", _("Reminders to respond")
+    EVENT = "event", _("Events")
+    REMINDER = "reminder", _("Reminders")
     LINEUP = "lineup", _("Line-ups")
-    CREW = "crew", _("Referee and official duties")
+    CREW = "crew", _("Crew")
     FORM = "form", _("Forms")
-    SHOP = "shop", _("Shop orders")
-    COACH = "coach", _("Messages from coaches")
-    ADMIN = "admin", _("Club administration")
-    ANNOUNCEMENT = "announcement", _("Platform announcements")
-    GAME = "game", _("Live game updates")
-    GENERAL = "general", _("Other")
+    SHOP = "shop", _("Shop")
+    COACH = "coach", _("Coach")
+    ADMIN = "admin", _("Admin")
+    ANNOUNCEMENT = "announcement", _("Announcements")
+    GAME = "game", _("Game moments")
+    GENERAL = "general", _("General")
 
 
-class NotificationPriority(models.TextChoices):
+class Channel(models.TextChoices):
+    """What a user can switch on or off."""
+
+    PUSH = "push", _("Push")
+    EMAIL = "email", _("Email")
+
+
+class Priority(models.TextChoices):
     NORMAL = "normal", _("Normal")
-    #: Something people must not miss (a cancelled or same-day changed event): it is delivered
-    #: during a person's quiet hours too. Category switches still apply.
-    CRITICAL = "critical", _("Critical")
+    CRITICAL = "critical", _("Critical")  # bypasses quiet hours; category and master switches still apply
 
 
-class Notification(ClubScopedModel):
-    """One member's copy of a notification -- "this member should know about
-    X" -- built for news publishing first (see news.tasks.notify_news_published),
-    but `source` is generic on purpose: the whole point is reusing this for
-    other kinds of activity later without a new model each time.
+# --- in-app inbox -----------------------------------------------------------------------------------------------------
 
-    Always keyed to the Member it's *about*, even though actual delivery may
-    go to a parent/guardian's email instead of (or as well as) the member's
-    own -- see notifications.services.notify_members. That's what a future
-    in-app feed for this member would list, regardless of who was actually
-    emailed; `sent_to_emails` is the audit trail of who that was.
-    """
 
-    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="notifications", verbose_name=_("member"))
-    category = models.CharField(_("category"), max_length=16, choices=NotificationCategory.choices, default=NotificationCategory.GENERAL)
-    priority = models.CharField(_("priority"), max_length=8, choices=NotificationPriority.choices, default=NotificationPriority.NORMAL)
+class InboxNotification(UUIDModel):
+    """A message in a user's in-app inbox (the bell in the management app), for one club. Lives with the account like the
+    rest of this app; ``notifications.inbox`` creates and reads them."""
+
+    class Kind(models.TextChoices):
+        INFO = "info", _("Info")
+        SUCCESS = "success", _("Success")
+        WARNING = "warning", _("Warning")
+
+    user = models.ForeignKey(USER, on_delete=models.CASCADE, related_name="inbox_notifications", verbose_name=_("user"))
+    club = models.ForeignKey("club.Club", on_delete=models.CASCADE, related_name="+", verbose_name=_("club"))
+    kind = models.CharField(_("kind"), max_length=10, choices=Kind.choices, default=Kind.INFO)
     title = models.CharField(_("title"), max_length=255)
-    body = models.TextField(_("body"))
-    #: ``{language: {"title": ..., "body": ...}}`` for every language in settings.LANGUAGES,
-    #: filled by notify_members when the text is translatable. ``title``/``body`` above stay the
-    #: English rendering (what emails use). Empty on rows from before this existed.
-    translations = models.JSONField(_("translations"), default=dict, blank=True, editable=False)
-
-    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE, null=True, blank=True)
-    object_id = models.CharField(max_length=255, null=True, blank=True)  # noqa: DJ001 -- GenericForeignKey needs a real NULL, not "", for "no source"
-    source = GenericForeignKey("content_type", "object_id")
-
-    target_type = models.CharField(
-        max_length=32,
-        blank=True,
-        help_text=_('For notifications with no source object that still point at a place in the app (e.g. "calendar"): the native app opens that screen. Ignored when there is a source.'),
-    )
-
-    sent_at = models.DateTimeField(_("sent at"), null=True, blank=True)
-    sent_to_emails = models.JSONField(_("sent to"), default=list, blank=True, help_text=_("Every email address this actually went to -- the member's own, and/or a parent/guardian's. Empty means nobody reachable was found."))
-    read_at = models.DateTimeField(_("read at"), null=True, blank=True, help_text=_("Set once there's somewhere for a member to read this -- not used yet."))
+    body = models.TextField(_("body"), blank=True)
+    href = models.CharField(_("link"), max_length=500, blank=True, help_text=_("A path inside the management app, e.g. /members."))
+    read_at = models.DateTimeField(_("read at"), null=True, blank=True)
 
     class Meta:
-        verbose_name = _("notification")
-        verbose_name_plural = _("notifications")
+        verbose_name = _("inbox notification")
+        verbose_name_plural = _("inbox notifications")
         ordering = ["-created"]
-        indexes = [
-            models.Index(fields=["content_type", "object_id"]),
-            # The unread-count badge query runs on every management and mobile
-            # request via a global context processor/mixin -- see
-            # members.services.lookup/club.services.access's request-scoped
-            # caching of the surrounding lookups.
-            models.Index(fields=["club", "member", "read_at"]),
-        ]
+        indexes = [models.Index(fields=["user", "club", "-created"], name="inbox_user_club_created")]
 
     def __str__(self):
-        return f"{self.member} — {self.title}"
+        return f"{self.title} -> {self.user_id}"
 
-    def clean(self):
-        validate_club_scope(self, self.club_id, member_fields=("member",))
+
+# --- devices ----------------------------------------------------------------------------------------------------------
+
+
+class PushDevice(UUIDModel):
+    """One app install (iOS via APNs, Android via FCM). Belongs to the account, not to a club."""
+
+    class Platform(models.TextChoices):
+        IOS = "ios", _("iOS")
+        ANDROID = "android", _("Android")
+
+    class Environment(models.TextChoices):
+        PRODUCTION = "production", _("Production")
+        SANDBOX = "sandbox", _("Sandbox")  # the platform's own test environment (APNs sandbox host); not the control panel sandbox
+
+    user = models.ForeignKey(USER, on_delete=models.CASCADE, related_name="push_devices", verbose_name=_("user"))
+    installation_id = models.CharField(_("installation id"), max_length=200, unique=True)
+    platform = models.CharField(_("platform"), max_length=10, choices=Platform.choices)
+    environment = models.CharField(_("environment"), max_length=10, choices=Environment.choices, default=Environment.PRODUCTION)
+    push_token = models.TextField(_("push token"))
+    push_to_start_token = models.TextField(_("push-to-start token"), blank=True)
+    app_version = models.CharField(_("app version"), max_length=50, blank=True)
+    locale = models.CharField(_("locale"), max_length=20, blank=True)
+    enabled = models.BooleanField(_("enabled"), default=True, help_text=_("Switched off automatically when the provider reports the token as gone."))
+    disabled_at = models.DateTimeField(_("disabled at"), null=True, blank=True)
+    last_seen = models.DateTimeField(_("last seen"), auto_now=True)
+
+    class Meta:
+        verbose_name = _("push device")
+        verbose_name_plural = _("push devices")
+        ordering = ["-last_seen"]
+
+    def __str__(self):
+        return f"{self.get_platform_display()} {self.installation_id[:8]}"
 
     @property
-    def is_sent(self) -> bool:
-        return self.sent_at is not None
-
-    def text_for(self, language: str) -> dict:
-        """``{"title", "body"}`` in ``language``; the stored English text when that language
-        has no translation (older rows, or untranslated user-written content)."""
-        return self.translations.get(language) or {"title": self.title, "body": self.body}
+    def provider(self) -> str:
+        return "apns" if self.platform == self.Platform.IOS else "fcm"
 
 
-class NotificationDelivery(ClubScopedModel):
-    """One attempt trail for one send on one channel to one target -- "the native push of this
-    notification to that phone", "this email to that address". Written by the channels
-    (notifications.delivery_log), so there is a record of what went out, what failed and why,
-    instead of nothing. A transient failure (throttling, a server error, a network blip) stays
-    ``RETRYING`` with the ``payload`` kept, and the ``retry_failed_deliveries`` job tries again
-    with a growing delay; once it succeeds, is refused for good or runs out of attempts the
-    payload is dropped. Rows are purged after a retention period by the same job."""
+class WebPushSubscription(UUIDModel):
+    """A browser/PWA subscription (VAPID web push). Optionally tied to the club it was subscribed from."""
 
-    class Channel(models.TextChoices):
-        NATIVE = "native", _("Native push")
-        WEB = "web", _("Web push")
-        EMAIL = "email", _("Email")
-
-    class Status(models.TextChoices):
-        SENT = "sent", _("Sent")
-        RETRYING = "retrying", _("Waiting to retry")
-        HELD = "held", _("Held until quiet hours end")
-        FAILED = "failed", _("Failed")
-        DEAD = "dead", _("Target gone")
-
-    notification = models.ForeignKey(Notification, on_delete=models.SET_NULL, null=True, blank=True, related_name="deliveries", verbose_name=_("notification"))
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("account"))
-    channel = models.CharField(_("channel"), max_length=16, choices=Channel.choices)
-    #: What was sent to: a native install id, a web push subscription id, an email address.
-    target = models.CharField(_("target"), max_length=255)
-    status = models.CharField(_("status"), max_length=16, choices=Status.choices)
-    #: Who actually carried it: apns, fcm, webpush, email (monitoring groups by this).
-    provider = models.CharField(_("provider"), max_length=16, blank=True)
-    #: How long the provider took to answer, for monitoring.
-    duration_ms = models.PositiveIntegerField(_("duration (ms)"), null=True, blank=True)
-    attempts = models.PositiveSmallIntegerField(_("attempts"), default=1)
-    last_error = models.CharField(_("last error"), max_length=500, blank=True)
-    next_attempt_at = models.DateTimeField(_("next attempt"), null=True, blank=True)
-    #: What a retry needs to send again (channel-specific JSON); kept only while RETRYING.
-    payload = models.JSONField(_("payload"), default=dict, blank=True)
+    user = models.ForeignKey(USER, on_delete=models.CASCADE, related_name="web_push_subscriptions", verbose_name=_("user"))
+    club = models.ForeignKey("club.Club", on_delete=models.CASCADE, null=True, blank=True, related_name="+", verbose_name=_("club"))
+    endpoint = models.TextField(_("endpoint"), unique=True)
+    p256dh = models.CharField(_("p256dh key"), max_length=255)
+    auth = models.CharField(_("auth secret"), max_length=255)
+    user_agent = models.CharField(_("user agent"), max_length=500, blank=True)
+    last_seen = models.DateTimeField(_("last seen"), auto_now=True)
 
     class Meta:
-        verbose_name = _("notification delivery")
-        verbose_name_plural = _("notification deliveries")
-        ordering = ["-created"]
-        indexes = [
-            models.Index(fields=["status", "next_attempt_at"]),
-            models.Index(fields=["notification"]),
-            models.Index(fields=["club", "created"]),
-            models.Index(fields=["created", "provider", "status"]),
-        ]
+        verbose_name = _("web push subscription")
+        verbose_name_plural = _("web push subscriptions")
+        ordering = ["-last_seen"]
 
     def __str__(self):
-        return f"{self.get_channel_display()} → {self.target} ({self.get_status_display()})"
+        return f"web push {self.endpoint[:30]}"
 
 
-class NotificationPreference(models.Model):
-    """One switch: "this account does (not) want ``category`` on ``channel``", for one club or --
-    with ``club`` empty -- for every club. Absence of a row means *on*: nothing is stored until
-    someone changes a default. A club-specific row beats the all-clubs row. The in-app inbox is
-    never switchable: the notification is always written, a preference only decides whether it
-    also buzzes a phone or lands in a mailbox."""
+# --- user preferences -------------------------------------------------------------------------------------------------
 
-    class Channel(models.TextChoices):
-        PUSH = "push", _("Push (app and browser)")
-        EMAIL = "email", _("Email")
 
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notification_preferences", verbose_name=_("account"))
-    club = models.ForeignKey("club.Club", on_delete=models.CASCADE, null=True, blank=True, related_name="notification_preferences", verbose_name=_("club"))
-    #: Set for a switch about one person only (a parent's "everything for Lou, only results for Sam"):
-    #: it applies to notifications *about* that member and needs a club. Beats the club-wide row.
-    member = models.ForeignKey("members.Member", on_delete=models.CASCADE, null=True, blank=True, related_name="+", verbose_name=_("member"))
-    category = models.CharField(_("category"), max_length=16, choices=NotificationCategory.choices)
-    channel = models.CharField(_("channel"), max_length=8, choices=Channel.choices)
+class NotificationPreference(UUIDModel):
+    """Category x channel switch. ``club`` empty = all clubs. Most specific wins (club row, then all-clubs row, then default on)."""
+
+    user = models.ForeignKey(USER, on_delete=models.CASCADE, related_name="notification_preferences", verbose_name=_("user"))
+    club = models.ForeignKey("club.Club", on_delete=models.CASCADE, null=True, blank=True, related_name="+", verbose_name=_("club"))
+    category = models.CharField(_("category"), max_length=20, choices=Category.choices)
+    channel = models.CharField(_("channel"), max_length=10, choices=Channel.choices)
     enabled = models.BooleanField(_("enabled"), default=True)
-    modified = models.DateTimeField(_("modified"), auto_now=True)
 
     class Meta:
         verbose_name = _("notification preference")
         verbose_name_plural = _("notification preferences")
         constraints = [
-            # Three scopes, each unique on its own (NULLs never collide in a plain unique constraint).
-            models.UniqueConstraint(fields=["user", "category", "channel"], condition=models.Q(club__isnull=True, member__isnull=True), name="unique_global_notification_preference"),
-            models.UniqueConstraint(fields=["user", "club", "category", "channel"], condition=models.Q(club__isnull=False, member__isnull=True), name="unique_club_notification_preference"),
-            models.UniqueConstraint(fields=["user", "club", "member", "category", "channel"], condition=models.Q(member__isnull=False), name="unique_member_notification_preference"),
-            models.CheckConstraint(condition=models.Q(member__isnull=True) | models.Q(club__isnull=False), name="member_preference_needs_club"),
+            models.UniqueConstraint(fields=["user", "club", "category", "channel"], name="unique_preference_per_scope", nulls_distinct=False),
         ]
 
     def __str__(self):
-        return f"{self.user} {self.category}/{self.channel}={'on' if self.enabled else 'off'}"
+        return f"{self.user_id} {self.category}/{self.channel}={'on' if self.enabled else 'off'}"
 
 
-class NotificationMasterSwitch(models.Model):
-    """The "All push" / "All emails" master toggle for one scope (same three scopes as
-    ``NotificationPreference``: one person in a club, one club, every club). ``enabled`` False means
-    *nothing* on that channel in that scope, whatever the per-category switches say; True (or no row)
-    leaves the per-category switches to decide. The most specific scope's row wins."""
+class MasterSwitch(UUIDModel):
+    """'All push' / 'All email', on top of the categories. ``club`` empty = all clubs."""
 
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notification_master_switches", verbose_name=_("account"))
-    club = models.ForeignKey("club.Club", on_delete=models.CASCADE, null=True, blank=True, related_name="notification_master_switches", verbose_name=_("club"))
-    member = models.ForeignKey("members.Member", on_delete=models.CASCADE, null=True, blank=True, related_name="+", verbose_name=_("member"))
-    channel = models.CharField(_("channel"), max_length=8, choices=NotificationPreference.Channel.choices)
+    user = models.ForeignKey(USER, on_delete=models.CASCADE, related_name="notification_master_switches", verbose_name=_("user"))
+    club = models.ForeignKey("club.Club", on_delete=models.CASCADE, null=True, blank=True, related_name="+", verbose_name=_("club"))
+    channel = models.CharField(_("channel"), max_length=10, choices=Channel.choices)
     enabled = models.BooleanField(_("enabled"), default=True)
-    modified = models.DateTimeField(_("modified"), auto_now=True)
 
     class Meta:
-        verbose_name = _("notification master switch")
-        verbose_name_plural = _("notification master switches")
+        verbose_name = _("master switch")
+        verbose_name_plural = _("master switches")
         constraints = [
-            models.UniqueConstraint(fields=["user", "channel"], condition=models.Q(club__isnull=True, member__isnull=True), name="unique_global_notification_master"),
-            models.UniqueConstraint(fields=["user", "club", "channel"], condition=models.Q(club__isnull=False, member__isnull=True), name="unique_club_notification_master"),
-            models.UniqueConstraint(fields=["user", "club", "member", "channel"], condition=models.Q(member__isnull=False), name="unique_member_notification_master"),
-            models.CheckConstraint(condition=models.Q(member__isnull=True) | models.Q(club__isnull=False), name="member_master_needs_club"),
+            models.UniqueConstraint(fields=["user", "club", "channel"], name="unique_master_switch_per_scope", nulls_distinct=False),
         ]
 
-    def __str__(self):
-        return f"{self.user} all {self.channel}={'on' if self.enabled else 'off'}"
+
+class UserNotificationSettings(UUIDModel):
+    """Account-wide settings that are not a switch."""
+
+    class EmailMode(models.TextChoices):
+        ALWAYS = "always", _("Always send email")
+        UNLESS_APP = "unless_app", _("Only email me when the app can't notify me")
+
+    user = models.OneToOneField(USER, on_delete=models.CASCADE, related_name="notification_settings", verbose_name=_("user"))
+    email_mode = models.CharField(_("email mode"), max_length=12, choices=EmailMode.choices, default=EmailMode.ALWAYS)
+
+    class Meta:
+        verbose_name = _("notification settings")
+        verbose_name_plural = _("notification settings")
 
 
-class QuietHours(models.Model):
-    """A daily window in which an account's *pushes* are held until it ends (``HELD`` deliveries),
-    or dropped for categories that go stale (live games). ``Critical`` notifications and email are
-    not affected. ``start`` > ``end`` crosses midnight (22:00 -> 07:00); ``start`` == ``end`` is no window."""
+class QuietHours(UUIDModel):
+    """One daily window per account. Pushes inside it are held until it ends (or dropped for categories that must not arrive late)."""
 
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="quiet_hours", verbose_name=_("account"))
+    user = models.OneToOneField(USER, on_delete=models.CASCADE, related_name="quiet_hours", verbose_name=_("user"))
     enabled = models.BooleanField(_("enabled"), default=True)
-    start = models.TimeField(_("from"), default=datetime.time(22, 0))
-    end = models.TimeField(_("until"), default=datetime.time(7, 0))
-    #: IANA name; the account's own, since the server serves several time zones.
-    timezone = models.CharField(_("time zone"), max_length=64, default="Europe/Brussels")
-    modified = models.DateTimeField(_("modified"), auto_now=True)
+    start = models.TimeField(_("start"), help_text=_("Local time in the chosen time zone. The window may cross midnight."))
+    end = models.TimeField(_("end"))
+    timezone = models.CharField(_("time zone"), max_length=64, default="Europe/Brussels", help_text=_("IANA name, e.g. Europe/Brussels."))
 
     class Meta:
         verbose_name = _("quiet hours")
         verbose_name_plural = _("quiet hours")
 
-    def __str__(self):
-        return f"{self.user}: {self.start:%H:%M}-{self.end:%H:%M} ({'on' if self.enabled else 'off'})"
+    def clean(self):
+        if self.start == self.end:
+            raise ValidationError({"end": _("The window can't be empty.")})
 
 
-class OutboxEntry(models.Model):
-    """Work still to dispatch, written in the same transaction as what it is about (a batch of
-    notifications, a game's new moments), so a restart between commit and delivery cannot lose it.
-    Worked off right after commit on a background thread, and by the ``process_outbox`` job for
-    anything left behind. At-least-once: an entry is claimed atomically, but a crash mid-dispatch
-    can repeat the sends that had not been marked yet."""
+# --- delivery ---------------------------------------------------------------------------------------------------------
 
-    class Kind(models.TextChoices):
-        NOTIFICATIONS = "notifications", _("Notifications")
-        GAME_MOMENTS = "game_moments", _("Game moments")
+
+class NotificationDelivery(UUIDModel):
+    """One attempt-chain to one target: the log monitoring reads, and the retry queue."""
+
+    class Status(models.TextChoices):
+        SENT = "sent", _("Sent")
+        RETRYING = "retrying", _("Retrying")
+        HELD = "held", _("Held (quiet hours)")
+        FAILED = "failed", _("Failed")
+        DEAD = "dead", _("Target gone")
+
+    class DeliveryChannel(models.TextChoices):
+        NATIVE = "native", _("Native app")
+        WEB = "web", _("Web push")
+        EMAIL = "email", _("Email")
+
+    class Provider(models.TextChoices):
+        APNS = "apns", _("APNs (iOS)")
+        FCM = "fcm", _("FCM (Android)")
+        WEBPUSH = "webpush", _("Web push")
+        EMAIL = "email", _("Email")
+
+    user = models.ForeignKey(USER, on_delete=models.SET_NULL, null=True, blank=True, related_name="notification_deliveries", verbose_name=_("user"))
+    club = models.ForeignKey("club.Club", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("club"))
+    notification_id = models.UUIDField(_("notification id"), null=True, blank=True, db_index=True)
+    category = models.CharField(_("category"), max_length=20, choices=Category.choices, default=Category.GENERAL)
+    title = models.CharField(_("title"), max_length=255, blank=True)
+    channel = models.CharField(_("channel"), max_length=10, choices=DeliveryChannel.choices)
+    provider = models.CharField(_("provider"), max_length=10, choices=Provider.choices)
+    target = models.CharField(_("target"), max_length=500, help_text=_("Installation id, endpoint or email address."))
+    status = models.CharField(_("status"), max_length=10, choices=Status.choices, db_index=True)
+    duration_ms = models.PositiveIntegerField(_("duration (ms)"), null=True, blank=True)
+    attempts = models.PositiveSmallIntegerField(_("attempts"), default=1)
+    last_error = models.CharField(_("last error"), max_length=500, blank=True)
+    next_attempt_at = models.DateTimeField(_("next attempt"), null=True, blank=True, db_index=True)
+    payload = models.JSONField(_("payload"), null=True, blank=True, help_text=_("Kept only while the delivery is retrying or held."))
+
+    class Meta:
+        verbose_name = _("notification delivery")
+        verbose_name_plural = _("notification deliveries")
+        ordering = ["-created"]
+        indexes = [models.Index(fields=["provider", "status", "created"])]
+
+
+class OutboxEntry(UUIDModel):
+    """Work to do, written in the same transaction as whatever caused it and processed by a Celery task (at-least-once)."""
 
     class Status(models.TextChoices):
         PENDING = "pending", _("Pending")
@@ -256,142 +254,134 @@ class OutboxEntry(models.Model):
         DONE = "done", _("Done")
         FAILED = "failed", _("Failed")
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    kind = models.CharField(_("kind"), max_length=16, choices=Kind.choices)
+    kind = models.CharField(_("kind"), max_length=30, default="notification")
     payload = models.JSONField(_("payload"), default=dict)
-    status = models.CharField(_("status"), max_length=12, choices=Status.choices, default=Status.PENDING)
+    status = models.CharField(_("status"), max_length=12, choices=Status.choices, default=Status.PENDING, db_index=True)
     attempts = models.PositiveSmallIntegerField(_("attempts"), default=0)
-    available_at = models.DateTimeField(_("available at"), default=timezone.now)
+    available_at = models.DateTimeField(_("available at"), db_index=True)
     locked_at = models.DateTimeField(_("locked at"), null=True, blank=True)
     last_error = models.CharField(_("last error"), max_length=500, blank=True)
-    created = models.DateTimeField(_("created"), auto_now_add=True)
-    modified = models.DateTimeField(_("modified"), auto_now=True)
 
     class Meta:
         verbose_name = _("outbox entry")
         verbose_name_plural = _("outbox entries")
-        ordering = ["created"]
-        indexes = [models.Index(fields=["status", "available_at"])]
+        ordering = ["available_at"]
+
+
+# --- configuration, alerts, sandbox -----------------------------------------------------------------------------------
+
+
+class PushSettings(models.Model):
+    """The editable, operational push configuration. A single row (pk=1); credentials stay in the environment."""
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    apns_enabled = models.BooleanField(_("APNs (iOS) enabled"), default=True)
+    fcm_enabled = models.BooleanField(_("FCM (Android) enabled"), default=True)
+    webpush_enabled = models.BooleanField(_("Web push enabled"), default=True)
+    retry_delays_minutes = models.JSONField(_("retry delays (minutes)"), default=list, help_text=_("Wait before retry 1, 2, ... A delivery is given up after the last one."))
+    outbox_max_attempts = models.PositiveSmallIntegerField(_("outbox attempts"), default=5)
+    sent_retention_days = models.PositiveSmallIntegerField(_("keep sent log rows (days)"), default=14)
+    failed_retention_days = models.PositiveSmallIntegerField(_("keep failed log rows (days)"), default=60)
+    stale_device_days = models.PositiveSmallIntegerField(_("stale device after (days)"), default=60)
+    disabled_device_retention_days = models.PositiveSmallIntegerField(_("delete disabled devices after (days)"), default=30)
+    unseen_device_retention_days = models.PositiveSmallIntegerField(_("delete unseen devices after (days)"), default=180)
+    degraded_below_percent = models.PositiveSmallIntegerField(_("degraded below (% success)"), default=95)
+    down_below_percent = models.PositiveSmallIntegerField(_("down below (% success)"), default=50)
+    health_min_requests = models.PositiveSmallIntegerField(_("minimum requests to judge health"), default=5)
+    alert_emails = models.TextField(_("alert recipients"), blank=True, help_text=_("Comma separated. Empty = the platform admins."))
+
+    class Meta:
+        verbose_name = _("push settings")
+        verbose_name_plural = _("push settings")
 
     def __str__(self):
-        return f"{self.kind} ({self.status})"
+        return "Push settings"
+
+    DEFAULT_RETRY_DELAYS = (1, 5, 30)
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        if not self.retry_delays_minutes:
+            self.retry_delays_minutes = list(self.DEFAULT_RETRY_DELAYS)
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get(cls) -> PushSettings:
+        obj, _created = cls.objects.get_or_create(pk=1, defaults={"retry_delays_minutes": list(cls.DEFAULT_RETRY_DELAYS)})
+        return obj
 
 
-class PushAlert(models.Model):
-    """An open (or resolved) problem the platform admins were told about -- a provider down, a stuck
-    retry queue, a configuration mismatch -- so one outage is one alert, a reminder every few hours
-    while it lasts, and a recovery notice, not an email per check. ``key`` is e.g. ``provider:apns``."""
+class PushAlert(UUIDModel):
+    """An open or resolved problem the platform admins are told about (one per outage, keyed e.g. ``provider:apns``)."""
 
-    key = models.CharField(_("key"), max_length=64, unique=True)
-    severity = models.CharField(_("severity"), max_length=16)
+    key = models.CharField(_("key"), max_length=100, db_index=True)
     message = models.CharField(_("message"), max_length=500)
-    first_seen = models.DateTimeField(_("first seen"), default=timezone.now)
-    last_notified_at = models.DateTimeField(_("last notified"), null=True, blank=True)
-    notifications_sent = models.PositiveSmallIntegerField(_("alerts sent"), default=0)
-    resolved_at = models.DateTimeField(_("resolved"), null=True, blank=True)
+    first_seen = models.DateTimeField(_("first seen"), auto_now_add=True)
+    resolved_at = models.DateTimeField(_("resolved at"), null=True, blank=True)
+    notifications_sent = models.PositiveSmallIntegerField(_("emails sent"), default=0)
+    last_notified_at = models.DateTimeField(_("last emailed"), null=True, blank=True)
 
     class Meta:
         verbose_name = _("push alert")
         verbose_name_plural = _("push alerts")
-        ordering = ["-first_seen"]
-
-    def __str__(self):
-        return f"{self.key} ({'open' if self.is_open else 'resolved'})"
-
-    @property
-    def is_open(self) -> bool:
-        return self.resolved_at is None
-
-
-class ProviderConfigState(models.Model):
-    """Whether a push provider's credentials were set the last time the health check looked (``apns``, ``fcm``,
-    ``webpush``). A provider that was never configured is not a problem -- many installs run without one --
-    but one that *was* and no longer is (a key dropped from the environment, a bad deploy) is: ``lost_at``
-    marks that moment and keeps the alert open until the credentials are back."""
-
-    provider = models.CharField(_("provider"), max_length=16, unique=True)
-    configured = models.BooleanField(_("configured"), default=False)
-    lost_at = models.DateTimeField(_("lost at"), null=True, blank=True)
-    changed_at = models.DateTimeField(_("changed at"), default=timezone.now)
-
-    class Meta:
-        verbose_name = _("provider configuration state")
-        verbose_name_plural = _("provider configuration states")
-
-    def __str__(self):
-        return f"{self.provider}: {'configured' if self.configured else 'not configured'}"
-
-
-class SandboxMessage(models.Model):
-    """A push or email the platform *would* have sent, captured instead of handed to Apple, Google, a
-    browser push service or the mail server (``settings.PUSH_SANDBOX``). Holds the exact request the real
-    provider would have received, plus what the sandbox's failure scenario made of it, so the sending side
-    -- payloads, headers, policy, retries, the delivery log, monitoring and alerts -- can be tested
-    without devices. Nothing here says anything about the receiving end."""
-
-    class Outcome(models.TextChoices):
-        DELIVERED = "delivered", _("Delivered")
-        THROTTLED = "throttled", _("Throttled (429)")
-        DEAD = "dead", _("Target gone")
-        ERROR = "error", _("Refused")
-        TIMEOUT = "timeout", _("Timed out")
-
-    created = models.DateTimeField(_("created"), auto_now_add=True, db_index=True)
-    channel = models.CharField(_("channel"), max_length=16, choices=NotificationDelivery.Channel.choices)
-    provider = models.CharField(_("provider"), max_length=16)
-    target = models.CharField(_("target"), max_length=255)
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("account"))
-    club = models.ForeignKey("club.Club", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("club"))
-    title = models.CharField(_("title"), max_length=255, blank=True)
-    body = models.TextField(_("body"), blank=True)
-    #: The request body exactly as the provider would have got it (APNs JSON, the FCM message, the web push payload, the mail's parts).
-    request = models.JSONField(_("request"), default=dict, blank=True)
-    #: The HTTP headers it would have carried (apns-expiration, apns-priority, collapse id, ...), without secrets.
-    headers = models.JSONField(_("headers"), default=dict, blank=True)
-    outcome = models.CharField(_("outcome"), max_length=12, choices=Outcome.choices, default=Outcome.DELIVERED)
-
-    class Meta:
-        verbose_name = _("sandbox message")
-        verbose_name_plural = _("sandbox messages")
-        ordering = ["-created"]
-
-    def __str__(self):
-        return f"{self.provider} → {self.target} ({self.outcome})"
+        ordering = ["first_seen"]
 
 
 class SandboxState(models.Model):
-    """The sandbox switch and scenario, one row (``pk=1``), editable from the control panel so the
-    platform can be flipped between *live* and *sandbox* without a deploy -- in production too. ``enabled``
-    ``None`` follows ``settings.PUSH_SANDBOX`` (the default, off). ``expires_at`` switches it back to live
-    on its own, so a forgotten sandbox cannot silently swallow every push."""
+    """The control panel's sending sandbox: while on, every provider is replaced by a fake one that captures instead of sending."""
 
-    enabled = models.BooleanField(_("sandbox on"), null=True, blank=True, default=None, help_text=_("Empty follows the PUSH_SANDBOX setting."))
-    scenario = models.CharField(_("scenario"), max_length=12, default="ok")
+    class Scenario(models.TextChoices):
+        OK = "ok", _("Delivered")
+        THROTTLE = "throttle", _("Throttled (429, retried)")
+        DEAD = "dead", _("Target gone")
+        ERROR = "error", _("Refused (no retry)")
+        TIMEOUT = "timeout", _("Timeout (retried)")
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    enabled = models.BooleanField(_("enabled"), null=True, blank=True, help_text=_("Empty follows the PUSH_SANDBOX setting."))
+    scenario = models.CharField(_("scenario"), max_length=10, choices=Scenario.choices, default=Scenario.OK)
     latency_ms = models.PositiveIntegerField(_("latency (ms)"), default=0)
     expires_at = models.DateTimeField(_("switches back to live at"), null=True, blank=True)
-    changed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("changed by"))
-    changed_at = models.DateTimeField(_("changed at"), auto_now=True)
 
     class Meta:
         verbose_name = _("sandbox state")
         verbose_name_plural = _("sandbox state")
 
     def __str__(self):
-        return f"sandbox {self.enabled} ({self.scenario})"
+        return "Sandbox state"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
 
 
-class SandboxEvent(models.Model):
-    """Append-only audit trail of who switched the sandbox or its scenario, and when -- shown on the control panel."""
+class SandboxMessage(UUIDModel):
+    """A message the fake provider captured instead of sending. Kept for 7 days."""
 
-    at = models.DateTimeField(_("at"), auto_now_add=True)
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("account"))
-    action = models.CharField(_("action"), max_length=32)
-    detail = models.CharField(_("detail"), max_length=255, blank=True)
+    channel = models.CharField(_("channel"), max_length=10)
+    provider = models.CharField(_("provider"), max_length=10)
+    user = models.ForeignKey(USER, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("user"))
+    club = models.ForeignKey("club.Club", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("club"))
+    target = models.CharField(_("target"), max_length=500)
+    title = models.CharField(_("title"), max_length=255, blank=True)
+    body = models.TextField(_("body"), blank=True)
+    request = models.JSONField(_("request"), default=dict, help_text=_("What would have been sent (credentials never included)."))
+    outcome = models.CharField(_("outcome"), max_length=10)
+
+    class Meta:
+        verbose_name = _("sandbox message")
+        verbose_name_plural = _("sandbox messages")
+        ordering = ["-created"]
+
+
+class SandboxEvent(UUIDModel):
+    """Audit trail of switching the sandbox on and off, and of changing its scenario."""
+
+    user = models.ForeignKey(USER, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("user"))
+    action = models.CharField(_("action"), max_length=30)
+    detail = models.CharField(_("detail"), max_length=300, blank=True)
 
     class Meta:
         verbose_name = _("sandbox event")
         verbose_name_plural = _("sandbox events")
-        ordering = ["-at"]
-
-    def __str__(self):
-        return f"{self.at:%Y-%m-%d %H:%M} {self.action}"
+        ordering = ["-created"]

@@ -1,8 +1,5 @@
-from django.apps import AppConfig
+from django.contrib.admin.apps import AdminConfig
 
 
-class RosterchiefConfig(AppConfig):
-    name = "rosterchief"
-
-    def ready(self):
-        from . import checks  # noqa: F401  (registers the SECRET_KEY system check)
+class RosterAdminConfig(AdminConfig):
+    default_site = "rosterchief.admin.RosterAdminSite"

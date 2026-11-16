@@ -1,328 +1,263 @@
+"""Club shop (one schema per club, so no club FK anywhere). Ported from the old site's ``shop`` app minus carts.
+Membership products also carry the registration pricing (season, early bird, registrant tiers) used by public registration."""
+
+import secrets
+
+from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator
 from django.db import IntegrityError, models, transaction
 from django.db.models import Q, UniqueConstraint
+from django.db.models.functions import Lower
 from django.utils import timezone
+from django.utils.text import get_valid_filename, slugify
 from django.utils.translation import gettext_lazy as _
 
-from authentication.models import User
-from club.models import Season
-from club.tenancy import require_current_club
 from members.models import Member
-from rosterchief.base import ClubScopedModel, UUIDModel, validate_club_scope
-from teams.models import Position, Team
+from rosterchief.base import UUIDModel
+from teams.models import Team
 
 
 class DiscountType(models.TextChoices):
-    """Shared by ``Product`` (early-bird), ``Discount`` and ``AppliedDiscount`` (its
-    snapshot on an order) — one discount vocabulary, not three copies of it."""
+    """Shared by ``Discount`` and its snapshot on an order (``AppliedDiscount``)."""
 
     PERCENTAGE = "percentage", _("Percentage")
     FIXED_AMOUNT = "fixed_amount", _("Fixed amount")
 
 
 class ProductionStatus(models.TextChoices):
-    """Shared by ``OrderLine`` (where it's actually tracked) and ``Order``
-    (its own rollup across every merchandise line -- see Order.production_status's
-    own docstring for how the two relate). Independent from payment_status/
-    fulfillment_status: whether the club has sent an item to a manufacturer
-    and gotten it back says nothing about whether the member has paid for or
-    collected it."""
+    """Merchandise order lines: to order -> ordered from the supplier (in a ProductionBatch) -> received. ``Order`` rolls its
+    lines up into the same three values."""
 
-    PENDING = "pending", _("Pending")
-    IN_PRODUCTION = "in_production", _("In production")
+    PENDING = "pending", _("To order")
+    ORDERED = "ordered", _("Ordered from supplier")
     RECEIVED = "received", _("Received")
 
 
 def product_image_path(instance, filename):
-    return f"clubs/{instance.club.slug}/shop/products/{filename}"
+    return f"shop/products/{instance.pk}/{filename}"
 
 
-def next_scoped_number(instance, code):
-    """Next per-club sequential number for the current year: ``<code>-<year>-<seq>``."""
-    prefix = f"{code}-{timezone.now().year}-"
-    model = type(instance)
-    sequences = [int(suffix) for number in model.objects.filter(club=instance.club, number__startswith=prefix).values_list("number", flat=True) if (suffix := number.removeprefix(prefix)).isdigit()]
-    return f"{prefix}{max(sequences, default=0) + 1:05d}"
+def product_gallery_path(instance, filename):
+    return f"shop/products/{instance.product_id}/images/{filename}"
+
+
+def product_attachment_path(instance, filename):
+    """A random prefix keeps two uploads with the same name apart; the original name is kept (made filesystem-safe) for recognition."""
+    return f"shop/products/{instance.product_id}/files/{secrets.token_hex(6)}-{get_valid_filename(filename)}"[:255]
+
+
+def next_number(kind: str) -> str:
+    """The next number for a document type from the shop's numbering patterns (``shop.services.numbering``); needs the creating transaction."""
+    from shop.services import numbering
+
+    return numbering.allocate(kind)
 
 
 def save_with_number(instance, save):
-    """Assign a unique per-club number (retrying on collision) then save.
-
-    Relies on the model's ``generate_number()`` and its ``(club, number)``
-    unique constraint as the source of truth.
-    """
-    if instance.club_id is None:
-        instance.club = require_current_club()
+    """Assign the next number and save, both in one transaction (a failed save burns no number), retrying on a collision; relies on
+    the model's ``generate_number()`` and the unique constraint on ``number``."""
     if instance.number:
         return save()
     for attempt in range(5):
-        instance.number = instance.generate_number()
         try:
             with transaction.atomic():
+                instance.number = instance.generate_number()
                 return save()
         except IntegrityError:
+            instance.number = ""
             if attempt == 4:
                 raise
 
 
-class ProductCategory(ClubScopedModel):
-    """A club-defined grouping for the shop's product grid ("Merch", "Fees",
-    "Season tickets", ...) -- purely organisational, no behaviour of its own.
-    Deleting one un-categorises its products (SET_NULL on Product.category)
-    rather than blocking the delete or taking products down with it.
+def unique_slug(instance, value: str) -> str:
+    """A slug from ``value`` no other row of the model has: ``-2``, ``-3``, ... on collision."""
+    max_length = instance._meta.get_field("slug").max_length
+    base = slugify(value)[:max_length] or "item"
+    others = type(instance).objects.exclude(pk=instance.pk)
+    slug, suffix = base, 2
+    while others.filter(slug=slug).exists():
+        tail = f"-{suffix}"
+        slug = f"{base[: max_length - len(tail)]}{tail}"
+        suffix += 1
+    return slug
 
-    Two rows per club are the exception: the system "Player"/"Volunteer"
-    categories (``registration_kind`` set), seeded for every club by
-    ``shop.signals.create_registration_categories`` and protected from
-    deletion by that same module's ``prevent_deleting_system_category`` --
-    see registration.forms.RegistrationEntryRowForm.clean, which uses
-    registration_kind to check a chosen product_variant actually matches
-    what the entry says it's registering as."""
 
-    class RegistrationKind(models.TextChoices):
-        #: Same string values as registration.models.RegistrationDetails.
-        #: EntryKind -- compared directly, not cross-imported (registration
-        #: already depends on shop.models, not the other way around).
+class ProductCategory(UUIDModel):
+    class SystemKey(models.TextChoices):
         PLAYER = "player", _("Player")
         VOLUNTEER = "volunteer", _("Volunteer")
 
     name = models.CharField(_("name"), max_length=255)
-    registration_kind = models.CharField(_("registration kind"), max_length=20, choices=RegistrationKind.choices, blank=True, help_text=_("System categories only (Player/Volunteer) -- leave blank for an ordinary category."))
+    #: Set for the two fixed categories every club has ("Player" and "Volunteer"): they cannot be renamed or deleted, and decide on which
+    #: registration option a membership product is offered. ``None`` for the club's own categories.
+    system_key = models.CharField(_("system category"), max_length=20, choices=SystemKey.choices, null=True, blank=True, unique=True, editable=False)
 
     class Meta:
         verbose_name = _("product category")
         verbose_name_plural = _("product categories")
         ordering = ["name"]
-        constraints = [UniqueConstraint(fields=["club", "name"], name="unique_category_name_per_club")]
+        constraints = [UniqueConstraint(Lower("name"), name="unique_shop_category_name")]
 
     def __str__(self):
         return self.name
 
+    @property
+    def is_system(self) -> bool:
+        return self.system_key is not None
 
-class Product(ClubScopedModel):
+
+class Product(UUIDModel):
     class ProductType(models.TextChoices):
         MEMBERSHIP = "membership", _("Membership")
         EVENT_FEE = "event_fee", _("Event fee")
         MERCHANDISE = "merchandise", _("Merchandise")
-
-    name = models.CharField(_("name"), max_length=255)
-    slug = models.SlugField(_("slug"), max_length=255, blank=True)
-    category = models.ForeignKey(ProductCategory, on_delete=models.SET_NULL, related_name="products", verbose_name=_("category"), blank=True, null=True)
-    description = models.TextField(_("description"), blank=True)
-    image = models.ImageField(_("photo"), upload_to=product_image_path, blank=True)
-    price = models.DecimalField(_("price"), max_digits=10, decimal_places=2, default=0)
-
-    # MERCHANDISE -- most products staff creates through the ordinary "New
-    # product" flow are regular shop items; MEMBERSHIP/EVENT_FEE are
-    # deliberate choices for registration pricing (registration.services.
-    # pricing), and MEMBERSHIP also hides a product from the member-facing
-    # shop entirely (mobile.views.ShopHomeView/ShopProductDetailView), so
-    # neither should be what a new product silently defaults to.
-    product_type = models.CharField(_("product type"), max_length=255, choices=ProductType.choices, default=ProductType.MERCHANDISE)
-    season = models.ForeignKey(Season, on_delete=models.PROTECT, related_name="products", verbose_name=_("season"), blank=True, null=True)
-
-    is_active = models.BooleanField(_("is active?"), default=True)
-    is_public = models.BooleanField(_("is public?"), default=True, help_text=_("Non-public products are only visible to staff members for adding on to an order later on."))
-    staff_role = models.ForeignKey(Position, on_delete=models.PROTECT, related_name="staff_products", verbose_name=_("staff role"), blank=True, null=True, limit_choices_to={"staff_position": True})
-
-    #: Off by default -- most products (dues, event fees, plain merch) have
-    #: nothing to personalize. Team gear (jerseys, warm-ups, ...) is the case
-    #: this exists for: a member picks it and optionally fills in a number
-    #: and/or the name to print on it (CartItem/OrderLine's own
-    #: personalization_number/personalization_name), carried through to the
-    #: manufacturer order export (management.shop_export).
-    personalization_enabled = models.BooleanField(_("personalization enabled?"), default=False, help_text=_("Lets a member enter a number and/or a name to print on this item when ordering, e.g. for a jersey."))
-
-    #: Bought in bulk instead of made to order: orders draw down a counted stock
-    #: (InventoryMovement) rather than going through production, and the product
-    #: -- or a variant of it -- can't be ordered once its stock is gone. See
-    #: shop.services.inventory.
-    inventory_managed = models.BooleanField(
-        _("inventory managed?"), default=False, help_text=_("Bought in bulk and kept in stock. Orders take items from stock and skip production; an item with no stock left can't be ordered until new stock is taken in.")
-    )
-
-    early_bird_discount_enabled = models.BooleanField(_("early bird discount enabled?"), default=False)
-    early_bird_discount_deadline = models.DateField(_("early bird discount deadline"), blank=True, null=True)
-    early_bird_discount_type = models.CharField(_("early bird discount type"), max_length=255, choices=DiscountType.choices, default=DiscountType.PERCENTAGE, blank=True)
-    early_bird_discount_amount = models.DecimalField(_("early bird discount amount"), max_digits=10, decimal_places=2, default=0, blank=True)
+        #: The single hidden product behind the free-text lines of a charge invoice (a fine, a late fee); never offered in the shop.
+        CHARGE = "charge", _("Charge")
 
     class RegistrantDiscountScope(models.TextChoices):
-        #: The best qualifying tier applies to every entry registered through
-        #: this product in the batch -- the original, still-default behaviour.
-        PER_PERSON = "per_person", _("Per person (applies to every qualifying registration)")
-        #: The best qualifying tier is subtracted once from the batch, not
-        #: once per entry -- registration.services.pricing.price_entries
-        #: applies it to whichever qualifying entry it reaches first, the
-        #: rest get none.
-        PER_ORDER = "per_order", _("Per order (subtracted once)")
+        PER_PERSON = "per_person", _("Per person")
+        PER_ORDER = "per_order", _("Once per registration")
 
-    registrant_discount_scope = models.CharField(
-        _("multi-registrant discount scope"),
-        max_length=20,
-        choices=RegistrantDiscountScope.choices,
-        default=RegistrantDiscountScope.PER_PERSON,
-        blank=True,
-        help_text=_("Whether a registrant-discount-tier threshold below applies to every qualifying registration, or is subtracted once from the whole batch."),
-    )
+    name = models.CharField(_("name"), max_length=255)
+    slug = models.SlugField(_("slug"), max_length=255, unique=True, blank=True)
+    category = models.ForeignKey(ProductCategory, on_delete=models.SET_NULL, related_name="products", verbose_name=_("category"), blank=True, null=True)
+    description = models.TextField(_("description"), blank=True)
+    price = models.DecimalField(_("price"), max_digits=10, decimal_places=2, default=0)
+    #: VAT contained in the price, in percent (the price is what the member pays). 0 means none. Shown on the invoice when the club has a VAT number.
+    vat_rate = models.DecimalField(_("VAT rate (%)"), max_digits=5, decimal_places=2, default=0)
+    product_type = models.CharField(_("product type"), max_length=255, choices=ProductType.choices, default=ProductType.MERCHANDISE)
 
-    slug_source = "name"
+    is_active = models.BooleanField(_("is active?"), default=True)
+    is_public = models.BooleanField(_("is public?"), default=True, help_text=_("Non-public products are only visible to staff for adding to an order."))
+    personalization_enabled = models.BooleanField(_("personalization enabled?"), default=False)
+    #: Membership products only (public registration): the season the fee is for, a discount that only applies when the fee is paid on
+    #: or before a deadline, and how a discount for registering several people at once (the tiers) is applied.
+    season = models.ForeignKey("events.Season", on_delete=models.SET_NULL, related_name="membership_products", null=True, blank=True, verbose_name=_("season"))
+    early_bird_discount_type = models.CharField(_("early-bird discount type"), max_length=20, choices=DiscountType.choices, blank=True, default="")
+    early_bird_discount_amount = models.DecimalField(_("early-bird discount"), max_digits=10, decimal_places=2, default=0)
+    early_bird_deadline = models.DateField(_("early-bird deadline"), null=True, blank=True)
+    registrant_discount_scope = models.CharField(_("registrant discount scope"), max_length=20, choices=RegistrantDiscountScope.choices, default=RegistrantDiscountScope.PER_PERSON)
+    #: Membership products in the Player category only: registrants for this product are placed in this team (a variant's own team wins). On the
+    #: public join page the team is fixed to it; staff can change it while reviewing the registration.
+    team = models.ForeignKey("teams.Team", on_delete=models.SET_NULL, related_name="+", null=True, blank=True, verbose_name=_("team"))
+    #: Bought in bulk and counted (InventoryMovement) instead of made to order: orders draw down stock and skip production.
+    inventory_managed = models.BooleanField(_("inventory managed?"), default=False)
+    ordering_windows = models.JSONField(_("ordering windows"), default=list, blank=True)
 
     class Meta:
         verbose_name = _("product")
         verbose_name_plural = _("products")
         ordering = ["name"]
-        constraints = [
-            UniqueConstraint(fields=["club", "slug"], name="unique_product_slug_per_club"),
-        ]
 
     def __str__(self):
         return self.name
 
+    @property
+    def main_image(self):
+        """The picture shown in lists: the main one, else the first. Reads ``images.all()`` so a prefetch is honoured."""
+        images = list(self.images.all())
+        return next((img for img in images if img.is_main), None) or (images[0] if images else None)
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = unique_slug(self, self.name)
+        super().save(*args, **kwargs)
+
     def clean(self):
-        validate_club_scope(self, self.club_id, same_club_fields=("season", "staff_role", "category"))
         if self.inventory_managed and self.product_type != self.ProductType.MERCHANDISE:
             raise ValidationError({"inventory_managed": _("Only merchandise can be inventory managed.")})
+        if self.product_type != self.ProductType.MEMBERSHIP and (self.season_id or self.early_bird_discount_type):
+            raise ValidationError(_("Season and early-bird discount are only for membership products."))
+        if self.early_bird_discount_type and (self.early_bird_deadline is None or self.early_bird_discount_amount <= 0):
+            raise ValidationError({"early_bird_deadline": _("An early-bird discount needs an amount and a deadline.")})
+
+
+class ProductRegistrantDiscountTier(UUIDModel):
+    """Registering at least ``min_registrants`` people at once earns this discount on the membership product (see ``Product.registrant_discount_scope``)."""
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="registrant_tiers", verbose_name=_("product"))
+    min_registrants = models.PositiveSmallIntegerField(_("minimum registrants"))
+    discount_type = models.CharField(_("discount type"), max_length=20, choices=DiscountType.choices, default=DiscountType.FIXED_AMOUNT)
+    discount_amount = models.DecimalField(_("discount"), max_digits=10, decimal_places=2)
+
+    class Meta:
+        verbose_name = _("registrant discount tier")
+        verbose_name_plural = _("registrant discount tiers")
+        ordering = ["min_registrants"]
+        constraints = [UniqueConstraint(fields=["product", "min_registrants"], name="unique_registrant_tier_per_product")]
+
+    def __str__(self):
+        return f"{self.product} - {self.min_registrants}+"
+
+
+class ProductImage(UUIDModel):
+    """One picture of a product's gallery; exactly one is the main picture (the one shown in lists), the rest follow in ``ordering``."""
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="images", verbose_name=_("product"))
+    image = models.ImageField(_("image"), upload_to=product_gallery_path, max_length=255)
+    alt = models.CharField(_("description"), max_length=255, blank=True)
+    is_main = models.BooleanField(_("main picture"), default=False)
+    ordering = models.PositiveSmallIntegerField(_("ordering"), default=0)
+
+    class Meta:
+        verbose_name = _("product image")
+        verbose_name_plural = _("product images")
+        ordering = ["ordering", "created"]
+        constraints = [UniqueConstraint(fields=["product"], condition=Q(is_main=True), name="unique_main_image_per_product")]
+
+    def __str__(self):
+        return f"{self.product} - picture"
+
+
+class ProductAttachment(UUIDModel):
+    """A file belonging to a product, e.g. a size guide: served from the same public media as the pictures."""
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="attachments", verbose_name=_("product"))
+    file = models.FileField(_("file"), upload_to=product_attachment_path, max_length=255)
+    title = models.CharField(_("title"), max_length=255)
+    name = models.CharField(_("file name"), max_length=255, blank=True)
+    size = models.PositiveIntegerField(_("size (bytes)"), default=0)
+    content_type = models.CharField(_("content type"), max_length=100, blank=True)
+
+    class Meta:
+        verbose_name = _("product attachment")
+        verbose_name_plural = _("product attachments")
+        ordering = ["created"]
+
+    def __str__(self):
+        return self.title
 
 
 class ProductVariant(UUIDModel):
-    """One orderable option of a Product -- "Small", "Medium — Red", whatever
-    label the club actually sells by. Deliberately a single free-text label
-    rather than separate size/colour axes with a generated combination
-    matrix: a club merch shop needs "the same jersey in different sizes",
-    not a full options/variants system, and a label an admin types once
-    covers "size", "colour", or "size and colour together" equally well
-    without extra UI for axes nobody asked for.
-
-    No club FK of its own -- scoped via ``product.club``, same shape as
-    CartItem/OrderLine below (plain UUIDModel, club implied by a parent FK).
-    """
+    """One orderable option of a product ("Small", "Medium - Red"): a single free-text label."""
 
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="variants", verbose_name=_("product"))
-    name = models.CharField(_("name"), max_length=255, help_text=_("e.g. “Small”, “Medium — Red”, “XL”."))
-    #: Overrides Product.price when set; leave blank when every variant of a
-    #: product costs the same (most of the time) so there's nothing to keep
-    #: in sync with the product's own price.
+    name = models.CharField(_("name"), max_length=255)
     price = models.DecimalField(_("price"), max_digits=10, decimal_places=2, blank=True, null=True, help_text=_("Leave blank to use the product's own price."))
     is_active = models.BooleanField(_("is active?"), default=True)
     ordering = models.PositiveSmallIntegerField(_("ordering"), default=0)
+    #: Overrides the product's team for registrations (same rules as ``Product.team``).
+    team = models.ForeignKey("teams.Team", on_delete=models.SET_NULL, related_name="+", null=True, blank=True, verbose_name=_("team"))
 
     class Meta:
         verbose_name = _("product variant")
         verbose_name_plural = _("product variants")
         ordering = ["ordering", "name"]
-        constraints = [
-            UniqueConstraint(fields=["product", "name"], name="unique_variant_name_per_product"),
-        ]
+        constraints = [UniqueConstraint(fields=["product", "name"], name="unique_variant_name_per_product")]
 
     def __str__(self):
         return self.full_name
 
     @property
     def full_name(self):
-        """"Product — Option", or just the product's name for the option that *is* the product
-        (shop.services.variants.ensure_default_variant)."""
-        return self.product.name if self.name == self.product.name else f"{self.product.name} — {self.name}"
+        return self.product.name if self.name == self.product.name else f"{self.product.name} - {self.name}"
 
     @property
     def effective_price(self):
         return self.price if self.price is not None else self.product.price
 
 
-class ProductRegistrantDiscountTier(UUIDModel):
-    """One step of a staircase discount for registering several people
-    through the same product in one go (e.g. siblings) -- "3+ people get
-    10% off, 5+ get 15% off". Consumed by registration.services.pricing,
-    not the regular shop checkout -- unlike Product.early_bird_discount_*
-    (a single, always-applies-once-enabled condition, evaluated at payment
-    time since it can't be known at registration time), a registrant count
-    is known immediately at submission time, so the *best* tier a batch
-    qualifies for is applied straight onto the resulting ClubMembership.
-    fee_amount then and there -- see that module's own docstring.
-
-    No club FK of its own -- scoped via ``product.club``, same shape as
-    ProductVariant above."""
-
-    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="registrant_discount_tiers", verbose_name=_("product"))
-    min_registrants = models.PositiveSmallIntegerField(_("minimum registrants"), validators=[MinValueValidator(2)], help_text=_("Applies once a single registration includes at least this many people registering through this product."))
-    discount_type = models.CharField(_("discount type"), max_length=255, choices=DiscountType.choices, default=DiscountType.PERCENTAGE)
-    discount_amount = models.DecimalField(_("discount amount"), max_digits=10, decimal_places=2)
-
-    class Meta:
-        verbose_name = _("registrant discount tier")
-        verbose_name_plural = _("registrant discount tiers")
-        ordering = ["product", "min_registrants"]
-        constraints = [
-            UniqueConstraint(fields=["product", "min_registrants"], name="unique_tier_threshold_per_product"),
-        ]
-
-    def __str__(self):
-        return f"{self.product} — {self.min_registrants}+ ({self.get_discount_type_display()} {self.discount_amount})"
-
-
-class Cart(ClubScopedModel):
-    class CartStatus(models.TextChoices):
-        OPEN = "open", _("Open")
-        CHECKED_OUT = "checked_out", _("Checked out")
-        ABANDONED = "abandoned", _("Abandoned")
-
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="carts", verbose_name=_("user"))
-    status = models.CharField(_("status"), max_length=255, choices=CartStatus.choices, default=CartStatus.OPEN)
-
-    class Meta:
-        verbose_name = _("cart")
-        verbose_name_plural = _("carts")
-        constraints = [
-            # At most one open cart per user per club (CartStatus.OPEN == "open").
-            UniqueConstraint(fields=["club", "user"], condition=Q(status="open"), name="unique_open_cart_per_user_per_club"),
-        ]
-
-    def __str__(self):
-        return f"{self.user} - {self.status}"
-
-
-class CartItem(UUIDModel):
-    cart = models.ForeignKey(Cart, on_delete=models.CASCADE, related_name="items", verbose_name=_("cart"))
-    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="cart_items", verbose_name=_("product"))
-    variant = models.ForeignKey(ProductVariant, on_delete=models.PROTECT, related_name="cart_items", verbose_name=_("variant"), blank=True, null=True)
-
-    quantity = models.PositiveSmallIntegerField(_("quantity"), default=1)
-    unit_price = models.DecimalField(_("unit price"), max_digits=10, decimal_places=2)
-
-    beneficiary = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="cart_items", verbose_name=_("beneficiary"), blank=True, null=True)
-    team = models.ForeignKey(Team, on_delete=models.PROTECT, related_name="cart_items", verbose_name=_("team"), blank=True, null=True)
-    #: Free-text per-item customization -- what to print on a jersey. Only
-    #: collected when Product.personalization_enabled is on for this item's
-    #: product (both blank otherwise); two fields since a jersey needs both a
-    #: number and a name, independently optional (a club might print one
-    #: without the other).
-    personalization_number = models.CharField(_("number"), max_length=20, blank=True, help_text=_("Optional -- e.g. the player number to print on this item."))
-    personalization_name = models.CharField(_("name"), max_length=100, blank=True, help_text=_("Optional -- e.g. the name to print on this item."))
-
-    class Meta:
-        verbose_name = _("cart item")
-        verbose_name_plural = _("cart items")
-        constraints = [
-            UniqueConstraint(fields=["cart", "product", "variant", "beneficiary", "personalization_number", "personalization_name"], name="unique_product_per_cart_per_beneficiary"),
-        ]
-
-    def __str__(self):
-        suffix = f" ({self.variant.name})" if self.variant_id else ""
-        return f"{self.product}{suffix} - {self.quantity}x"
-
-    def clean(self):
-        club_id = self.cart.club_id if self.cart_id else None
-        validate_club_scope(self, club_id, same_club_fields=("product", "team"), member_fields=("beneficiary",))
-        if self.variant_id and self.product_id and self.variant.product_id != self.product_id:
-            raise ValidationError({"variant": _("Must be a variant of this product.")})
-
-
-class Order(ClubScopedModel):
-    #: Independent from FulfillmentStatus on purpose -- "paid" and "picked up"
-    #: are two different questions (see FulfillmentStatus's own docstring for
-    #: why a single combined status field couldn't answer both at once
-    #: without a member-comment.md-worthy JOIN against Payment every time
-    #: something needed to know just one of them).
+class Order(UUIDModel):
     class PaymentStatus(models.TextChoices):
         PENDING = "pending", _("Pending")
         PARTIALLY_PAID = "partially_paid", _("Partially paid")
@@ -333,156 +268,131 @@ class Order(ClubScopedModel):
         NOT_READY = "not_ready", _("Not ready")
         READY_FOR_PICKUP = "ready_for_pickup", _("Ready for pickup")
         DELIVERED = "delivered", _("Delivered")
-        #: A fulfillment outcome, not a payment one -- an order can be
-        #: cancelled before or after being paid (payment_status keeps
-        #: tracking independently; a cancelled-but-unrefunded order is a
-        #: real, valid combination, not a contradiction).
         CANCELLED = "cancelled", _("Cancelled")
 
-    class MemberStatus(models.TextChoices):
-        """The single, member-facing progress status shown on the mobile app
-        (Order.member_status) -- folds fulfillment_status and
-        production_status into the one sequence a member actually cares
-        about, instead of showing two independent pills."""
-
-        NOT_READY = "not_ready", _("Not ready")
-        IN_PRODUCTION = "in_production", _("In production")
-        READY_FOR_PICKUP = "ready_for_pickup", _("Ready for pickup")
-        COMPLETED = "completed", _("Completed")
-        CANCELLED = "cancelled", _("Cancelled")
+    class Kind(models.TextChoices):
+        SHOP = "shop", _("Shop order")
+        #: An invoice staff write for an amount that is not a shop item (a fine, a late fee). A draft until it is sent: no invoice yet.
+        CHARGE = "charge", _("Charge")
 
     number = models.CharField(_("number"), max_length=255, blank=True)
-    purchaser = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="orders", verbose_name=_("purchaser"))
+    kind = models.CharField(_("kind"), max_length=20, choices=Kind.choices, default=Kind.SHOP, db_index=True)
+    #: Charges only: the due date the invoice will get when it is sent.
+    due_date = models.DateField(_("due date"), blank=True, null=True)
+    #: Charges only: a message printed on the invoice and repeated in the email (the reason, a match, a reference). ``notes`` stays internal.
+    invoice_text = models.TextField(_("text on the invoice"), blank=True, max_length=2000)
+    #: Charges only: how to pay this invoice, replacing the club's standard payment instructions (empty: use those).
+    payment_instructions = models.TextField(_("payment instructions"), blank=True, max_length=2000)
+    purchaser = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="shop_orders", verbose_name=_("purchaser"))
     payment_status = models.CharField(_("payment status"), max_length=255, choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
     fulfillment_status = models.CharField(_("fulfillment status"), max_length=255, choices=FulfillmentStatus.choices, default=FulfillmentStatus.NOT_READY)
-    #: Rolled up from this order's own merchandise OrderLines (shop.services.
-    #: production.sync_production_status) -- PENDING while every merchandise
-    #: line is, IN_PRODUCTION once any line has been exported to a
-    #: manufacturer or received but not all have, RECEIVED once every one
-    #: has. Meaningless (left at its PENDING default, never displayed -- see
-    #: has_production_lines) for an order with no merchandise lines at all.
+    #: Rolled up from the merchandise lines (PENDING while all are, RECEIVED once all are, ORDERED in between).
     production_status = models.CharField(_("production status"), max_length=255, choices=ProductionStatus.choices, default=ProductionStatus.PENDING)
     total = models.DecimalField(_("total"), max_digits=10, decimal_places=2)
-    #: Set (optionally) the moment an order is marked ready for pickup --
-    #: shown to the member on their own order and in the notification that
-    #: told them so (shop.services.notifications.dispatch_order_ready_for_pickup_notification).
-    pickup_instructions = models.TextField(_("pickup instructions"), blank=True, help_text=_('Optional -- shown to the member, e.g. "ask for it at the clubhouse desk".'))
-
-    # `created`/`modified` come from TimeStampedModel — declaring them here as well
-    # would clash with the abstract base.
+    pickup_instructions = models.TextField(_("pickup instructions"), blank=True)
+    notes = models.TextField(_("notes"), blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="+", verbose_name=_("created by"), blank=True, null=True)
 
     class Meta:
         verbose_name = _("order")
         verbose_name_plural = _("orders")
         ordering = ["-created"]
-        constraints = [
-            UniqueConstraint(fields=["club", "number"], name="unique_order_number_per_club"),
-        ]
-        indexes = [
-            # Matches Meta.ordering above, scoped to the tenant every list view
-            # already filters on -- OrderListView's own default ordering.
-            models.Index(fields=["club", "-created"]),
-        ]
+        constraints = [UniqueConstraint(fields=["number"], name="unique_shop_order_number")]
 
     def __str__(self):
         return self.number
 
-    def clean(self):
-        validate_club_scope(self, self.club_id, member_fields=("purchaser",))
-
     @property
     def is_closed(self) -> bool:
-        """Delivered *and* paid -- genuinely finished, nothing left to
-        collect or hand over. A delivered-but-unpaid order is deliberately
-        still "open": someone still needs to collect payment for it. Drives
-        OrderListView's own default "hide closed" filter and
-        shop.services.stats.order_kpis' open_orders count -- both read this
-        exact property so the KPI strip and the list underneath it never
-        disagree."""
+        """Delivered and paid: genuinely finished."""
         return self.fulfillment_status == self.FulfillmentStatus.DELIVERED and self.payment_status == self.PaymentStatus.PAID
 
     @property
     def has_production_lines(self) -> bool:
-        """Whether production_status means anything for this order at all --
-        gates its display everywhere (order_list.html/order_detail.html),
-        since a dues/membership-only order has nothing to send a
-        manufacturer and its production_status is just an unused default."""
-        return self.order_items.filter(product__product_type=Product.ProductType.MERCHANDISE).exists()
-
-    @property
-    def member_status(self) -> Order.MemberStatus:
-        """Consolidated status for the mobile app -- see MemberStatus. An
-        order sitting on fulfillment_status NOT_READY because its jersey is
-        still being made looks the same as one nobody's touched yet unless
-        production_status is folded in here too; once fulfillment_status
-        moves past NOT_READY, production_status no longer matters (the
-        member cares that it's ready/delivered, not the manufacturing step
-        that got it there)."""
-        if self.fulfillment_status == self.FulfillmentStatus.CANCELLED:
-            return self.MemberStatus.CANCELLED
-        if self.fulfillment_status == self.FulfillmentStatus.DELIVERED:
-            return self.MemberStatus.COMPLETED
-        if self.fulfillment_status == self.FulfillmentStatus.READY_FOR_PICKUP:
-            return self.MemberStatus.READY_FOR_PICKUP
-        if self.has_production_lines and self.production_status == ProductionStatus.IN_PRODUCTION:
-            return self.MemberStatus.IN_PRODUCTION
-        return self.MemberStatus.NOT_READY
+        return self.lines.filter(product__product_type=Product.ProductType.MERCHANDISE, product__inventory_managed=False).exists()
 
     def generate_number(self):
-        """Next per-club order number for the current year: ``ORD-<year>-<seq>``."""
-        return next_scoped_number(self, "ORD")
+        return next_number("order")
 
     def save(self, *args, **kwargs):
         return save_with_number(self, lambda: super(Order, self).save(*args, **kwargs))
 
 
-class OrderLine(UUIDModel):
-    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="order_items", verbose_name=_("order"))
-    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="order_items", verbose_name=_("product"))
-    variant = models.ForeignKey(ProductVariant, on_delete=models.PROTECT, related_name="order_items", verbose_name=_("variant"), blank=True, null=True)
+class ProductionBatch(UUIDModel):
+    """A group of order lines sent to a supplier in one go (exported as CSV)."""
 
+    class Status(models.TextChoices):
+        DRAFT = "draft", _("Draft")
+        ORDERED = "ordered", _("Ordered")
+        PARTIALLY_RECEIVED = "partially_received", _("Partially received")
+        RECEIVED = "received", _("Received")
+
+    number = models.CharField(_("number"), max_length=255, blank=True)
+    reference = models.CharField(_("reference"), max_length=255, blank=True)
+    supplier = models.CharField(_("supplier"), max_length=255, blank=True)
+    note = models.TextField(_("note"), blank=True)
+    status = models.CharField(_("status"), max_length=30, choices=Status.choices, default=Status.ORDERED)
+    ordered_at = models.DateTimeField(_("ordered at"), default=timezone.now)
+    received_at = models.DateTimeField(_("received at"), blank=True, null=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="+", verbose_name=_("created by"), blank=True, null=True)
+
+    class Meta:
+        verbose_name = _("production batch")
+        verbose_name_plural = _("production batches")
+        ordering = ["-ordered_at"]
+        constraints = [UniqueConstraint(fields=["number"], name="unique_shop_batch_number")]
+
+    def __str__(self):
+        return self.number
+
+    def generate_number(self):
+        return next_number("batch")
+
+    def save(self, *args, **kwargs):
+        return save_with_number(self, lambda: super(ProductionBatch, self).save(*args, **kwargs))
+
+
+class OrderLine(UUIDModel):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="lines", verbose_name=_("order"))
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="order_lines", verbose_name=_("product"))
+    variant = models.ForeignKey(ProductVariant, on_delete=models.PROTECT, related_name="order_lines", verbose_name=_("variant"), blank=True, null=True)
+
+    #: Charges: what the line is for. Replaces the product's name on the invoice.
+    description = models.CharField(_("description"), max_length=255, blank=True)
     quantity = models.PositiveSmallIntegerField(_("quantity"), default=1)
     unit_price = models.DecimalField(_("unit price"), max_digits=10, decimal_places=2)
-
-    beneficiary = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="order_items", verbose_name=_("beneficiary"), blank=True, null=True)
-    team = models.ForeignKey(Team, on_delete=models.PROTECT, related_name="order_items", verbose_name=_("team"), blank=True, null=True)
     line_total = models.DecimalField(_("line total"), max_digits=10, decimal_places=2)
-    #: Carried over from CartItem.personalization_number/_name at checkout --
-    #: see CartItem's own docstring.
-    personalization_number = models.CharField(_("number"), max_length=20, blank=True, help_text=_("Optional -- e.g. the player number to print on this item."))
-    personalization_name = models.CharField(_("name"), max_length=100, blank=True, help_text=_("Optional -- e.g. the name to print on this item."))
-    #: Only meaningful for a merchandise line -- see ProductionStatus's own
-    #: docstring. Flipped to IN_PRODUCTION by management.views.
-    #: OrderProductionExportView's export, or by hand via OrderLineEditForm
-    #: (e.g. an order phoned in to the manufacturer outside this app, or
-    #: correcting a mistake); RECEIVED is always a manual step -- nothing
-    #: here knows when a physical delivery actually arrives.
+    #: The product's VAT rate when the line was made (percent, contained in the price); fixed so later changes never touch issued invoices.
+    vat_rate = models.DecimalField(_("VAT rate (%)"), max_digits=5, decimal_places=2, default=0)
+
+    beneficiary = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="shop_order_lines", verbose_name=_("beneficiary"), blank=True, null=True)
+    team = models.ForeignKey(Team, on_delete=models.PROTECT, related_name="shop_order_lines", verbose_name=_("team"), blank=True, null=True)
+    personalization_number = models.CharField(_("number"), max_length=20, blank=True)
+    personalization_name = models.CharField(_("name"), max_length=100, blank=True)
+
     production_status = models.CharField(_("production status"), max_length=255, choices=ProductionStatus.choices, default=ProductionStatus.PENDING)
+    production_batch = models.ForeignKey(ProductionBatch, on_delete=models.SET_NULL, related_name="lines", verbose_name=_("production batch"), blank=True, null=True)
+    #: Units received so far from the supplier (partial deliveries); the line is RECEIVED once it reaches ``quantity``.
+    received_quantity = models.PositiveSmallIntegerField(_("received quantity"), default=0)
+    ordered_at = models.DateTimeField(_("ordered at"), blank=True, null=True)
+    received_at = models.DateTimeField(_("received at"), blank=True, null=True)
 
     class Meta:
         verbose_name = _("order line")
         verbose_name_plural = _("order lines")
+        ordering = ["created"]
 
     def __str__(self):
         suffix = f" ({self.variant.name})" if self.variant_id else ""
         return f"{self.product}{suffix} - {self.quantity}x"
 
     def clean(self):
-        club_id = self.order.club_id if self.order_id else None
-        validate_club_scope(self, club_id, same_club_fields=("product", "team"), member_fields=("beneficiary",))
         if self.variant_id and self.product_id and self.variant.product_id != self.product_id:
             raise ValidationError({"variant": _("Must be a variant of this product.")})
 
 
 class InventoryMovement(UUIDModel):
-    """One change to the stock of an inventory-managed product (or one of its
-    variants): the on-hand count is the sum of ``quantity`` over a product's
-    movements (shop.services.inventory.stock_levels), so the history is the
-    count -- there's no separate counter to drift out of step with it.
-
-    No club FK of its own -- scoped via ``product.club``, same shape as
-    ProductVariant/OrderLine. ``variant`` is null for a product without
-    variants."""
+    """One signed change to the stock of an inventory-managed product/variant; on hand = sum of ``quantity``."""
 
     class Reason(models.TextChoices):
         RECEIVED = "received", _("Stock taken in")
@@ -492,12 +402,11 @@ class InventoryMovement(UUIDModel):
 
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="inventory_movements", verbose_name=_("product"))
     variant = models.ForeignKey(ProductVariant, on_delete=models.PROTECT, related_name="inventory_movements", verbose_name=_("variant"), blank=True, null=True)
-    #: Signed: positive adds to stock, negative takes from it.
     quantity = models.IntegerField(_("quantity"))
     reason = models.CharField(_("reason"), max_length=20, choices=Reason.choices)
     note = models.CharField(_("note"), max_length=255, blank=True)
     order = models.ForeignKey(Order, on_delete=models.SET_NULL, related_name="inventory_movements", verbose_name=_("order"), blank=True, null=True)
-    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, related_name="+", verbose_name=_("created by"), blank=True, null=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="+", verbose_name=_("created by"), blank=True, null=True)
 
     class Meta:
         verbose_name = _("inventory movement")
@@ -509,46 +418,25 @@ class InventoryMovement(UUIDModel):
         suffix = f" ({self.variant.name})" if self.variant_id else ""
         return f"{self.product}{suffix}: {self.quantity:+d}"
 
-    def clean(self):
-        club_id = self.product.club_id if self.product_id else None
-        validate_club_scope(self, club_id, same_club_fields=("order",))
-        if self.variant_id and self.product_id and self.variant.product_id != self.product_id:
-            raise ValidationError({"variant": _("Must be a variant of this product.")})
 
-
-class Discount(ClubScopedModel):
+class Discount(UUIDModel):
     name = models.CharField(_("name"), max_length=255)
-    slug = models.SlugField(_("slug"), max_length=255, blank=True)
+    slug = models.SlugField(_("slug"), max_length=255, unique=True, blank=True)
     description = models.TextField(_("description"), blank=True)
-
-    #: What a member types in at checkout -- always compared uppercased (see
-    #: save()) so "summer10"/"SUMMER10" match the same discount regardless of
-    #: how either side happened to type it.
-    code = models.CharField(_("code"), max_length=50, help_text=_("What members type in at checkout, e.g. SUMMER10. Not case-sensitive."))
-
+    #: Always stored uppercased; compared case-insensitively.
+    code = models.CharField(_("code"), max_length=50, unique=True)
     discount_type = models.CharField(_("discount type"), max_length=255, choices=DiscountType.choices, default=DiscountType.PERCENTAGE)
     discount_amount = models.DecimalField(_("discount amount"), max_digits=10, decimal_places=2, default=0)
-
     is_active = models.BooleanField(_("is active?"), default=True)
-
-    #: Optional validity window, both days inclusive (club-local dates).
-    valid_from = models.DateField(_("valid from"), blank=True, null=True, help_text=_("Optional -- the first day the code can be used."))
-    valid_until = models.DateField(_("valid until"), blank=True, null=True, help_text=_("Optional -- the last day the code can be used."))
-    #: Counted over orders that used the code and weren't cancelled -- see
-    #: shop.services.checkout.discount_uses.
-    max_uses = models.PositiveIntegerField(_("maximum uses"), blank=True, null=True, help_text=_("Optional -- how many orders in total can use this code. Cancelled orders don't count."))
-    once_per_member = models.BooleanField(_("once per member?"), default=True, help_text=_("Each member can use this code on one order only."))
-
-    slug_source = "name"
+    valid_from = models.DateField(_("valid from"), blank=True, null=True)
+    valid_until = models.DateField(_("valid until"), blank=True, null=True)
+    max_uses = models.PositiveIntegerField(_("maximum uses"), blank=True, null=True)
+    once_per_member = models.BooleanField(_("once per member?"), default=True)
 
     class Meta:
-        verbose_name = _("order discount type")
-        verbose_name_plural = _("order discount types")
+        verbose_name = _("order discount")
+        verbose_name_plural = _("order discounts")
         ordering = ["name"]
-        constraints = [
-            UniqueConstraint(fields=["club", "slug"], name="unique_order_discount_type_slug_per_club"),
-            UniqueConstraint(fields=["club", "code"], name="unique_discount_code_per_club"),
-        ]
 
     def __str__(self):
         return self.name
@@ -559,6 +447,8 @@ class Discount(ClubScopedModel):
 
     def save(self, *args, **kwargs):
         self.code = self.code.upper().strip()
+        if not self.slug:
+            self.slug = unique_slug(self, self.name)
         super().save(*args, **kwargs)
 
     def is_within_validity(self, today=None) -> bool:
@@ -569,70 +459,45 @@ class Discount(ClubScopedModel):
 class AppliedDiscount(UUIDModel):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="applied_discounts", verbose_name=_("order"))
     discount = models.ForeignKey(Discount, on_delete=models.PROTECT, related_name="applied_discounts", verbose_name=_("discount"))
-
-    #: A snapshot of the discount's own terms when it was applied: for a
-    #: PERCENTAGE discount ``discount_amount`` is the *rate* (10 = 10%), not
-    #: euros -- ``amount`` below is the euro value actually deducted.
+    #: Snapshot of the terms when applied: for a percentage ``discount_amount`` is the rate, ``amount`` the money deducted.
     discount_type = models.CharField(_("discount type"), max_length=255, choices=DiscountType.choices, default=DiscountType.PERCENTAGE)
-    discount_amount = models.DecimalField(_("discount amount"), max_digits=10, decimal_places=2, help_text=_("The discount's rate (for a percentage) or its fixed euro amount, as it was when applied."))
-    #: The euro amount this discount takes off the order. Set at checkout and
-    #: re-derived from discount_type/discount_amount whenever the order's
-    #: lines change (shop.services.pricing.order_total) -- a percentage keeps
-    #: meaning a percentage of whatever the lines now add up to.
+    discount_amount = models.DecimalField(_("discount amount"), max_digits=10, decimal_places=2)
     amount = models.DecimalField(_("amount deducted"), max_digits=10, decimal_places=2, default=0)
     description = models.TextField(_("description"), blank=True)
-
-    applied_by = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="applied_discounts", verbose_name=_("applied by"), blank=True, null=True)
+    applied_by = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="shop_applied_discounts", verbose_name=_("applied by"), blank=True, null=True)
 
     class Meta:
         verbose_name = _("applied discount")
         verbose_name_plural = _("applied discounts")
-        constraints = [
-            UniqueConstraint(fields=["order", "discount"], name="unique_discount_per_order"),
-        ]
+        constraints = [UniqueConstraint(fields=["order", "discount"], name="unique_discount_per_order")]
 
     def __str__(self):
         suffix = "%" if self.discount_type == DiscountType.PERCENTAGE else ""
         return f"{self.discount} - {self.discount_amount}{suffix}"
 
-    def clean(self):
-        club_id = self.order.club_id if self.order_id else None
-        validate_club_scope(self, club_id, same_club_fields=("discount",), member_fields=("applied_by",))
 
-
-class Voucher(ClubScopedModel):
-    """A prepaid credit for a fixed amount, redeemable in part or in full
-    against one or more orders' Payments (Payment.voucher) -- consumed_amount
-    tracks how much of it has been used so far, never reset or recomputed
-    from Payments directly (shop.services.payments.record_payment/
-    PaymentDeleteView are the only writers, keeping the two in lock-step
-    instead of ever re-deriving one from the other)."""
+class Voucher(UUIDModel):
+    """Prepaid credit, redeemable in parts against orders (Payment.voucher) or manually (VoucherConsumption).
+    ``consumed_amount`` is only changed by the voucher services, under a row lock."""
 
     number = models.CharField(_("number"), max_length=255, blank=True)
-    #: Optional -- who this credit was issued to, for the management list to
-    #: search/filter by. Doesn't restrict which order it can be redeemed
-    #: against (any order in the club); it's a record of provenance, not an
-    #: ownership lock.
-    issued_to = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="vouchers", verbose_name=_("issued to"), blank=True, null=True)
+    issued_to = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="shop_vouchers", verbose_name=_("issued to"), blank=True, null=True)
     amount = models.DecimalField(_("amount"), max_digits=10, decimal_places=2)
     consumed_amount = models.DecimalField(_("consumed amount"), max_digits=10, decimal_places=2, default=0)
     expiry_date = models.DateField(_("expiry date"))
-    is_active = models.BooleanField(_("is active?"), default=True, help_text=_("Turn off to void a voucher before its expiry date, e.g. if it was issued by mistake."))
+    is_active = models.BooleanField(_("is active?"), default=True)
     notes = models.TextField(_("notes"), blank=True)
 
     class Meta:
         verbose_name = _("voucher")
         verbose_name_plural = _("vouchers")
         ordering = ["-created"]
-        constraints = [
-            UniqueConstraint(fields=["club", "number"], name="unique_voucher_number_per_club"),
-        ]
+        constraints = [UniqueConstraint(fields=["number"], name="unique_shop_voucher_number")]
 
     def __str__(self):
         return self.number
 
     def clean(self):
-        validate_club_scope(self, self.club_id, member_fields=("issued_to",))
         if self.consumed_amount > self.amount:
             raise ValidationError({"consumed_amount": _("Cannot exceed the voucher's own amount.")})
 
@@ -649,28 +514,19 @@ class Voucher(ClubScopedModel):
         return self.is_active and not self.is_expired and self.available_amount > 0
 
     def generate_number(self):
-        """Next per-club voucher number for the current year: ``VCH-<year>-<seq>``."""
-        return next_scoped_number(self, "VCH")
+        return next_number("voucher")
 
     def save(self, *args, **kwargs):
         return save_with_number(self, lambda: super(Voucher, self).save(*args, **kwargs))
 
 
 class VoucherConsumption(UUIDModel):
-    """A manual record of a voucher being (partly) used outside the shop's
-    own checkout flow -- e.g. an offline/cash payment for something not sold
-    through the shop. A second, independent way (alongside Payment.voucher /
-    shop.services.payments.record_payment) to draw down a voucher's own
-    consumed_amount, kept in lock-step the same way -- see Voucher's own
-    docstring for why the two writers never re-derive one from the other.
-    Not itself club-scoped -- its club is reached through ``voucher``, same
-    reasoning as club.models.FeePayment's own recorded_by/note shape, which
-    this mirrors."""
+    """A manual record of a voucher being (partly) used outside an order."""
 
     voucher = models.ForeignKey(Voucher, on_delete=models.CASCADE, related_name="consumptions", verbose_name=_("voucher"))
     amount = models.DecimalField(_("amount"), max_digits=10, decimal_places=2)
-    note = models.TextField(_("note"), help_text=_("What this was for, e.g. “Cash payment for the tournament fee, collected at the clubhouse.”"))
-    recorded_by = models.ForeignKey(User, on_delete=models.SET_NULL, related_name="voucher_consumptions_recorded", blank=True, null=True, verbose_name=_("recorded by"))
+    note = models.TextField(_("note"), blank=True)
+    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="+", blank=True, null=True, verbose_name=_("recorded by"))
     recorded_at = models.DateTimeField(_("recorded at"), default=timezone.now)
 
     class Meta:
@@ -679,7 +535,7 @@ class VoucherConsumption(UUIDModel):
         ordering = ["-recorded_at"]
 
     def __str__(self):
-        return f"{self.voucher} — €{self.amount}"
+        return f"{self.voucher} - {self.amount}"
 
 
 class Payment(UUIDModel):
@@ -688,6 +544,7 @@ class Payment(UUIDModel):
         BANK_TRANSFER = "bank_transfer", _("Bank transfer")
         CASH = "cash", _("Cash")
         VOUCHER = "voucher", _("Voucher")
+        ONLINE = "online", _("Online")
 
     class PaymentStatus(models.TextChoices):
         PENDING = "pending", _("Pending")
@@ -697,19 +554,23 @@ class Payment(UUIDModel):
 
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="payments", verbose_name=_("order"))
     amount = models.DecimalField(_("amount"), max_digits=10, decimal_places=2)
-    method = models.CharField(_("method"), max_length=255, choices=PaymentMethod.choices, default=PaymentMethod.CREDIT_CARD)
+    method = models.CharField(_("method"), max_length=255, choices=PaymentMethod.choices, default=PaymentMethod.BANK_TRANSFER)
     status = models.CharField(_("status"), max_length=255, choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
     reference = models.CharField(_("reference"), max_length=255, blank=True)
     paid_at = models.DateTimeField(_("paid at"), blank=True, null=True)
-    #: Set only when method == VOUCHER (see clean()) -- which voucher this
-    #: payment drew its amount from. shop.services.payments.record_payment is
-    #: the only place that both creates a Payment and deducts from the
-    #: voucher's own consumed_amount, in the same transaction.
     voucher = models.ForeignKey(Voucher, on_delete=models.PROTECT, related_name="payments", verbose_name=_("voucher"), blank=True, null=True)
+    #: Online payments through a provider (see the payment-provider abstraction).
+    provider = models.CharField(_("provider"), max_length=50, blank=True)
+    provider_payment_id = models.CharField(_("provider payment id"), max_length=255, blank=True)
+    payment_url = models.URLField(_("payment url"), max_length=1000, blank=True)
+    provider_data = models.JSONField(_("provider data"), blank=True, null=True)
+    note = models.CharField(_("note"), max_length=255, blank=True)
+    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="+", verbose_name=_("recorded by"), blank=True, null=True)
 
     class Meta:
         verbose_name = _("payment")
         verbose_name_plural = _("payments")
+        ordering = ["created"]
 
     def __str__(self):
         return f"{self.order} - {self.status}"
@@ -719,40 +580,29 @@ class Payment(UUIDModel):
             raise ValidationError({"voucher": _("Required when the method is voucher.")})
         if self.method != self.PaymentMethod.VOUCHER and self.voucher_id:
             raise ValidationError({"voucher": _("Only allowed when the method is voucher.")})
-        if self.voucher_id and self.order_id and self.voucher.club_id != self.order.club_id:
-            raise ValidationError({"voucher": _("Must belong to the same club as the order.")})
 
 
-class Invoice(ClubScopedModel):
+class Invoice(UUIDModel):
     number = models.CharField(_("number"), max_length=255, blank=True)
     order = models.OneToOneField(Order, on_delete=models.CASCADE, related_name="invoice", verbose_name=_("order"))
-
     issued_at = models.DateTimeField(_("issued at"), auto_now_add=True)
     due_date = models.DateField(_("due date"), blank=True, null=True)
-
-    billing_snapshot = models.JSONField(_("billing snapshot"), blank=True, null=True)  # Name/address information
-    # No stored PDF field -- rendered on demand instead (shop.services.invoices.
-    # render_invoice_pdf), same pattern as club/services/invoicing.py's dues
-    # invoices. Simpler, and sidesteps ever needing to get storage/regeneration
-    # right for a cached file.
+    billing_snapshot = models.JSONField(_("billing snapshot"), blank=True, null=True)
+    #: Overdue reminders sent for a charge invoice, and when the last one went out.
+    reminders_sent = models.PositiveSmallIntegerField(_("reminders sent"), default=0)
+    last_reminder_at = models.DateTimeField(_("last reminder at"), blank=True, null=True)
 
     class Meta:
         verbose_name = _("invoice")
         verbose_name_plural = _("invoices")
         ordering = ["-issued_at"]
-        constraints = [
-            UniqueConstraint(fields=["club", "number"], name="unique_invoice_number_per_club"),
-        ]
+        constraints = [UniqueConstraint(fields=["number"], name="unique_shop_invoice_number")]
 
     def __str__(self):
         return self.number
 
-    def clean(self):
-        validate_club_scope(self, self.club_id, same_club_fields=("order",))
-
     def generate_number(self):
-        """Next per-club invoice number for the current year: ``INV-<year>-<seq>``."""
-        return next_scoped_number(self, "INV")
+        return next_number("invoice")
 
     def save(self, *args, **kwargs):
         return save_with_number(self, lambda: super(Invoice, self).save(*args, **kwargs))

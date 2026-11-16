@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>{{ club_name }}</title>
+</head>
+<body style="margin:0;padding:0;background:#f3f4f6;-webkit-text-size-adjust:100%;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:32px 12px;">
+  <tr><td align="center">
+    <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="width:100%;max-width:560px;background:#ffffff;border-radius:14px;overflow:hidden;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0f172a;">
+      <tr><td align="center" style="background:{{ primary }};padding:28px 24px;">
+        {% if logo_url %}
+          <img src="{{ logo_url }}" alt="{{ club_name }}" height="64" style="display:block;border:0;height:64px;max-width:240px;width:auto;">
+        {% else %}
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+            <td align="center" width="64" height="64" style="width:64px;height:64px;border-radius:32px;background:{{ secondary }};color:{{ secondary_content }};font-size:24px;font-weight:800;letter-spacing:1px;">{{ club_initials }}</td>
+          </tr></table>
+        {% endif %}
+        <div style="margin-top:12px;color:{{ primary_content }};font-size:15px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;">{{ club_name }}</div>
+      </td></tr>
+      <tr><td style="padding:32px 32px 8px;">
+        <h1 style="margin:0 0 16px;font-size:22px;line-height:1.3;">{% block heading %}{% endblock %}</h1>
+        <p style="margin:0 0 24px;font-size:16px;line-height:1.55;color:#334155;">{% block intro %}{% endblock %}</p>
+      </td></tr>
+      {% block action %}{% endblock %}
+      {% block details %}{% endblock %}
+      <tr><td style="padding:24px 32px 32px;font-size:12px;line-height:1.5;color:#94a3b8;text-align:center;border-top:0;">{% block footer %}{{ t.footer }}{% endblock %}</td></tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>

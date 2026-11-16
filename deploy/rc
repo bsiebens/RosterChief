@@ -1,0 +1,287 @@
+#!/usr/bin/env bash
+# rc: the RosterChief release and deployment orchestrator. Run it from a checkout on your own machine.
+set -euo pipefail
+
+RC_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+RC_ROOT=$(dirname "$RC_DIR")
+# shellcheck source=lib/common.sh
+source "$RC_DIR/lib/common.sh"
+# shellcheck source=lib/transport.sh
+source "$RC_DIR/lib/transport.sh"
+
+usage() {
+    cat << 'USAGE'
+rc: release, deploy and provision RosterChief
+
+  rc release VERSION                      merge development into main, tag vVERSION, push (CI builds the artifacts)
+  rc deploy ENV vX.Y.Z [options]          install a release on the environment's hosts (backends first)
+  rc rollback ENV [--host NAME]           switch hosts back to their previous completed release
+  rc status ENV                           role, running version and health of every host
+  rc provision ENV --host NAME            prepare a new server (bootstrap) for the role listed in the environment file
+  rc proxy ENV on|off                     switch whether Caddy trusts Cloudflare's CF-Connecting-IP (updates the env file too)
+
+Options (where they apply):
+  --role all|full|backend|frontend        deploy/rollback only hosts with this role (default all)
+  --host NAME                             only this host
+  --force                                 deploy: skip the "must be on PROMOTE_FROM first" check
+  --yes                                   do not ask for confirmation
+  --dry-run                               print what would run (remote commands are shown, not executed)
+
+Environments live in deploy/environments/ENV.env (hosts, transport) and ENV.secrets (tokens, mode 600).
+USAGE
+    exit 2
+}
+
+role_filter=all host_filter='' force=0
+parse_flags() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --role) role_filter=${2:?--role needs a value}; shift ;;
+            --host) host_filter=${2:?--host needs a name}; shift ;;
+            --force) force=1 ;;
+            --yes) RC_ASSUME_YES=1 ;;
+            --dry-run) RC_DRY_RUN=1 ;;
+            *) die "Unknown option $1" ;;
+        esac
+        shift
+    done
+}
+
+# Hosts of an environment, formatted for messages.
+describe_host() { printf '%s (%s, %s %s)' "${H_NAME[$1]}" "${H_ROLE[$1]}" "${H_TRANSPORT[$1]}" "${H_TARGET[$1]}"; }
+
+require_production_word() {
+    # Environments whose name contains "prod" need the name typed back.
+    if [[ $ENV_NAME == *prod* ]]; then
+        confirm "This changes the PRODUCTION environment '$ENV_NAME'." "$ENV_NAME" || die "Cancelled."
+    else
+        confirm "Continue on '$ENV_NAME'?" || die "Cancelled."
+    fi
+}
+
+# ----------------------------------------------------------------------------- release
+cmd_release() {
+    local version=${1:-} tag
+    [[ -n $version ]] || usage
+    shift
+    parse_flags "$@"
+    version=${version#v}
+    tag=v$version
+    valid_version_tag "$tag" || die "Version must look like 1.4.0 (or 1.4.0-rc1)."
+    cd "$RC_ROOT"
+
+    run() { if [[ $RC_DRY_RUN == 1 ]]; then printf '[dry-run] %s\n' "$*"; else "$@"; fi; }
+
+    info "Checking the repository"
+    [[ -z $(git status --porcelain --untracked-files=no) ]] || die "The working tree has uncommitted changes."
+    [[ $(git rev-parse --abbrev-ref HEAD) == development ]] || die "Start from the development branch."
+    git fetch --quiet origin
+    [[ $(git rev-parse development) == "$(git rev-parse origin/development)" ]] || die "development differs from origin/development. Push or pull first."
+    if git rev-parse --verify --quiet "refs/tags/$tag" > /dev/null || git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null 2>&1; then
+        die "Tag $tag already exists."
+    fi
+    info "Linting and checking Django"
+    uv run ruff check .
+    uv run python manage.py check
+
+    echo
+    echo "About to: merge development into main, set the version to $version, tag $tag, push main and the tag,"
+    echo "then fast-forward development to include the version commit. CI then builds and publishes the release."
+    confirm "Proceed?" || die "Cancelled."
+
+    run git checkout main
+    run git pull --ff-only origin main
+    if ! run git merge --no-ff development -m "Merge development for $tag"; then
+        git merge --abort 2> /dev/null || true
+        git checkout development
+        die "Merge into main failed. Resolve it by hand, then run rc release again."
+    fi
+    run sed -i.bak -E "s/^version = \".*\"/version = \"$version\"/" pyproject.toml
+    run rm -f pyproject.toml.bak
+    run uv lock
+    run git add pyproject.toml uv.lock
+    run git commit -m "Release $tag"
+    run git tag -a "$tag" -m "RosterChief $tag"
+    confirm "Push main and $tag to origin now? (This triggers the release build.)" || die "Not pushed. main and the tag exist locally; push them yourself, or delete the tag with: git tag -d $tag"
+    run git push origin main "$tag"
+    run git checkout development
+    run git merge --ff-only main
+    run git push origin development
+    echo
+    echo "Pushed $tag. Watch the build: gh run watch  (or the repository's Actions tab)."
+    echo "When the release has its artifacts: deploy/rc deploy staging $tag"
+}
+
+# ----------------------------------------------------------------------------- deploy
+# Has every host of environment $1 already run version $2?
+deployed_everywhere() (
+    local env=$1 tag=$2 i
+    load_env "$env"
+    for ((i = 0; i < ${#H_NAME[@]}; i++)); do
+        printf 'grep -qxF %q /var/lib/rosterchief/deployed-versions\n' "$tag" | rc_run "$i" > /dev/null 2>&1 || return 1
+    done
+)
+
+cmd_deploy() {
+    local env=${1:-} tag=${2:-} i idx promote
+    [[ -n $env && -n $tag ]] || usage
+    shift 2
+    parse_flags "$@"
+    valid_version_tag "$tag" || die "Give the release tag, e.g. v1.4.0."
+    load_env "$env"
+    promote=$PROMOTE_FROM
+    if [[ -n $promote && $force == 0 && $RC_DRY_RUN == 0 ]]; then
+        info "Checking that $tag already runs in $promote"
+        deployed_everywhere "$promote" "$tag" || die "$tag has not been deployed to every $promote host. Deploy it there first, or pass --force."
+        load_env "$env"
+    fi
+    idx=$(select_hosts "$role_filter" "$host_filter")
+    echo "Deploying $tag to $ENV_NAME:"
+    for i in $idx; do echo "  - $(describe_host "$i")"; done
+    require_production_word || die "Cancelled."
+    for i in $idx; do
+        info "$(describe_host "$i")"
+        if ! printf 'rosterchief-deploy release %q\n' "$tag" | rc_run "$i"; then
+            die "Deploy to ${H_NAME[i]} failed. Hosts after it were not touched. The host rolled itself back when it could; check with: rc status $ENV_NAME"
+        fi
+    done
+    info "Done. Check on all hosts with: rc status $ENV_NAME"
+}
+
+cmd_rollback() {
+    local env=${1:-} i idx
+    [[ -n $env ]] || usage
+    shift
+    parse_flags "$@"
+    load_env "$env"
+    idx=$(select_hosts "$role_filter" "$host_filter")
+    echo "Rolling back $ENV_NAME to each host's previous completed release:"
+    for i in $idx; do echo "  - $(describe_host "$i")"; done
+    require_production_word || die "Cancelled."
+    # Frontends first on the way back: they must not run ahead of the backend.
+    local ordered=()
+    for i in $idx; do ordered=("$i" ${ordered[@]+"${ordered[@]}"}); done
+    for i in "${ordered[@]}"; do
+        info "$(describe_host "$i")"
+        printf 'rosterchief-deploy rollback\n' | rc_run "$i" || die "Rollback on ${H_NAME[i]} failed."
+    done
+}
+
+cmd_status() {
+    local env=${1:-} i bad=0
+    [[ -n $env ]] || usage
+    shift
+    parse_flags "$@"
+    load_env "$env"
+    for i in $(select_hosts "$role_filter" "$host_filter"); do
+        printf '%-14s ' "${H_NAME[i]}"
+        printf 'rosterchief-deploy status 2>&1 | tr "\\n" " "; echo\n' | rc_run "$i" || bad=1
+    done
+    return $bad
+}
+
+# ----------------------------------------------------------------------------- provision
+cmd_provision() {
+    local env=${1:-} i role url args secrets_note=''
+    [[ -n $env ]] || usage
+    shift
+    parse_flags "$@"
+    [[ -n $host_filter ]] || die "Say which host: rc provision $env --host NAME"
+    load_env "$env"
+    i=$(select_hosts all "$host_filter")
+    role=${H_ROLE[i]}
+    args=(--role "$role" --domain "$BASE_DOMAIN" --owner-email "$OWNER_EMAIL" --proxied "$CLOUDFLARE_PROXIED" --github-repo "$GITHUB_REPO")
+    [[ $ACCESS != ip ]] || args+=(--access ip)
+    case $role in
+        backend)
+            [[ -n $TRUSTED_CIDR ]] || die "Set TRUSTED_CIDR (the private network frontends live in) in the environment file."
+            [[ -n $(host_opt "$i" private_ip) ]] || die "Host '${H_NAME[i]}' needs private_ip=… in its options."
+            args+=(--private-ip "$(host_opt "$i" private_ip)" --trusted-cidr "$TRUSTED_CIDR")
+            ;;
+        frontend)
+            url=$(backend_url)
+            args+=(--backend-url "$url")
+            ;;
+    esac
+    echo "Provisioning $(describe_host "$i") for $BASE_DOMAIN (Cloudflare proxy: $CLOUDFLARE_PROXIED)"
+    require_production_word || die "Cancelled."
+
+    local bundle exports=''
+    bundle=$(COPYFILE_DISABLE=1 tar -czf - -C "$RC_DIR" host | base64 | tr -d '\n')
+    if [[ ${H_TRANSPORT[i]} == ssh ]]; then
+        [[ -z ${CLOUDFLARE_API_TOKEN:-} ]] || exports+=$(printf 'export CLOUDFLARE_API_TOKEN=%q\n' "$CLOUDFLARE_API_TOKEN")
+        [[ -z ${GITHUB_TOKEN:-} ]] || exports+=$(printf '\nexport GITHUB_TOKEN=%q\n' "$GITHUB_TOKEN")
+    else
+        secrets_note="SSM keeps command text in its history, so tokens were NOT sent. On the host put CLOUDFLARE_API_TOKEN=… in /etc/rosterchief/caddy.env (frontend/full) and GITHUB_TOKEN=… in /etc/rosterchief/deploy.env, both mode 600, e.g. via 'aws ssm start-session'."
+    fi
+    rc_run "$i" << SCRIPT
+set -euo pipefail
+work=\$(mktemp -d)
+trap 'rm -rf "\$work"' EXIT
+base64 -d << 'RC_PAYLOAD' | tar -xzf - -C "\$work"
+$bundle
+RC_PAYLOAD
+$exports
+bash "\$work/host/bootstrap.sh" $(printf '%q ' "${args[@]}")
+SCRIPT
+    echo
+    echo "Next steps for ${H_NAME[i]}:"
+    [[ -z $secrets_note ]] || echo "  * $secrets_note"
+    if [[ $role != backend && $ACCESS == ip ]]; then
+        echo "  * No DNS needed: the control panel is at https://control.$BASE_DOMAIN and each club at https://<club>.$BASE_DOMAIN (sslip.io points every such name at this host)."
+        echo "  * Your browser warns about the certificate (Caddy's own CA signs it): accept it once per name. Allow ports 80 and 443 in the security group."
+    elif [[ $role != backend ]]; then
+        echo "  * Cloudflare DNS: A records for $BASE_DOMAIN and *.$BASE_DOMAIN to this host's public address (proxied: $CLOUDFLARE_PROXIED)."
+        [[ $CLOUDFLARE_PROXIED == false ]] || echo "  * Cloudflare: set SSL/TLS mode to Full (strict)."
+        [[ $CLOUDFLARE_PROXIED == false ]] || echo "  * Security group: allow ports 80 and 443 from Cloudflare's ranges only (https://www.cloudflare.com/ips/), so the origin can't be reached directly."
+        [[ $CLOUDFLARE_PROXIED == true ]] || echo "  * Security group: allow ports 80 and 443 from anywhere."
+    fi
+    if [[ $role == backend ]]; then
+        echo "  * Security group: allow TCP 8001 from the frontend host(s) only. Nothing else should reach this host publicly."
+    fi
+    [[ $role == frontend ]] || echo "  * Edit /etc/rosterchief/app.env on the host (SMTP, VAPID keys) before inviting users."
+    echo "  * Then: deploy/rc deploy $ENV_NAME vX.Y.Z --host ${H_NAME[i]}"
+}
+
+# ----------------------------------------------------------------------------- proxy switch
+cmd_proxy() {
+    local env=${1:-} mode=${2:-} i file value
+    [[ -n $env && ( $mode == on || $mode == off ) ]] || usage
+    shift 2
+    parse_flags "$@"
+    load_env "$env"
+    [[ $ACCESS != ip ]] || die "$env is reached by IP address (ACCESS=ip), so there is no Cloudflare proxy to switch."
+    echo "Turning the Cloudflare-proxy trust ${mode} on $ENV_NAME's public hosts."
+    echo "(Also set the DNS records to proxied/DNS-only in Cloudflare, and the security group to match.)"
+    require_production_word || die "Cancelled."
+    for i in $(select_hosts all "$host_filter"); do
+        [[ ${H_ROLE[i]} != backend ]] || continue
+        info "$(describe_host "$i")"
+        printf 'rosterchief-cloudflare-ips set %s\nrosterchief-health --tls\n' "$mode" | rc_run "$i" || die "Failed on ${H_NAME[i]}."
+    done
+    if [[ $RC_DRY_RUN == 0 ]]; then
+        file=$RC_DIR/environments/$env.env
+        value=$([[ $mode == on ]] && echo true || echo false)
+        if grep -q '^CLOUDFLARE_PROXIED=' "$file"; then
+            sed -i.bak -E "s/^CLOUDFLARE_PROXIED=.*/CLOUDFLARE_PROXIED=$value/" "$file" && rm -f "$file.bak"
+        else
+            printf 'CLOUDFLARE_PROXIED=%s\n' "$value" >> "$file"
+        fi
+        echo "Updated CLOUDFLARE_PROXIED=$value in $file."
+    fi
+}
+
+# ----------------------------------------------------------------------------- dispatch
+[[ $# -ge 1 ]] || usage
+command=$1
+shift
+case $command in
+    release) cmd_release "$@" ;;
+    deploy) cmd_deploy "$@" ;;
+    rollback) cmd_rollback "$@" ;;
+    status) cmd_status "$@" ;;
+    provision) cmd_provision "$@" ;;
+    proxy) cmd_proxy "$@" ;;
+    -h | --help | help) usage ;;
+    *) usage ;;
+esac

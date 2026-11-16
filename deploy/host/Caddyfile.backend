@@ -1,0 +1,26 @@
+{
+	# No public TLS here. This host only answers the frontend host(s) on the private network.
+	auto_https off
+	servers {
+		# Keep X-Forwarded-Proto / -For from the frontend host(s), so Django sees https.
+		trusted_proxies static {$ROSTERCHIEF_TRUSTED_CIDR}
+	}
+}
+
+http://{$ROSTERCHIEF_BACKEND_BIND}:8001 {
+	bind {$ROSTERCHIEF_BACKEND_BIND}
+	encode zstd gzip
+
+	handle_path /static/* {
+		root * /opt/rosterchief/current/staticfiles
+		file_server
+	}
+	handle_path /media/* {
+		root * /var/lib/rosterchief/media
+		header X-Content-Type-Options nosniff
+		file_server
+	}
+	handle {
+		reverse_proxy 127.0.0.1:8000
+	}
+}

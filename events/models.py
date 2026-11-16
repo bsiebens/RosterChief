@@ -3,31 +3,25 @@ import secrets
 from decimal import Decimal
 
 from django.conf import settings
-from django.core.exceptions import SuspiciousFileOperation
+from django.core.exceptions import SuspiciousFileOperation, ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
+from django.utils import timezone
 from django.utils.text import get_valid_filename
 from django.utils.translation import gettext_lazy as _
 from django_countries.fields import CountryField
 
-from club.models import Club, Season, sport_choices
 from members.models import Group, Member
-from rosterchief.base import ClubScopedModel, UUIDModel, validate_club_scope
+from rosterchief.base import UUIDModel
 from rosterchief.storage import get_private_storage
-from teams.models import Team
 
-#: How long a game is assumed to run when no explicit `end` is given -- set on
-#: GAME events at save time (Event.save() below), and reused as a read-time-only
-#: fallback for other event kinds by events.services.referees.event_window().
 ASSUMED_EVENT_DURATION = datetime.timedelta(hours=2)
 
 
-class Opponent(ClubScopedModel):
+class Opponent(UUIDModel):
     name = models.CharField(_("name"), max_length=255)
     logo = models.ImageField(_("logo"), upload_to="opponents", blank=True)
-    #: Other spellings a federation fixture list uses for this opponent, recorded when an
-    #: import maps a scraped name onto this opponent. A fixture carrying one of these (or
-    #: the name itself) is no longer reported as an opponent change. Never set by a form.
     alternative_names = models.JSONField(_("alternative names"), default=list, blank=True, editable=False)
 
     class Meta:
@@ -53,7 +47,51 @@ class Opponent(ClubScopedModel):
         return True
 
 
-class Location(ClubScopedModel):
+class Season(UUIDModel):
+    start_date = models.DateField(_("start date"))
+    end_date = models.DateField(_("end date"))
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = _("season")
+        verbose_name_plural = _("seasons")
+
+    @property
+    def name(self):
+        """Short label built from the start/end years, e.g. "Season '25 - '26"."""
+        return f"Season '{self.start_date:%y} - '{self.end_date:%y}"
+
+    @classmethod
+    def get_current(cls, date: datetime.date | None = None):
+        """Return the current club's season covering ``date`` (today by default)."""
+        if date is None:
+            date = timezone.now().date()
+
+        return cls.objects.filter(start_date__lte=date, end_date__gte=date).first()
+
+    @classmethod
+    def covering(cls, club, date: datetime.date):
+        """Return ``club``'s season covering ``date`` (no tenant context needed)."""
+        return cls.objects.filter(start_date__lte=date, end_date__gte=date).first()
+
+    @classmethod
+    def next_after(cls, club, date: datetime.date):
+        """Return ``club``'s soonest season starting after ``date`` (no tenant
+        context needed) -- the season that follows the one covering ``date``."""
+        return cls.objects.filter(start_date__gt=date).order_by("start_date").first()
+
+    @classmethod
+    def before(cls, club, season):
+        """Return ``club``'s most recent season starting before ``season`` --
+        e.g. the management dashboard's member-count trend compares against
+        this. Mirrors next_after's own "adjacent by date" reasoning, just
+        looking the other way."""
+        return cls.objects.filter(start_date__lt=season.start_date).order_by("-start_date").first()
+
+
+class Location(UUIDModel):
     name = models.CharField(_("name"), max_length=255)
     address = models.CharField(_("address"), max_length=255)
     city = models.CharField(_("city"), max_length=255)
@@ -65,19 +103,29 @@ class Location(ClubScopedModel):
         help_text=_("The club's own ground, set from the control panel -- lets an event's location tell a home game from an away one."),
     )
 
+    latitude = models.FloatField(
+        _("latitude"),
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(-90), MaxValueValidator(90)],
+        help_text=_("Optional exact position, set from the control panel for the home location. When blank, maps look the address up."),
+    )
+    longitude = models.FloatField(_("longitude"), null=True, blank=True, validators=[MinValueValidator(-180), MaxValueValidator(180)])
+
     class Meta:
         verbose_name = _("location")
         verbose_name_plural = _("locations")
         ordering = ["name"]
-        constraints = [
-            models.UniqueConstraint(fields=["club"], condition=Q(is_home=True), name="unique_home_location_per_club"),
-        ]
 
     def __str__(self):
         return self.name
 
+    def clean(self):
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValidationError({"latitude" if self.latitude is None else "longitude": _("Give both latitude and longitude, or neither.")})
 
-class Event(ClubScopedModel):
+
+class Event(UUIDModel):
     class EventKind(models.TextChoices):
         TRAINING = "training", _("Training")
         GAME = "game", _("Game")
@@ -90,7 +138,7 @@ class Event(ClubScopedModel):
     detached = models.BooleanField(_("detached"), default=False, help_text=_("Edited independently; excluded from series-wide updates and regeneration."))
     cancelled = models.BooleanField(_("cancelled"), default=False)
 
-    teams = models.ManyToManyField(Team, related_name="scheduled_events", blank=True, verbose_name=_("teams"))
+    teams = models.ManyToManyField("teams.Team", related_name="scheduled_events", blank=True, verbose_name=_("teams"))
     groups = models.ManyToManyField(Group, related_name="scheduled_events", blank=True, verbose_name=_("groups"), help_text=_("Invite every current member of these groups."))
     club_wide = models.BooleanField(_("whole club"), default=False, help_text=_("Invite every active club member for this event's season, instead of specific teams/groups. Can't be combined with teams or groups."))
     invited_members = models.ManyToManyField(Member, related_name="invited_to_events", blank=True, verbose_name=_("invited members"))
@@ -98,6 +146,7 @@ class Event(ClubScopedModel):
     season = models.ForeignKey(Season, on_delete=models.SET_NULL, related_name="events", null=True, blank=True, verbose_name=_("season"), help_text=_("Season whose team rosters define the audience; derived from the start date when left blank."))
 
     kind = models.CharField(_("kind"), max_length=10, choices=EventKind.choices, default=EventKind.OTHER)
+    subtype = models.ForeignKey("EventSubtype", on_delete=models.SET_NULL, related_name="events", null=True, blank=True, verbose_name=_("subtype"))
     title = models.CharField(_("title"), max_length=255)
 
     start = models.DateTimeField(_("start"))
@@ -106,12 +155,10 @@ class Event(ClubScopedModel):
     deadline = models.DateTimeField(_("registration deadline"), blank=True, null=True)
 
     location = models.ForeignKey(Location, on_delete=models.SET_NULL, related_name="events", null=True, blank=True, verbose_name=_("location"))
+    notes = models.TextField(_("notes"), blank=True, max_length=2000, help_text=_("Written by staff, shown to everyone invited (plain text)."))
     opponent = models.ForeignKey(Opponent, on_delete=models.SET_NULL, related_name="events", null=True, blank=True, verbose_name=_("opponent"))
     created_by = models.ForeignKey(Member, on_delete=models.SET_NULL, related_name="created_events", null=True, blank=True, verbose_name=_("created by"))
 
-    # Game-specific -- meaningless for other kinds, so all optional. external_game_id
-    # is this game's id in an external competition/fixture data source, for a later
-    # automatic score-fetcher to key off; nothing populates it yet.
     competition = models.CharField(_("competition"), max_length=255, blank=True, help_text=_("The league, cup or competition this game is part of."))
     competition_label = models.CharField(
         _("competition label"),
@@ -152,18 +199,11 @@ class Event(ClubScopedModel):
         verbose_name_plural = _("events")
         ordering = ["-start"]
         indexes = [
-            # Covers both the tenant scope every query already filters on and the
-            # -start ordering/range filter (calendars, statistics, dashboards,
-            # recurrence, referee/official scheduling) -- Meta.ordering above had
-            # no supporting index at all before this.
-            models.Index(fields=["club", "start"]),
+            models.Index(fields=["start"]),
         ]
 
     def __str__(self):
         return self.title
-
-    def clean(self):
-        validate_club_scope(self, self.club_id, same_club_fields=("season", "location", "opponent"))
 
     def save(self, *args, **kwargs):
         if self.kind == self.EventKind.GAME and self.end is None:
@@ -193,7 +233,136 @@ class Event(ClubScopedModel):
         return self.kind in (self.EventKind.GAME, self.EventKind.TOURNAMENT) and self.location_id is not None and self.location.is_home
 
 
-class EventSeries(ClubScopedModel):
+class EventSubtype(UUIDModel):
+    """A club-defined flavour of an event kind ("Fitness training", "Friendly game", ...), picked in the event form.
+    ``title_template`` suggests the title: for a training / game it is what a blank title becomes, for other kinds only
+    the placeholder in the (still required) title box. Placeholders: ``{teams}`` (short names), ``{opponent}``, ``{kind}``."""
+
+    kind = models.CharField(_("kind"), max_length=10, choices=Event.EventKind.choices)
+    name = models.CharField(_("name"), max_length=100)
+    title_template = models.CharField(_("title template"), max_length=255, blank=True, help_text=_("Suggested title; may use {teams}, {opponent} and {kind}."))
+    ordering = models.PositiveSmallIntegerField(_("ordering"), default=0)
+
+    class Meta:
+        verbose_name = _("event subtype")
+        verbose_name_plural = _("event subtypes")
+        ordering = ["kind", "ordering", "name"]
+        constraints = [models.UniqueConstraint(fields=["kind", "name"], name="unique_event_subtype_name_per_kind")]
+
+    def __str__(self):
+        return self.name
+
+
+class _Assignment(UUIDModel):
+    """One referee / official on one (home) game: a club member (``member``) or an external person logged by name only
+    (``external_name``), never both and never neither. ``fee``/``km``/``km_rate`` back the payment form: what the club owes
+    for this game, with the mileage rate snapshotted per assignment so a later rate change never rewrites an issued form."""
+
+    external_name = models.CharField(_("external name"), max_length=255, blank=True, help_text=_("For someone who isn't a club member (e.g. federation-appointed), logged by name only."))
+    assigned_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("assigned by"))
+    referee_type = models.ForeignKey("club.RefereeType", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("type"))
+
+    fee = models.DecimalField(_("fee"), max_digits=8, decimal_places=2, default=Decimal("0.00"), blank=True)
+    km = models.DecimalField(_("kilometers"), max_digits=6, decimal_places=1, null=True, blank=True)
+    km_rate = models.DecimalField(_("rate per km"), max_digits=6, decimal_places=4, null=True, blank=True, help_text=_("Reimbursement rate per kilometer, e.g. 0.4230."))
+    no_fee = models.BooleanField(_("no fee"), default=False, help_text=_("Not paid for this game: no fee or travel is owed and the fee is not flagged as missing."))
+
+    class Meta:
+        abstract = True
+        ordering = ["event", "member__last_name", "member__first_name"]
+        constraints = [
+            models.UniqueConstraint(fields=["event", "member"], name="unique_%(class)s_per_event"),
+            models.CheckConstraint(condition=(Q(member__isnull=False) & Q(external_name="")) | (Q(member__isnull=True) & ~Q(external_name="")), name="%(class)s_member_xor_external_name"),
+        ]
+
+    def __str__(self):
+        return f"{self.event} - {self.display_name}"
+
+    @property
+    def display_name(self) -> str:
+        return str(self.member) if self.member_id else self.external_name
+
+    @property
+    def is_external(self) -> bool:
+        return self.member_id is None
+
+    @property
+    def km_total(self) -> Decimal:
+        return (self.km or Decimal("0")) * (self.km_rate or Decimal("0"))
+
+    @property
+    def fee_pending(self) -> bool:
+        """No fee entered yet, and not marked as unpaid either."""
+        return not self.fee and not self.no_fee
+
+    @property
+    def total_payable(self) -> Decimal:
+        return Decimal("0") if self.no_fee else (self.fee or Decimal("0")) + self.km_total
+
+
+class EventReferee(_Assignment):
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="referees", verbose_name=_("event"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, null=True, blank=True, related_name="referee_assignments", verbose_name=_("member"))
+
+    class Meta(_Assignment.Meta):
+        verbose_name = _("event referee")
+        verbose_name_plural = _("event referees")
+
+
+class EventOfficial(_Assignment):
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="officials", verbose_name=_("event"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, null=True, blank=True, related_name="official_assignments", verbose_name=_("member"))
+
+    class Meta(_Assignment.Meta):
+        verbose_name = _("event official")
+        verbose_name_plural = _("event officials")
+
+
+class _Signup(UUIDModel):
+    """A member who offered to referee / officiate a game. Interest only: it takes no place until staff assign the person,
+    which removes the sign-up."""
+
+    class Meta:
+        abstract = True
+        ordering = ["created"]
+        constraints = [models.UniqueConstraint(fields=["event", "member"], name="unique_%(class)s_per_event")]
+
+    def __str__(self):
+        return f"{self.event} - {self.member}"
+
+
+class RefereeSignup(_Signup):
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="referee_signups", verbose_name=_("event"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="referee_signups", verbose_name=_("member"))
+
+    class Meta(_Signup.Meta):
+        verbose_name = _("referee sign-up")
+        verbose_name_plural = _("referee sign-ups")
+
+
+class OfficialSignup(_Signup):
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="official_signups", verbose_name=_("event"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="official_signups", verbose_name=_("member"))
+
+    class Meta(_Signup.Meta):
+        verbose_name = _("official sign-up")
+        verbose_name_plural = _("official sign-ups")
+
+
+class OfficiatingInvitation(UUIDModel):
+    """Keep declines and notification history separate from offers and assignments."""
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="officiating_invitations")
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="officiating_invitations")
+    kind = models.CharField(max_length=8, choices=[("referee", _("referee")), ("official", _("official"))])
+    declined = models.BooleanField(default=False)
+    notified = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["event", "member", "kind"], name="unique_officiating_invitation")]
+
+
+class EventSeries(UUIDModel):
     """A recurring event definition that materialises concrete Event rows."""
 
     rrule = models.CharField(_("recurrence rule"), max_length=255, help_text=_("RFC 5545 RRULE, e.g. FREQ=WEEKLY;BYDAY=MO,WE."))
@@ -207,10 +376,12 @@ class EventSeries(ClubScopedModel):
 
     # Template copied onto each generated occurrence.
     kind = models.CharField(_("kind"), max_length=10, choices=Event.EventKind.choices, default=Event.EventKind.OTHER)
+    subtype = models.ForeignKey("EventSubtype", on_delete=models.SET_NULL, related_name="event_series", null=True, blank=True, verbose_name=_("subtype"))
     title = models.CharField(_("title"), max_length=255)
     location = models.ForeignKey(Location, on_delete=models.SET_NULL, related_name="event_series", null=True, blank=True, verbose_name=_("location"))
+    notes = models.TextField(_("notes"), blank=True, max_length=2000, help_text=_("Copied onto each generated occurrence."))
     opponent = models.ForeignKey(Opponent, on_delete=models.SET_NULL, related_name="event_series", null=True, blank=True, verbose_name=_("opponent"))
-    teams = models.ManyToManyField(Team, related_name="event_series", blank=True, verbose_name=_("teams"))
+    teams = models.ManyToManyField("teams.Team", related_name="event_series", blank=True, verbose_name=_("teams"))
     groups = models.ManyToManyField(Group, related_name="event_series", blank=True, verbose_name=_("groups"), help_text=_("Invite every current member of these groups."))
     club_wide = models.BooleanField(_("whole club"), default=False, help_text=_("Invite every active club member for each occurrence's season, instead of specific teams/groups. Can't be combined with teams or groups."))
     invited_members = models.ManyToManyField(Member, related_name="invited_to_event_series", blank=True, verbose_name=_("invited members"))
@@ -224,11 +395,10 @@ class EventSeries(ClubScopedModel):
     def __str__(self):
         return self.title
 
-    def clean(self):
-        validate_club_scope(self, self.club_id, same_club_fields=("location", "opponent"))
-
 
 class Attendance(UUIDModel):
+    """One invited member's answer for one event: the RSVP/coach status, the check-in (``showed_up``) and notes."""
+
     class AttendanceStatus(models.TextChoices):
         PRESENT = "present", _("Present")
         ABSENT = "absent", _("Absent")
@@ -241,6 +411,8 @@ class Attendance(UUIDModel):
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="attendances", verbose_name=_("event"))
     member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="attendances", verbose_name=_("member"))
     status = models.CharField(_("status"), max_length=20, choices=AttendanceStatus.choices, default=AttendanceStatus.NO_RESPONSE)
+    #: The answer this row had before a line-up was published over it (selected / not selected), so withdrawing the line-up can restore it exactly.
+    status_before_lineup = models.CharField(_("status before the line-up"), max_length=20, blank=True, default="")
     showed_up = models.BooleanField(
         _("showed up"),
         null=True,
@@ -252,7 +424,7 @@ class Attendance(UUIDModel):
     coach_note = models.TextField(
         _("coach note"),
         blank=True,
-        help_text=_("Private to the team's managers (the people who may manage attendance): never shown to the player or their guardians, in the member app, the public API, or in any notification."),
+        help_text=_("Private to the team's managers: never shown to the player or their guardians, in any app or notification."),
     )
     answered_by_coach = models.BooleanField(_("answered by a coach"), default=False, help_text=_("The current answer was set by a coach for the player. A reply from the player themselves, or a reset, clears this."))
     coach_set_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("last changed by coach"))
@@ -262,37 +434,52 @@ class Attendance(UUIDModel):
         verbose_name = _("attendance")
         verbose_name_plural = _("attendances")
         ordering = ["event", "member__last_name", "member__first_name"]
-        constraints = [
-            models.UniqueConstraint(fields=["event", "member"], name="unique_attendance_per_event_per_member"),
-        ]
-        indexes = [
-            # RSVP screens, coach attendance, lineups, and deadline reminders all
-            # filter event+status together -- status itself was unindexed before this.
-            models.Index(fields=["event", "status"]),
-        ]
+        constraints = [models.UniqueConstraint(fields=["event", "member"], name="unique_attendance_per_event_per_member")]
+        indexes = [models.Index(fields=["event", "status"])]
 
     def __str__(self):
         return f"{self.event} - {self.member}"
 
 
+class AttendanceChange(UUIDModel):
+    """One change of an attendance's status: who set it (a coach, the player, a parent/guardian or the system), when,
+    and from what to what. ``changed_by_name`` is a snapshot so the log survives a deleted account."""
+
+    class Via(models.TextChoices):
+        COACH = "coach", _("Coach")
+        SELF = "self", _("The player")
+        GUARDIAN = "guardian", _("Parent / guardian")
+        SYSTEM = "system", _("System")
+
+    attendance = models.ForeignKey(Attendance, on_delete=models.CASCADE, related_name="changes", verbose_name=_("attendance"))
+    from_status = models.CharField(_("from"), max_length=20, choices=Attendance.AttendanceStatus.choices)
+    to_status = models.CharField(_("to"), max_length=20, choices=Attendance.AttendanceStatus.choices)
+    changed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("changed by"))
+    changed_by_name = models.CharField(_("changed by (name)"), max_length=255, blank=True)
+    via = models.CharField(_("via"), max_length=10, choices=Via.choices, default=Via.COACH)
+    note_changed = models.BooleanField(_("note changed"), default=False)
+
+    class Meta:
+        verbose_name = _("attendance change")
+        verbose_name_plural = _("attendance changes")
+        ordering = ["-created"]
+
+    def __str__(self):
+        return f"{self.attendance}: {self.from_status} -> {self.to_status}"
+
+
 class Lineup(UUIDModel):
-    """A game's line-up -- coach mode's C3 screen (mobile/coach_views.py's
-    CoachLineupView): a plain yes/no pick per roster player (``selections``),
-    not lines/slots -- a coach doesn't need to think in terms of who's on
-    which line, just who's in. Publishing (events.services.lineup.
-    publish_lineup) flips every selected member's Attendance.status to
-    SELECTED and every other available roster member's to NOT_SELECTED --
-    the reason those two statuses exist on Attendance in the first place,
-    previously unused."""
+    """A game's selection: a plain yes/no pick per player (``selections``), not lines or slots. Publishing flips every
+    selected member's attendance to SELECTED and every other available member's to NOT_SELECTED."""
 
     event = models.OneToOneField(Event, on_delete=models.CASCADE, related_name="lineup", verbose_name=_("event"))
-    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="lineups", verbose_name=_("team"))
+    team = models.ForeignKey("teams.Team", on_delete=models.CASCADE, related_name="lineups", verbose_name=_("team"))
     published_at = models.DateTimeField(_("published at"), null=True, blank=True)
     scheduled_publish_at = models.DateTimeField(
         _("scheduled publish at"),
         null=True,
         blank=True,
-        help_text=_("If set (and not yet published), this line-up publishes itself automatically at this time -- events.tasks.publish_scheduled_lineups is the periodic sweep that catches it."),
+        help_text=_("If set (and not yet published), this line-up publishes itself at this time: a periodic task sweeps for due ones."),
     )
     created_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_lineups", verbose_name=_("created by"))
 
@@ -303,16 +490,9 @@ class Lineup(UUIDModel):
     def __str__(self):
         return f"{self.team} - {self.event}"
 
-    def clean(self):
-        validate_club_scope(self, self.event.club_id if self.event_id else None, same_club_fields=("team",))
-
 
 class LineupSelection(UUIDModel):
-    """One roster player the coach has marked "in" for a Lineup -- presence
-    of the row *is* the yes; there's no separate flag and no "no" row.
-    Grouped by the member's own roster position ("category") when displayed,
-    both in coach mode and on the published member-side view -- see
-    events.services.lineup for the publish-time read of this set."""
+    """One player the coach marked "in" for a line-up: the row's presence is the yes, there is no "no" row."""
 
     lineup = models.ForeignKey(Lineup, on_delete=models.CASCADE, related_name="selections", verbose_name=_("line-up"))
     member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="lineup_selections", verbose_name=_("member"))
@@ -328,253 +508,68 @@ class LineupSelection(UUIDModel):
         return f"{self.lineup} - {self.member}"
 
 
-class EventReferee(UUIDModel):
-    """One referee assigned to one (home) game -- either a club member
-    (``member`` set) or an external referee logged by name only
-    (``external_name`` set, e.g. a federation-appointed referee the club
-    still needs to pay/log) -- never both, never neither. ``assigned_by`` is
-    required for now -- assignment is admin-only; a future self-service
-    sign-up would make it nullable to mean "the referee signed themself up"
-    rather than adding a parallel model. See events.services.referees for the
-    home-game gate, the ``Event.max_referees`` capacity ceiling, and the
-    (non-blocking) schedule conflict check.
+class LineupSlotAssignment(UUIDModel):
+    """A picked player placed in one slot ("line") of the sport's line-up template: ``"<group key>.<slot key>"``. A slot holds one
+    player, a player may hold several slots (a regular line plus power play, penalty kill ...). Informational only (never used for
+    statistics); only picked players have assignments (un-picking removes them)."""
 
-    ``fee``/``km``/``km_rate`` back the referee payment form (PDF export):
-    what the club owes this referee for this game, and the mileage rate used
-    to compute the travel portion -- snapshotted per assignment (not read
-    from a live club-wide setting) so a rate change later doesn't rewrite an
-    already-issued form's numbers.
-    """
-
-    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="referees", verbose_name=_("event"))
-    member = models.ForeignKey(Member, on_delete=models.CASCADE, null=True, blank=True, related_name="referee_assignments", verbose_name=_("member"))
-    external_name = models.CharField(_("external referee name"), max_length=255, blank=True, help_text=_("For a referee who isn't a club member (e.g. federation-appointed) -- logged by name only."))
-    assigned_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, related_name="+", verbose_name=_("assigned by"))
-    referee_type = models.ForeignKey("club.RefereeType", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("type"))
-
-    fee = models.DecimalField(_("fee"), max_digits=8, decimal_places=2, default=Decimal("0.00"), blank=True)
-    km = models.DecimalField(_("kilometers"), max_digits=6, decimal_places=1, null=True, blank=True)
-    km_rate = models.DecimalField(_("rate per km"), max_digits=6, decimal_places=4, null=True, blank=True, help_text=_("Reimbursement rate per kilometer, e.g. 0.4230."))
-    no_fee = models.BooleanField(_("no fee"), default=False, help_text=_("Not paid for this game (or doesn't wish to be) -- no fee or travel is owed, and the fee isn't flagged as missing."))
+    lineup = models.ForeignKey(Lineup, on_delete=models.CASCADE, related_name="slot_assignments", verbose_name=_("line-up"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="lineup_slot_assignments", verbose_name=_("member"))
+    slot = models.CharField(_("slot"), max_length=100, help_text=_('Place in the sport\'s line-up template: "<group key>.<slot key>".'))
 
     class Meta:
-        verbose_name = _("event referee")
-        verbose_name_plural = _("event referees")
-        ordering = ["event", "member__last_name", "member__first_name"]
+        verbose_name = _("line-up slot assignment")
+        verbose_name_plural = _("line-up slot assignments")
         constraints = [
-            models.UniqueConstraint(fields=["event", "member"], name="unique_referee_per_event"),
-            models.CheckConstraint(
-                condition=(Q(member__isnull=False) & Q(external_name="")) | (Q(member__isnull=True) & ~Q(external_name="")),
-                name="event_referee_member_xor_external_name",
-            ),
+            models.UniqueConstraint(fields=["lineup", "slot"], name="unique_slot_assignment_per_lineup"),
+            models.UniqueConstraint(fields=["lineup", "member", "slot"], name="unique_member_slot_assignment"),
         ]
 
     def __str__(self):
-        return f"{self.event} - {self.display_name}"
-
-    @property
-    def display_name(self) -> str:
-        return str(self.member) if self.member_id else self.external_name
-
-    @property
-    def is_external(self) -> bool:
-        return self.member_id is None
-
-    @property
-    def km_total(self) -> Decimal:
-        return (self.km or Decimal("0")) * (self.km_rate or Decimal("0"))
-
-    @property
-    def fee_pending(self) -> bool:
-        """No fee entered yet, and not marked as unpaid either."""
-        return not self.fee and not self.no_fee
-
-    @property
-    def total_payable(self) -> Decimal:
-        return (self.fee or Decimal("0")) + self.km_total
-
-
-class RefereeSignup(UUIDModel):
-    """One eligible referee's invite/response for one home game -- the
-    self-service counterpart to admin assignment (EventReferee). Created
-    automatically (events.services.referees.sync_referee_invites, wired from
-    events/signals.py) the moment a home game needs a club-arranged referee,
-    for every currently-eligible member (teams.RefereeProfile). Accepting
-    (accept_referee_signup) only records interest (ACCEPTED) -- it is never an
-    automatic assignment. Staff confirm from the referee-management screen
-    (confirm_referee_signup -> the capacity-checked assign_referee), which
-    creates the EventReferee row and moves the signup to CONFIRMED. This table
-    never tracks payment/capacity; EventReferee stays the source of truth for
-    who's actually refereeing.
-    """
-
-    class Status(models.TextChoices):
-        INVITED = "invited", _("invited")
-        #: "I want to come" -- interest only; creates no assignment and uses no capacity.
-        ACCEPTED = "accepted", _("signed up")
-        #: Staff picked them: an EventReferee/EventOfficial row exists.
-        CONFIRMED = "confirmed", _("confirmed")
-        DECLINED = "declined", _("declined")
-
-    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="referee_signups", verbose_name=_("event"))
-    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="referee_signups", verbose_name=_("member"))
-    status = models.CharField(_("status"), max_length=20, choices=Status.choices, default=Status.INVITED)
-    responded_at = models.DateTimeField(_("responded at"), null=True, blank=True)
-
-    class Meta:
-        verbose_name = _("referee sign-up")
-        verbose_name_plural = _("referee sign-ups")
-        ordering = ["event", "member__last_name", "member__first_name"]
-        constraints = [
-            models.UniqueConstraint(fields=["event", "member"], name="unique_referee_signup_per_event_per_member"),
-        ]
-
-    def __str__(self):
-        return f"{self.event} - {self.member} ({self.status})"
-
-
-class EventOfficial(UUIDModel):
-    """The match-officials counterpart to EventReferee -- same shape, same
-    reasoning (see that model's own docstring): one official assigned to one
-    (home) game, either a club member or an external one logged by name
-    only, never both/neither. See events.services.officials for the
-    home-game gate, Event.max_officials, and the (non-blocking) schedule
-    conflict check."""
-
-    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="officials", verbose_name=_("event"))
-    member = models.ForeignKey(Member, on_delete=models.CASCADE, null=True, blank=True, related_name="official_assignments", verbose_name=_("member"))
-    external_name = models.CharField(_("external official name"), max_length=255, blank=True, help_text=_("For an official who isn't a club member (e.g. federation-appointed) -- logged by name only."))
-    assigned_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, related_name="+", verbose_name=_("assigned by"))
-    referee_type = models.ForeignKey("club.RefereeType", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("type"))
-
-    fee = models.DecimalField(_("fee"), max_digits=8, decimal_places=2, default=Decimal("0.00"), blank=True)
-    km = models.DecimalField(_("kilometers"), max_digits=6, decimal_places=1, null=True, blank=True)
-    km_rate = models.DecimalField(_("rate per km"), max_digits=6, decimal_places=4, null=True, blank=True, help_text=_("Reimbursement rate per kilometer, e.g. 0.4230."))
-    no_fee = models.BooleanField(_("no fee"), default=False, help_text=_("Not paid for this game (or doesn't wish to be) -- no fee or travel is owed, and the fee isn't flagged as missing."))
-
-    class Meta:
-        verbose_name = _("event official")
-        verbose_name_plural = _("event officials")
-        ordering = ["event", "member__last_name", "member__first_name"]
-        constraints = [
-            models.UniqueConstraint(fields=["event", "member"], name="unique_official_per_event"),
-            models.CheckConstraint(
-                condition=(Q(member__isnull=False) & Q(external_name="")) | (Q(member__isnull=True) & ~Q(external_name="")),
-                name="event_official_member_xor_external_name",
-            ),
-        ]
-
-    def __str__(self):
-        return f"{self.event} - {self.display_name}"
-
-    @property
-    def display_name(self) -> str:
-        return str(self.member) if self.member_id else self.external_name
-
-    @property
-    def is_external(self) -> bool:
-        return self.member_id is None
-
-    @property
-    def km_total(self) -> Decimal:
-        return (self.km or Decimal("0")) * (self.km_rate or Decimal("0"))
-
-    @property
-    def fee_pending(self) -> bool:
-        """No fee entered yet, and not marked as unpaid either."""
-        return not self.fee and not self.no_fee
-
-    @property
-    def total_payable(self) -> Decimal:
-        return (self.fee or Decimal("0")) + self.km_total
-
-
-class OfficialSignup(UUIDModel):
-    """The match-officials counterpart to RefereeSignup -- same shape, same
-    reasoning: one eligible official's invite/response for one home game,
-    created automatically (events.services.officials.sync_official_invites)
-    the moment a home game needs a club-arranged official."""
-
-    class Status(models.TextChoices):
-        INVITED = "invited", _("invited")
-        #: "I want to come" -- interest only; creates no assignment and uses no capacity.
-        ACCEPTED = "accepted", _("signed up")
-        #: Staff picked them: an EventReferee/EventOfficial row exists.
-        CONFIRMED = "confirmed", _("confirmed")
-        DECLINED = "declined", _("declined")
-
-    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="official_signups", verbose_name=_("event"))
-    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="official_signups", verbose_name=_("member"))
-    status = models.CharField(_("status"), max_length=20, choices=Status.choices, default=Status.INVITED)
-    responded_at = models.DateTimeField(_("responded at"), null=True, blank=True)
-
-    class Meta:
-        verbose_name = _("official sign-up")
-        verbose_name_plural = _("official sign-ups")
-        ordering = ["event", "member__last_name", "member__first_name"]
-        constraints = [
-            models.UniqueConstraint(fields=["event", "member"], name="unique_official_signup_per_event_per_member"),
-        ]
-
-    def __str__(self):
-        return f"{self.event} - {self.member} ({self.status})"
+        return f"{self.lineup} - {self.member} - {self.slot}"
 
 
 class EventTask(UUIDModel):
-    """A logistics ask a team manager/admin attaches to an event (e.g. "Bring
-    fruit for half-time") -- families/members confirm whether they can take
-    it, up to needed_quantity at once (see EventTaskClaim and
-    events.services.tasks.claim_task for the capacity-checked claim itself).
-    Not kind-restricted -- a training or social can need this just as much
-    as a game."""
+    """A logistics ask a team manager attaches to an event (e.g. "Bring fruit for half-time"): members confirm they can
+    take it, up to ``needed_quantity`` at once (see EventTaskClaim). Any kind of event can have tasks."""
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="tasks", verbose_name=_("event"))
     title = models.CharField(_("title"), max_length=255)
     description = models.TextField(_("description"), blank=True)
     needed_quantity = models.PositiveSmallIntegerField(_("needed quantity"), default=1, help_text=_("How many people/families need to take this on."))
     created_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("created by"))
-    created_at = models.DateTimeField(_("created at"), auto_now_add=True)
 
     class Meta:
         verbose_name = _("event task")
         verbose_name_plural = _("event tasks")
-        ordering = ["event", "created_at"]
+        ordering = ["event", "created"]
 
     def __str__(self):
         return f"{self.event} - {self.title}"
 
 
 class EventTaskClaim(UUIDModel):
-    """One person's claim on one slot of an EventTask -- see
-    events.services.tasks.claim_task for the capacity check against
-    EventTask.needed_quantity. Displayed under the claiming member's own
-    family (members.services.family.claim_label_for) rather than their own
-    name, when they have one -- the rest of the team only needs to know it's
-    covered, not by which specific parent or child."""
+    """One person's claim on one slot of an EventTask (capacity is checked against ``needed_quantity``)."""
 
     task = models.ForeignKey(EventTask, on_delete=models.CASCADE, related_name="claims", verbose_name=_("task"))
     member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="event_task_claims", verbose_name=_("member"))
-    claimed_at = models.DateTimeField(_("claimed at"), auto_now_add=True)
 
     class Meta:
         verbose_name = _("event task claim")
         verbose_name_plural = _("event task claims")
-        ordering = ["task", "claimed_at"]
-        constraints = [
-            models.UniqueConstraint(fields=["task", "member"], name="unique_claim_per_member_per_task"),
-        ]
+        ordering = ["task", "created"]
+        constraints = [models.UniqueConstraint(fields=["task", "member"], name="unique_claim_per_member_per_task")]
 
     def __str__(self):
         return f"{self.task} - {self.member}"
 
 
 def event_attachment_path(attachment, filename):
-    """``event-attachments/<event id>/<random>-<safe file name>`` in private storage. The random
-    prefix keeps two uploads with the same name apart and makes the path unguessable; the original
-    name is kept (made safe for a filesystem) only so a download is recognisable."""
+    """``event-attachments/<event id>/<random>-<safe file name>`` in private storage: the random prefix keeps same-named
+    uploads apart and the path unguessable; the original name is kept (made filesystem-safe) so a download is recognisable."""
     try:
         safe_name = get_valid_filename(filename)
-    except SuspiciousFileOperation:  # a name like "." or "" has nothing usable left
+    except SuspiciousFileOperation:
         safe_name = "file"
     if len(safe_name) > 100:
         stem, dot, extension = safe_name.rpartition(".")
@@ -583,10 +578,8 @@ def event_attachment_path(attachment, filename):
 
 
 class EventAttachment(UUIDModel):
-    """A file a team manager/admin attaches to an event (a tournament schedule, a map, a
-    consent form) for the invited people to open. Stored privately and only ever streamed
-    through an authenticated view (events.services.attachments.can_view_attachments decides
-    who), never a public /media link."""
+    """A file attached to an event (a tournament schedule, a map, a consent form) for the invited people to open. Stored
+    privately and only ever streamed through an authenticated view, never a public /media link."""
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="attachments", verbose_name=_("event"))
     file = models.FileField(_("file"), storage=get_private_storage, upload_to=event_attachment_path, max_length=255)
@@ -604,20 +597,10 @@ class EventAttachment(UUIDModel):
 
 
 class GameTimeline(UUIDModel):
-    """What happened during one game -- goals and who scored them, penalties,
-    goalie changes, time-outs, period scores -- as fetched from the game's
-    competition (see GAME_TIMELINE.md and events.services.game_timeline).
-
-    A one-to-one side table rather than columns on Event: Event is loaded
-    everywhere (calendar, lists, attendance, the API) and ``data`` runs from a
-    few to a few dozen KB, so it's only joined where it's actually wanted.
-    Club-scoped through ``event``, like Attendance/Lineup/EventReferee.
-
-    ``data`` is the normalized document (GAME_TIMELINE.md §2.2) -- one shape
-    for every source. ``data_hash`` lets a poll that found nothing new skip the
-    write. ``raw`` is the last payload ``data`` was parsed from, kept (only the
-    latest) so a parser fix can re-parse stored games.
-    """
+    """What happened during one game (goals and who scored them, penalties, goalie changes, time-outs, period scores) as
+    fetched from the game's competition. A one-to-one side table: ``data`` is the normalised document (one shape for every
+    source), ``data_hash`` lets a poll that found nothing new skip the write, ``raw`` is the last payload it was parsed
+    from so a parser fix can re-parse stored games."""
 
     class Status(models.TextChoices):
         SCHEDULED = "scheduled", _("scheduled")
@@ -647,16 +630,9 @@ class GameTimeline(UUIDModel):
 
 
 class GameMoment(UUIDModel):
-    """One piece of news detected in a game's timeline, from the club's own
-    side -- a goal for or against, a goal taken back, a penalty, a period or
-    the game ending (events.services.game_moments, GAME_TIMELINE.md §4).
-
-    Recorded once per (event, key): ``key`` is the kind plus the timeline event
-    it's about, so a repeated or racing fetch can't record it twice. Push
-    notifications (not built yet) will read these rows -- ``notifiable`` says
-    whether it's recent enough to be worth telling anyone, ``delivered_at``
-    will say it was.
-    """
+    """One piece of news detected in a game's timeline from the club's own side (a goal for or against, a penalty, a period
+    or the game ending). Recorded once per (event, key) so a repeated or racing fetch cannot record it twice; ``notifiable``
+    says it is recent enough to be worth telling anyone, ``delivered_at`` that it was pushed."""
 
     class Kind(models.TextChoices):
         GAME_STARTED = "game_started", _("game started")
@@ -677,36 +653,23 @@ class GameMoment(UUIDModel):
     payload = models.JSONField(_("payload"), default=dict, blank=True)
     game_seconds = models.PositiveIntegerField(_("game time (seconds)"), null=True, blank=True)
     notifiable = models.BooleanField(_("notifiable"), default=True, help_text=_("Recent enough in game time to be worth notifying about (not a catch-up after an outage)."))
-    created_at = models.DateTimeField(_("detected at"), auto_now_add=True)
-    delivered_at = models.DateTimeField(_("delivered at"), null=True, blank=True, help_text=_("When it was pushed out -- not used until push notifications exist."))
+    delivered_at = models.DateTimeField(_("delivered at"), null=True, blank=True, help_text=_("When it was pushed out."))
 
     class Meta:
         verbose_name = _("game moment")
         verbose_name_plural = _("game moments")
-        ordering = ["event", "created_at"]
+        ordering = ["event", "created"]
         constraints = [models.UniqueConstraint(fields=["event", "key"], name="unique_game_moment_per_event")]
 
     def __str__(self):
         return f"{self.event} - {self.get_kind_display()}"
 
 
-class GameStat(ClubScopedModel):
-    """One countable thing a player (or the opposition) did in a game -- a goal, an
-    assist, penalty minutes -- flattened out of the game's timeline so team analytics
-    can sum it with a query instead of reading JSON (events.services.game_stats).
-
-    Deliberately sport-agnostic: ``stat_type`` is a free slug ("goal", "assist",
-    "penalty_minutes" for ice hockey; a later sport adds its own) and ``value`` is how
-    much of it this row counts (1 for a goal, the minutes for a penalty). Anything
-    sport-specific (strength, penalty code, ...) rides along in ``meta``.
-
-    One row per (game, team of ours, source event, stat type): a game shared by two of
-    the club's teams is recorded once for each, so a team's page just filters on
-    ``team``. ``is_ours`` is resolved from the club's own side, like Event.score_for.
-    ``member`` is matched to the roster when the timeline's jersey number or name
-    allows; it stays empty for opponents and for players that couldn't be matched
-    (``player_name`` / ``player_number`` always keep what the source said).
-    """
+class GameStat(UUIDModel):
+    """One countable thing a player (or the opposition) did in a game (a goal, an assist, penalty minutes), flattened out of
+    the game's timeline so team analytics can sum it with a query. Sport-agnostic: ``stat_type`` is a free slug and ``value``
+    how much this row counts. One row per (game, team of ours, source event, stat type); ``is_ours`` is resolved from the
+    club's own side; ``member`` is matched to the roster when the jersey number or name allows."""
 
     class StatType(models.TextChoices):
         GOAL = "goal", _("goal")
@@ -716,9 +679,10 @@ class GameStat(ClubScopedModel):
         POWER_PLAY_OPPORTUNITY = "pp_opportunity", _("power-play opportunity")
         GOAL_CONCEDED = "goal_conceded", _("goal conceded")
         GOALIE_SECONDS = "goalie_seconds", _("goalie time in net (seconds)")
+        APPEARANCE = "appearance", _("game played (on the line-up)")
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="stats", verbose_name=_("event"))
-    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="game_stats", verbose_name=_("team"))
+    team = models.ForeignKey("teams.Team", on_delete=models.CASCADE, related_name="game_stats", verbose_name=_("team"))
     season = models.ForeignKey(Season, on_delete=models.CASCADE, null=True, blank=True, related_name="game_stats", verbose_name=_("season"))
     stat_type = models.CharField(_("stat"), max_length=30, db_index=True)
     value = models.PositiveSmallIntegerField(_("value"), default=1)
@@ -741,16 +705,12 @@ class GameStat(ClubScopedModel):
         return f"{self.event} - {self.stat_type} {self.value}"
 
 
-class GameFollow(ClubScopedModel):
-    """An account following one of the club's teams for live game pushes --
-    goals, penalties, the result, as detected in its games' timelines
-    (events.services.game_push, GAME_TIMELINE.md phase 4). Opt-in: anyone with
-    an account in the club picks the teams they want, from the member app or
-    the PWA's "Live game updates" screen. Per account (not per Member), since
-    pushes go to an account's devices whichever of its people they concern."""
+class GameFollow(UUIDModel):
+    """An account following one of the club's teams for live game pushes (goals, penalties, the result). Opt-in, per
+    account (not per member) since pushes go to an account's devices."""
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="game_follows", verbose_name=_("user"))
-    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="followers", verbose_name=_("team"))
+    team = models.ForeignKey("teams.Team", on_delete=models.CASCADE, related_name="followers", verbose_name=_("team"))
 
     class Meta:
         verbose_name = _("game follow")
@@ -761,11 +721,8 @@ class GameFollow(ClubScopedModel):
         return f"{self.user} -> {self.team}"
 
 
-class EventFollow(ClubScopedModel):
-    """An account following ONE game for live updates -- on Home while it is on, and the same live
-    pushes GameFollow gives a team's followers. The single-game counterpart to GameFollow (which
-    follows every game of a team); an account can have both, and a game it follows both ways
-    shows once. Per account, not per Member, for the same reason as GameFollow."""
+class EventFollow(UUIDModel):
+    """An account following ONE game for live updates; the single-game counterpart to GameFollow."""
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="event_follows", verbose_name=_("user"))
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="followers", verbose_name=_("event"))
@@ -779,32 +736,43 @@ class EventFollow(ClubScopedModel):
         return f"{self.user} -> {self.event}"
 
 
-class Competition(models.Model):
-    """A competition has a name with a specific URL to fetch data from. These are managed centrally."""
+class StatsRefresh(UUIDModel):
+    """A background re-link of game stats after someone was added to a team's roster: the team's stored game sheets are
+    matched against the new roster again (jersey number / name) so the player's numbers show up. While ``running`` the
+    member's Stats tab shows an "update in progress" banner."""
 
-    name = models.CharField(max_length=250)
-    module = models.CharField(max_length=250)
-    sport_type = models.CharField(
-        _("sport"),
-        max_length=20,
-        choices=sport_choices,
-        default=Club.SportType.OTHER,
-        help_text=_("Which sport this competition is for."),
-    )
-    flag = models.ForeignKey(
-        settings.WAFFLE_FLAG_MODEL,
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name="competitions",
-        verbose_name=_("feature flag"),
-        help_text=_("Which clubs this competition is offered to -- set (or leave blank to hide it everywhere) from the control panel's Features page. A competition with no flag never shows up on the Event admin's competition dropdown."),
-    )
+    class Status(models.TextChoices):
+        RUNNING = "running", _("running")
+        DONE = "done", _("done")
+        FAILED = "failed", _("failed")
+
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="stats_refreshes", verbose_name=_("member"))
+    team = models.ForeignKey("teams.Team", on_delete=models.CASCADE, related_name="stats_refreshes", verbose_name=_("team"))
+    status = models.CharField(_("status"), max_length=10, choices=Status.choices, default=Status.RUNNING, db_index=True)
+    games = models.PositiveIntegerField(_("games checked"), default=0)
+    updated = models.PositiveIntegerField(_("games updated"), default=0)
+    finished_at = models.DateTimeField(_("finished at"), null=True, blank=True)
+    error = models.TextField(_("error"), blank=True)
 
     class Meta:
-        verbose_name = _("competition")
-        verbose_name_plural = _("competitions")
-        ordering = ["name"]
+        verbose_name = _("stats refresh")
+        verbose_name_plural = _("stats refreshes")
+        ordering = ["-created"]
 
     def __str__(self):
-        return self.name
+        return f"{self.member} / {self.team} ({self.status})"
+
+
+class CalendarFeed(UUIDModel):
+    """An account's secret calendar link (``/public/calendar/<token>.ics``) to subscribe to from Google, Apple or Outlook calendar.
+    One per login in this club: it carries that person's events and those of the children they manage. No row means the link is off."""
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="calendar_feed", verbose_name=_("user"))
+    token = models.CharField(_("token"), max_length=64, unique=True, editable=False)
+
+    class Meta:
+        verbose_name = _("calendar feed")
+        verbose_name_plural = _("calendar feeds")
+
+    def __str__(self):
+        return f"calendar feed of {self.user}"

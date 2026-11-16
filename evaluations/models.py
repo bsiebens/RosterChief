@@ -1,132 +1,87 @@
-from django.core.exceptions import ValidationError
+"""Player evaluations. Lives in the club schema, so there is no club foreign key anywhere.
+
+A checklist is a named rubric whose criteria are the fields of a ``formbuilder.Form`` (see ``evaluations.services.checklists``).
+Filling it in for a player stores an ordinary formbuilder ``Submission`` (the player is ``member``, the evaluator
+``submitted_by``) plus the ``PlayerEvaluation`` envelope that says which checklist and season it was about.
+"""
+
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
-from club.models import Season
-from formbuilder.models import Form
+from events.models import Season
+from formbuilder.models import Form, unique_slug
 from members.models import Member
-from rosterchief.base import ClubScopedModel, validate_club_scope
+from rosterchief.base import UUIDModel
 
 
-class EvaluationChecklist(ClubScopedModel):
-    """One named, independently-versioned rubric for this club (e.g. "U8",
-    "U10", "Goalkeepers") -- a club can run several side by side, each
-    scoring a different cohort of players against its own set of criteria.
-    Formerly ``EvaluationSettings``, a singleton-per-club row; renamed and
-    given a name/slug once evaluations grew to support more than one
-    checklist per club.
-
-    ``form`` points at the formbuilder.Form backing this checklist's
-    *current* version, created lazily the first time an admin builds/edits
-    its rubric (see evaluations.services.current_rubric_form). Swapping the
-    rubric re-points ``form`` at a new Form (see
-    evaluations.services.start_new_rubric_version) rather than mutating the
-    existing one's Fields in place -- existing PlayerEvaluations keep
-    referencing their Submission's original Form/Fields (already immutable
-    once a Submission exists, via formbuilder's own FK shape), so an old
-    evaluation still renders with the questions it was actually scored
-    against. There is deliberately no FK from Form back to EvaluationChecklist
-    (formbuilder stays unaware evaluations exist at all, same reasoning as
-    evaluations.services' own module docstring) -- PlayerEvaluation.checklist
-    is what lets a checklist's past versions be found again, by walking its
-    own evaluations rather than Form.
-    """
+class EvaluationChecklist(UUIDModel):
+    """One named rubric (e.g. "U8", "Goalkeepers"). A club can run several side by side, each scoring its own cohort against
+    its own criteria. The criteria are the fields of ``form``; that form is created with the checklist and never shown in the
+    Forms section."""
 
     name = models.CharField(_("name"), max_length=255)
-    slug = models.SlugField(_("slug"), blank=True)
-    description = models.TextField(_("description"), blank=True, help_text=_("Optional notes for whoever picks a checklist -- e.g. which age group or squad it's meant for."))
-    is_active = models.BooleanField(_("is active?"), default=True, help_text=_("Whether this checklist can still be picked for a new evaluation. Existing evaluations against it are unaffected."))
-    form = models.ForeignKey(Form, on_delete=models.PROTECT, related_name="evaluation_checklists_for", null=True, blank=True, verbose_name=_("form"))
-
-    slug_source = "name"
+    slug = models.SlugField(_("slug"), max_length=255, unique=True, blank=True)
+    description = models.TextField(_("description"), blank=True, help_text=_("Optional notes for whoever picks a checklist, e.g. which age group it is meant for."))
+    is_active = models.BooleanField(_("is active?"), default=True, help_text=_("Whether this checklist can still be picked for a new evaluation. Existing evaluations are unaffected."))
+    form = models.OneToOneField(Form, on_delete=models.PROTECT, related_name="evaluation_checklist", verbose_name=_("form"))
 
     class Meta:
         verbose_name = _("evaluation checklist")
         verbose_name_plural = _("evaluation checklists")
         ordering = ["name"]
-        constraints = [
-            models.UniqueConstraint(fields=["club", "slug"], name="unique_evaluation_checklist_slug_per_club"),
-        ]
 
     def __str__(self):
-        return f"{self.club} - {self.name}"
+        return self.name
 
-    def clean(self):
-        validate_club_scope(self, self.club_id, same_club_fields=("form",))
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = unique_slug(self, self.name, fallback="checklist")
+        super().save(*args, **kwargs)
 
 
-class PlayerEvaluation(ClubScopedModel):
-    """The "who this was about, for which season" envelope around a
-    formbuilder.Submission -- formbuilder's own Submission.member is the
-    *submitter* (here, the evaluator filling the rubric in), and a generic
-    form has no notion of a separate subject, so this pairs the two rather
-    than growing Submission an evaluation-specific field. Club-wide, not
-    scoped to a specific Team -- a member evaluated on more than one team in
-    the same season gets one PlayerEvaluation per submission, same as any
-    other coach's perspective (see the docstring on the missing uniqueness
-    constraint below).
-
-    Carries its own ``club`` FK (via ClubScopedModel) rather than relying on
-    ``player``'s or ``submission``'s, even though both are already club-scoped
-    transitively -- this is a first-class object management views query
-    directly (every evaluation for this club), not just reached by joining
-    through Form/FormSend the way formbuilder.Answer reaches Form.
-
-    Access is gated entirely at the view layer (club.mixins.
-    EvaluationManagerRequiredMixin) -- nothing here restricts who can create
-    or query these; a player/guardian must simply never be routed to a view
-    that does.
-    """
+class PlayerEvaluation(UUIDModel):
+    """Who a submission was about, on which checklist and in which season. Several coaches may evaluate the same player in the
+    same season (several perspectives), so there is deliberately no uniqueness constraint."""
 
     player = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="evaluations_received", verbose_name=_("player"))
     season = models.ForeignKey(Season, on_delete=models.PROTECT, related_name="player_evaluations", verbose_name=_("season"))
-    #: Denormalized like ``club`` above, and for the same reason: this is what
-    #: lets a checklist's evaluations be found across every version of its
-    #: Form (each edit is a brand-new Form row -- see EvaluationChecklist's
-    #: own docstring), and what the statistics/results-matrix/walkthrough
-    #: views (evaluations.services) group and filter by. PROTECT -- a
-    #: checklist with evaluations against it can be deactivated but not
-    #: deleted out from under them.
+    #: PROTECT: a checklist with evaluations can be deactivated but not deleted out from under them.
     checklist = models.ForeignKey(EvaluationChecklist, on_delete=models.PROTECT, related_name="evaluations", verbose_name=_("checklist"))
-    #: CASCADE: a PlayerEvaluation has no meaning once its own Submission (the
-    #: evaluator's actual answers) is gone -- there is nothing left to show.
+    #: CASCADE: without its submission (the evaluator's answers) there is nothing left to show.
     submission = models.OneToOneField("formbuilder.Submission", on_delete=models.CASCADE, related_name="player_evaluation", verbose_name=_("submission"))
+
+    class Release(models.TextChoices):
+        NONE = "", _("Not shared")
+        NOTES = "notes", _("Notes only")
+        FULL = "full", _("Notes and details")
+
+    #: Written for the player and their family. Shown only once the evaluation is released.
+    public_note = models.TextField(_("public note"), blank=True)
+    #: What the player and their family may see. Evaluations stay private until someone releases them on purpose.
+    release = models.CharField(_("shared with the player"), max_length=8, choices=Release.choices, blank=True, default=Release.NONE)
+    released_at = models.DateTimeField(_("released at"), null=True, blank=True)
+    released_by = models.ForeignKey(Member, on_delete=models.SET_NULL, related_name="+", null=True, blank=True, verbose_name=_("released by"))
 
     class Meta:
         verbose_name = _("player evaluation")
         verbose_name_plural = _("player evaluations")
         ordering = ["-created"]
-        # Deliberately no uniqueness constraint on (player, season) or (player,
-        # season, evaluator) -- several coaches leaving their own evaluation of
-        # the same player in the same season is a feature (multiple
-        # perspectives), not a duplicate to prevent. A member can have zero,
-        # one, or many PlayerEvaluations.
 
     def __str__(self):
         return f"{self.player} - {self.season}"
 
-    def clean(self):
-        validate_club_scope(self, self.club_id, member_fields=("player",), same_club_fields=("checklist",))
-        if self.submission_id and self.submission.send.club_id != self.club_id:
-            raise ValidationError({"submission": _("Must belong to the same club.")})
+    @property
+    def evaluator(self):
+        return self.submission.submitted_by
 
 
-class EvaluationNote(ClubScopedModel):
-    """A free-text discussion note about one player, in the context of one
-    checklist -- captured during a walkthrough session ("transfer
-    candidate", "work on positioning"), not tied to any single
-    PlayerEvaluation. Deliberately separate from PlayerEvaluation's own
-    structured rubric answers: this is the running log a coaching staff
-    builds up across repeated walkthrough sessions, meant to still read back
-    sensibly a month later regardless of how many more evaluations land in
-    between -- an evaluation's answers are a snapshot at one point in time,
-    a note is commentary that survives past it."""
+class EvaluationNote(UUIDModel):
+    """A free-text discussion note about one player in the context of one checklist, left during a meeting ("transfer candidate",
+    "work on positioning"). Not tied to any one evaluation: a running log that still reads sensibly a month later."""
 
     player = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="evaluation_notes", verbose_name=_("player"))
     checklist = models.ForeignKey(EvaluationChecklist, on_delete=models.CASCADE, related_name="notes", verbose_name=_("checklist"))
-    #: SET_NULL, not PROTECT/CASCADE -- same reasoning as formbuilder.Submission.member
-    #: (the evaluator on a Submission): whoever wrote the note may later leave the
-    #: club, but the note itself -- and that someone left it -- should still show.
+    #: SET_NULL: whoever wrote it may leave the club; the note, and that someone left it, should stay.
     author = models.ForeignKey(Member, on_delete=models.SET_NULL, related_name="evaluation_notes_authored", null=True, blank=True, verbose_name=_("author"))
     note = models.TextField(_("note"))
 
@@ -136,79 +91,46 @@ class EvaluationNote(ClubScopedModel):
         ordering = ["-created"]
 
     def __str__(self):
-        return f"{self.player} — {self.checklist} ({self.created:%Y-%m-%d})"
-
-    def clean(self):
-        validate_club_scope(self, self.club_id, member_fields=("player",), same_club_fields=("checklist",))
+        return f"{self.player} - {self.checklist} ({self.created:%Y-%m-%d})"
 
 
-class EvaluationSession(ClubScopedModel):
-    """One evaluation meeting for a single checklist -- started when a
-    coaching staff sits down to walk through players together, ended when
-    the meeting wraps up. Exists purely so EvaluationOutcome has something to
-    attach to: PlayerEvaluation and EvaluationNote both predate this and
-    don't need it, since they're per-player facts recorded any time, with no
-    "which meeting" to group them by. A re-evaluation weeks later is just
-    another PlayerEvaluation, with no session at all.
-
-    At most one open (``ended_at`` unset) session per checklist at a time --
-    starting a second one before the first ends would fork the meeting's own
-    outcome notes across two rows with no way to tell which is current (see
-    the constraint below and evaluations.services.start_session, which
-    returns the existing open session rather than erroring)."""
+class EvaluationSession(UUIDModel):
+    """One evaluation meeting for a checklist: started when the coaching staff sit down to go through players together, ended when
+    it wraps up. It exists so outcomes have something to attach to. At most one is open per checklist at a time."""
 
     checklist = models.ForeignKey(EvaluationChecklist, on_delete=models.CASCADE, related_name="sessions", verbose_name=_("checklist"))
     started_at = models.DateTimeField(_("started at"), auto_now_add=True)
     ended_at = models.DateTimeField(_("ended at"), null=True, blank=True)
-    #: SET_NULL, not PROTECT/CASCADE -- same reasoning as EvaluationNote.author:
-    #: whoever ran the meeting may later leave the club, but the session (and
-    #: its outcomes) should still show.
     started_by = models.ForeignKey(Member, on_delete=models.SET_NULL, related_name="+", null=True, blank=True, verbose_name=_("started by"))
 
     class Meta:
         verbose_name = _("evaluation session")
         verbose_name_plural = _("evaluation sessions")
         ordering = ["-started_at"]
-        constraints = [
-            models.UniqueConstraint(fields=["checklist"], condition=models.Q(ended_at__isnull=True), name="one_open_evaluation_session_per_checklist"),
-        ]
+        constraints = [models.UniqueConstraint(fields=["checklist"], condition=models.Q(ended_at__isnull=True), name="one_open_evaluation_session_per_checklist")]
 
     def __str__(self):
-        return f"{self.checklist} — {self.started_at:%Y-%m-%d %H:%M}"
+        return f"{self.checklist} - {self.started_at:%Y-%m-%d %H:%M}"
 
     @property
     def is_open(self) -> bool:
         return self.ended_at is None
 
-    def clean(self):
-        validate_club_scope(self, self.club_id, same_club_fields=("checklist",))
 
-
-class EvaluationOutcome(ClubScopedModel):
-    """The meeting's actual decision on one player -- promoted, released,
-    needs another look, whatever the coaching staff agreed -- kept in its own
-    model, separate from EvaluationNote's private running discussion log, so
-    exporting "what we decided" (evaluations.services.session_outcome_rows,
-    management's evaluation_outcomes_pdf.html) can never accidentally pull
-    the informal notes in alongside it. One row per (session, player): edited
-    in place while the meeting is still open, not a log of every edit."""
+class EvaluationOutcome(UUIDModel):
+    """The meeting's decision on one player (promoted, released, needs another look ...), kept apart from the private notes so
+    exporting "what we decided" can never pull the informal notes along. One row per (session, player), edited in place."""
 
     session = models.ForeignKey(EvaluationSession, on_delete=models.CASCADE, related_name="outcomes", verbose_name=_("session"))
     player = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="evaluation_outcomes", verbose_name=_("player"))
     decision = models.TextField(_("decision"))
-    #: SET_NULL -- same reasoning as EvaluationNote.author.
     recorded_by = models.ForeignKey(Member, on_delete=models.SET_NULL, related_name="+", null=True, blank=True, verbose_name=_("recorded by"))
 
     class Meta:
         verbose_name = _("evaluation outcome")
         verbose_name_plural = _("evaluation outcomes")
         ordering = ["player__last_name", "player__first_name"]
-        constraints = [
-            models.UniqueConstraint(fields=["session", "player"], name="unique_outcome_per_session_per_player"),
-        ]
+        constraints = [models.UniqueConstraint(fields=["session", "player"], name="unique_outcome_per_session_per_player")]
 
     def __str__(self):
-        return f"{self.player} — {self.session}"
-
-    def clean(self):
-        validate_club_scope(self, self.club_id, member_fields=("player",), same_club_fields=("session",))
+        return f"{self.player} - {self.session}"

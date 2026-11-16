@@ -1,5 +1,5 @@
-# Created by https://www.toptal.com/developers/gitignore/api/python,pycharm,django
-# Edit at https://www.toptal.com/developers/gitignore?templates=python,pycharm,django
+# Created by https://www.toptal.com/developers/gitignore/api/django,python,pycharm
+# Edit at https://www.toptal.com/developers/gitignore?templates=django,python,pycharm
 
 ### Django ###
 *.log
@@ -10,7 +10,6 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 media
-private_media
 
 # If your build process includes running collectstatic, then you probably don't need or want to include staticfiles/
 # in your Git repository. Update and uncomment the following line accordingly.
@@ -134,14 +133,6 @@ celerybeat.pid
 
 # Environments
 .env
-# Any local env variant (.env.production, .env.local, ...). Only the *.example
-# templates are meant to be committed.
-.env.*
-!.env*.example
-# Any per-target deploy config (SSH_HOST/SSH_USER/SSH_KEY_FILE/... -- see deploy/.env.deploy.
-# example), whatever you name the copy -- only the example itself is meant to be committed.
-deploy/.env.*
-!deploy/.env.deploy.example
 .venv
 env/
 venv/
@@ -385,13 +376,15 @@ poetry.toml
 # LSP config files
 pyrightconfig.json
 
-# End of https://www.toptal.com/developers/gitignore/api/python,pycharm,django%
-# Node
-node_modules/
-staticfiles/
+# End of https://www.toptal.com/developers/gitignore/api/django,python,pycharm
+# Frontend apps: SvelteKit keeps its shared code in src/lib (the Python "lib/" rule above would hide it from git and Tailwind)
+!frontend/*/src/lib/
 
-# macOS Finder metadata
-.DS_Store
+# Private uploads (member photos, ...): never served directly, only through authenticated views
+private_media/
 
-# Per-developer IDE settings (PyCharm) -- not shared.
-.idea/
+# Deployment: real environment files hold hosts and secrets; only the examples are tracked.
+deploy/environments/*.env
+deploy/environments/*.secrets
+!deploy/environments/*.example
+!deploy/lib/

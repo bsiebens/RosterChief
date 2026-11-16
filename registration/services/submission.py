@@ -1,242 +1,206 @@
-"""Turns a registration form's submission into real records -- a Member (+
-family link) and a PENDING ClubMembership per entry, landing straight in
-the existing Sign-up queue (club.services.onboarding) rather than a second,
-parallel review gate. See registration/models.py's own module docstrings
-for why RegistrationBatch/RegistrationDetails carry no status of their own,
-and why RegistrationDetails.membership is a plain FK -- registering the same
-member again for an already-open season (a second team, or player and
-referee both) adds a new request onto their existing ClubMembership rather
-than erroring or replacing the first one.
+"""Submitting the public join page: validate, price and create everything in one transaction (ported from ``registration.services.submission``).
+
+Per submission: a contact (always a **fresh** member -- an anonymous visitor is never matched to an existing person by email, staff merge them
+later with ``linking``), the people being registered (the contact themselves and/or children), a family when children are involved (the contact
+is its PARENT), and for each person a PENDING ``ClubMembership`` whose fee, early-bird deadline and discount come from ``pricing``. No login is
+created. The batch stays out of the Sign-ups queue until staff confirm its invoice (``invoicing``).
 """
 
-from dataclasses import dataclass
-from datetime import date
-from decimal import Decimal
+import datetime
+import logging
 
-from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.db import transaction
-from django.db.models import F
 from django.utils import timezone
-from django.utils.translation import gettext_lazy as _
 
-from club.models import ClubMembership
-from club.services.fees import sync_fee_status
-from members.models import Family, FamilyMembership, Member
-from members.services.family import add_parent_to_family, get_or_create_login_member
-from shop.models import ProductVariant
-from teams.models import Position, Team
+from club.services import create_member
+from members.models import ClubMembership, Family, FamilyMembership
+from members.services import audit
+from members.services import memberships as fees
+from members.services.errors import Invalid
+from members.services.members import _clean
+from registration.models import RegistrationBatch, RegistrationDetails
+from registration.services import config, holds, pricing
+from teams.models import Position, Team, TeamMembership
+from teams.services import numbers
 
-from ..models import RegistrationBatch, RegistrationDetails
-from .pricing import PricingError, price_entries, resolve_registration_season
+log = logging.getLogger(__name__)
 
-User = get_user_model()
-
-
-class RegistrationError(Exception):
-    """A registration couldn't be submitted as given."""
-
-
-@dataclass
-class EntryInput:
-    """One row of the registration form -- either a brand-new person
-    (first_name/last_name/date_of_birth) or an already-known one
-    (existing_member, e.g. the mobile re-registration screen picking one of
-    the signed-in member's own managed_people). ``is_contact`` marks the one
-    entry (if any) that *is* the person filling in the form themselves --
-    told explicitly by the caller rather than inferred by name-matching,
-    since that's the only unambiguous way to know it."""
-
-    first_name: str = ""
-    last_name: str = ""
-    date_of_birth: date | None = None
-    entry_kind: str = RegistrationDetails.EntryKind.PLAYER
-    requested_team: Team | None = None
-    requested_position: Position | None = None
-    requested_jersey_number: int | None = None
-    product_variant: ProductVariant | None = None
-    existing_member: Member | None = None
-    is_contact: bool = False
+MAX_ENTRIES = 12
+HELD_MESSAGE = "Number {number} was just taken by another registration. Choose another number."
+LANGS = ("en", "nl", "fr")
 
 
-def _is_authenticated(user):
-    return user is not None and user.is_authenticated
+class RegistrationClosed(Invalid):
+    def __init__(self):
+        super().__init__("Registration is closed.", {"__all__": ["Registration is closed."]}, code="closed")
 
 
-def _resolve_contact_member(submitted_by_user, contact_first_name, contact_last_name, contact_email):
-    """The Member behind whoever is filling in the form.
+def _text(value) -> str:
+    return (value or "").strip() if isinstance(value, str) else ""
 
-    Signed in: always the account's own Member (created for it if the
-    account has none yet) -- the login is the only trustworthy "who is
-    this" signal. Never looked up by the typed email, which could name
-    someone else entirely.
 
-    Anonymous: always a *fresh* Member. The typed email is unverified, so an
-    anonymous submission is never bound to an existing Member or login by
-    email -- staff links a genuine duplicate afterwards from the Sign-up
-    page (club.services.signup_linking.possible_duplicates/
-    link_to_existing_member). The fresh Member only gets a login of its own
-    when no account uses that email yet (they set a password via the reset-
-    link flow, same as before); otherwise it's a login-less record carrying
-    the email as its contact address."""
-    if _is_authenticated(submitted_by_user):
-        member, _created = Member.objects.get_or_create(user=submitted_by_user, defaults={"first_name": contact_first_name, "last_name": contact_last_name})
-        return member
-    if contact_email and not User.objects.filter(email__iexact=contact_email).exists():
-        return get_or_create_login_member(contact_email, contact_first_name, contact_last_name)
-    return Member.objects.create(first_name=contact_first_name, last_name=contact_last_name, email=contact_email)
+def _option_key(entry: dict) -> str:
+    """What a person chose: ``option_id`` (``variant:<uuid>`` / ``product:<uuid>``), else the old ``variant_id``."""
+    return str(entry.get("option_id") or entry.get("variant_id") or "")
+
+
+def validate(contact: dict, entries: list[dict]) -> list[dict]:
+    """Check the form; returns the entries with resolved objects (``option``, ``team``, ``position``) or raises ``Invalid`` with errors keyed
+    ``contact.<field>`` / ``entries.<index>.<field>``."""
+    errors: dict[str, list[str]] = {}
+    if not _text(contact.get("first_name")):
+        errors["contact.first_name"] = ["Required."]
+    if not _text(contact.get("last_name")):
+        errors["contact.last_name"] = ["Required."]
+    email = _text(contact.get("email"))
+    try:
+        validate_email(email)
+    except ValidationError:
+        errors["contact.email"] = ["Enter a valid email address."]
+    if not entries:
+        errors["entries"] = ["Add at least one person."]
+    if len(entries) > MAX_ENTRIES:
+        errors["entries"] = [f"At most {MAX_ENTRIES} people at once."]
+    options = pricing.options_by_key([_option_key(e) for e in entries])
+    teams = {t.pk: t for t in Team.objects.filter(pk__in=[e["requested_team_id"] for e in entries if e.get("requested_team_id")])}
+    positions = {p.pk: p for p in Position.objects.filter(pk__in=[e["requested_position_id"] for e in entries if e.get("requested_position_id")], staff_position=False)}
+    today = timezone.localdate()
+    out, selves = [], 0
+    for i, entry in enumerate(entries):
+        where = f"entries.{i}"
+        who = entry.get("who") or "child"
+        if who not in ("self", "child"):
+            errors[f"{where}.who"] = ["Invalid choice."]
+        selves += who == "self"
+        kind = entry.get("kind") or RegistrationDetails.EntryKind.PLAYER
+        if kind not in RegistrationDetails.EntryKind.values:
+            errors[f"{where}.kind"] = ["Invalid choice."]
+        first = _text(contact.get("first_name")) if who == "self" else _text(entry.get("first_name"))
+        last = _text(contact.get("last_name")) if who == "self" else _text(entry.get("last_name"))
+        if not first:
+            errors[f"{where}.first_name"] = ["Required."]
+        if not last:
+            errors[f"{where}.last_name"] = ["Required."]
+        dob = entry.get("date_of_birth")
+        if who == "child" and dob is None:
+            errors[f"{where}.date_of_birth"] = ["Required."]
+        if dob is not None and dob > today:
+            errors[f"{where}.date_of_birth"] = ["Can't be in the future."]
+        option = options.get(_option_key(entry))
+        if option is None:
+            errors[f"{where}.variant_id"] = ["Choose what to register for."]
+        elif kind in RegistrationDetails.EntryKind.values and not pricing.fits_kind(option.product, kind):
+            errors[f"{where}.variant_id"] = [pricing.kind_error(kind)]
+        fixed = option.team if option is not None and kind == RegistrationDetails.EntryKind.PLAYER else None
+        team = teams.get(entry.get("requested_team_id")) if entry.get("requested_team_id") else None
+        if fixed is not None:
+            team = fixed  # the option decides the team: whatever the form sent is ignored (staff can change it while reviewing)
+        elif entry.get("requested_team_id") and team is None:
+            errors[f"{where}.requested_team_id"] = ["Unknown team."]
+        position = positions.get(entry.get("requested_position_id")) if entry.get("requested_position_id") else None
+        if entry.get("requested_position_id") and position is None:
+            errors[f"{where}.requested_position_id"] = ["Unknown position."]
+        jersey = entry.get("requested_jersey_number")
+        if jersey is not None and not 0 <= jersey <= 999:
+            errors[f"{where}.requested_jersey_number"] = ["Between 0 and 999."]
+        out.append({**entry, "who": who, "kind": kind, "first_name": first, "last_name": last, "option": option, "team": team, "position": position})
+    if selves > 1:
+        errors["entries"] = ["Only one person can be the contact."]
+    _check_jerseys(out, errors)
+    if errors:
+        raise Invalid("Check the registration.", errors)
+    return out
+
+
+def _check_jerseys(entries: list[dict], errors: dict) -> None:
+    """A requested number must be free for that team: inside its pool's range, not reserved, not held by someone who may not share it (age gap rule
+    on the registrant's date of birth), not held by another registration that is still waiting for review (``holds``) and not asked for by someone
+    earlier in the same registration. Nothing about who holds a number is told.
+
+    Runs inside the submit transaction: the pools involved are locked first, so a competing submission that is already in the middle of saving makes
+    this one wait and then see its hold (the second person gets the error, never both a number)."""
+    wanted = [(i, e) for i, e in enumerate(entries) if e.get("requested_jersey_number") is not None and e.get("team") is not None and e["kind"] == RegistrationDetails.EntryKind.PLAYER]
+    if not wanted or any(f"entries.{i}.variant_id" in errors for i, _e in wanted):
+        return
+    try:
+        season = pricing.resolve_season([e["option"] for e in entries if e.get("option") is not None])
+    except Invalid:
+        return  # the pricing step reports a mix of seasons
+    holds.lock([e["team"] for _i, e in wanted])
+    held: dict = {}
+    earlier: list[tuple[object, TeamMembership]] = []
+    for i, e in wanted:
+        team, number = e["team"], e["requested_jersey_number"]
+        dob = e.get("date_of_birth")
+        pool_id = team.pool_id
+        extra = [probe for other, probe in earlier if (pool_id is not None and other.pool_id == pool_id) or other.pk == team.pk]
+        key = f"entries.{i}.requested_jersey_number"
+        message = numbers.range_message(number, team)
+        if message is None and not numbers.number_available(number, season, team, dob, extra):
+            message = f"Number {number} is not available for {team.name}. Choose another number."
+        if message is None:
+            if team.pk not in held:
+                held[team.pk] = holds.holders(season, team)
+            if not numbers.number_available(number, season, team, dob, [*extra, *held[team.pk]]):
+                message = HELD_MESSAGE.format(number=number)
+        if message is not None:
+            errors[key] = [message]
+        else:
+            earlier.append((team, numbers.probe_membership(team, season, dob, number)))
+
+
+def _new_member(club, features, first, last, email="", *, phone="", dob=None, consent=False, language=""):
+    member = create_member(club, first, last, email, features=features)  # enforces the club's member limit
+    member.phone, member.date_of_birth, member.photo_public_consent = phone or "", dob, bool(consent)
+    if language in LANGS:
+        member.language = language
+    _clean(member)
+    member.save()
+    return member
 
 
 @transaction.atomic
-def submit_registration(club, *, contact_first_name, contact_last_name, contact_email, contact_phone="", entries, submitted_by_user=None):
-    """``entries`` -- a list of ``EntryInput``. Returns the created
-    ``RegistrationBatch``. Raises ``RegistrationError`` if the batch can't
-    be priced/scoped as submitted (empty, or chosen products spanning more
-    than one season).
+def submit_registration(club, *, contact: dict, entries: list[dict], language: str = "", features=None, today: datetime.date | None = None, use_installments: bool = False) -> RegistrationBatch:
+    """Create the batch, its people, family and pending memberships. Raises ``Invalid`` (422) / ``RegistrationClosed`` / ``LimitExceeded``."""
+    settings = config.get_settings()
+    if not settings.is_open:
+        raise RegistrationClosed()
+    if use_installments and not settings.installment_offsets:
+        raise Invalid("Instalments are no longer available.", {"use_installments": ["Choose payment in full."]}, code="installments_unavailable")
+    today = today or timezone.localdate()
+    checked = validate(contact, entries)
+    priced = pricing.price_entries([e["option"] for e in checked], today=today)
+    language = language if language in LANGS else ""
 
-    An entry for a member who already has a ClubMembership this season
-    (mobile's "add a registration" per family member -- a second team, or
-    player and referee both) doesn't create a second membership --
-    ClubMembership is unique per (club, member, season). It adds the new
-    entry's price onto the existing one's fee_amount, puts a not-yet-active
-    one back to PENDING (an ACTIVE one stays ACTIVE -- its new unpaid
-    balance is what brings it back in front of staff), and always adds a new
-    RegistrationDetails row rather than overwriting the existing one -- see
-    this module's own docstring.
-
-    Only a signed-in submitter can name existing people at all (their own
-    Member via ``is_contact``, their managed people via ``existing_member``)
-    -- see _resolve_contact_member for why an anonymous submission always
-    creates fresh Members instead."""
-    if not entries:
-        raise RegistrationError(_("At least one person must be registered."))
-    if not _is_authenticated(submitted_by_user) and any(entry.existing_member is not None for entry in entries):
-        raise RegistrationError(_("Sign in to register someone who is already known to the club."))
-
-    variants = [entry.product_variant for entry in entries]
-    try:
-        season = resolve_registration_season(variants)
-    except PricingError as error:
-        raise RegistrationError(str(error)) from error
-
-    priced = price_entries(variants)
-
-    contact_first_name = contact_first_name.strip()
-    contact_last_name = contact_last_name.strip()
-    contact_email = contact_email.strip().lower()
-
-    parent = _resolve_contact_member(submitted_by_user, contact_first_name, contact_last_name, contact_email)
-
-    # Scoped to this club: parent is a global Member, so an unscoped .first() here
-    # could otherwise reuse a family from a club they'd separately registered
-    # with elsewhere, attaching this club's new registrant to another club's household.
-    parent_family_membership = parent.family_memberships.filter(family__club=club).first()
-    family = parent_family_membership.family if parent_family_membership is not None else Family.objects.create(club=club)
-    if parent_family_membership is None:
-        FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
-
-    has_self_entry = any(_is_self_entry(entry, parent) for entry in entries)
-    if not has_self_entry:
-        # A pure guardian -- no fee, active immediately.
-        add_parent_to_family(club, season, family, parent=parent)
-
-    batch = RegistrationBatch.objects.create(
-        club=club,
-        season=season,
-        submitted_by_user=submitted_by_user if submitted_by_user is not None and submitted_by_user.is_authenticated else None,
-        contact_first_name=contact_first_name,
-        contact_last_name=contact_last_name,
-        contact_email=contact_email,
-        contact_phone=contact_phone.strip(),
-        contact_member=parent,
-    )
-
-    subtotal = Decimal("0")
-    discount_total = Decimal("0")
-
-    for entry, row in zip(entries, priced, strict=True):
-        member = _resolve_entry_member(family, parent, entry)
-
-        price = row["price"] - row["min_registrants_discount"]
-        membership, created = ClubMembership.objects.get_or_create(
-            club=club,
-            member=member,
-            season=season,
-            defaults={
-                "kind": ClubMembership.Kind.MEMBER,
-                "status": ClubMembership.StatusChoices.PENDING,
-                "fee_amount": price,
-                "fee_status": ClubMembership.FeeStatus.UNPAID,
-                "signed_up_at": timezone.localdate(),
-                "early_payment_deadline": row["deadline"],
-                "early_payment_discount": row["deadline_discount"],
-            },
-        )
-        if not created:
-            # An *additional* registration for someone already signed up this
-            # season (a second team, or player and referee both) -- only ever
-            # reachable by a signed-in submitter for their own people (see
-            # _resolve_contact_member). Adds to what's owed rather than
-            # replacing it. A not-yet-active membership goes back to PENDING;
-            # an ACTIVE one is never demoted by a family's own request -- the
-            # added, unpaid fee already makes it "not clean", which is what
-            # puts it back on the Sign-up page for staff (club.services.
-            # onboarding). early_payment_deadline/discount are left as
-            # whatever the first registration set -- combining two different
-            # products' own early-bird terms has no single right answer, so
-            # the earliest-set one simply stands.
-            membership.fee_amount = F("fee_amount") + price
-            update_fields = ["fee_amount"]
-            if membership.status != ClubMembership.StatusChoices.ACTIVE:
-                membership.status = ClubMembership.StatusChoices.PENDING
-                update_fields.append("status")
-            membership.save(update_fields=update_fields)
-            membership.refresh_from_db(fields=["fee_amount"])
-            sync_fee_status(membership)
+    contact_member = _new_member(club, features, _text(contact["first_name"]), _text(contact["last_name"]), _text(contact["email"]), phone=_text(contact.get("phone")), language=language)
+    batch = RegistrationBatch.objects.create(contact=contact_member, season=priced.season, language=language, installment_offsets=settings.installment_offsets if use_installments else [])
+    family = None
+    if any(e["who"] == "child" for e in checked):
+        family = Family.objects.create(name=contact_member.last_name)
+        FamilyMembership.objects.create(family=family, member=contact_member, role=FamilyMembership.FamilyRole.PARENT)
+        audit.record(None, "family.created", target=family, changes=audit.snapshot(family, ["name"]))
+    for entry, line in zip(checked, priced.lines, strict=True):
+        if entry["who"] == "self":
+            member = contact_member
+            member.date_of_birth, member.photo_public_consent = entry.get("date_of_birth"), bool(entry.get("photo_public_consent"))
+            member.save(update_fields=["date_of_birth", "photo_public_consent", "modified"])
+        else:
+            member = _new_member(club, features, entry["first_name"], entry["last_name"], _text(entry.get("email")), dob=entry.get("date_of_birth"), consent=entry.get("photo_public_consent"), language=language)
+            FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.CHILD)
+        membership = ClubMembership.objects.create(
+            member=member, season=priced.season, status=ClubMembership.StatusChoices.PENDING, fee_amount=line.price, signed_up_at=today,
+            early_payment_deadline=line.early_bird_deadline if line.early_bird_discount else None, early_payment_discount=line.early_bird_discount,
+        )  # fmt: skip
+        fees.sync_fee_status(membership)
+        audit.record(None, "membership.created", member=member, target=membership, changes=audit.snapshot(membership, fees.LOGGED_FIELDS), target_label=f"{priced.season} - {member}")
         RegistrationDetails.objects.create(
-            membership=membership,
-            batch=batch,
-            entry_kind=entry.entry_kind,
-            requested_team=entry.requested_team,
-            requested_position=entry.requested_position if entry.entry_kind == RegistrationDetails.EntryKind.VOLUNTEER else None,
-            requested_jersey_number=entry.requested_jersey_number if entry.entry_kind == RegistrationDetails.EntryKind.PLAYER else None,
-            product_variant=row["variant"],
-            price=row["price"],
-            discount_amount=row["min_registrants_discount"],
-        )
-        subtotal += row["price"]
-        discount_total += row["min_registrants_discount"]
+            batch=batch, membership=membership, member=member, entry_kind=entry["kind"], requested_team=entry["team"], requested_position=entry["position"],
+            requested_jersey_number=entry.get("requested_jersey_number"), product=line.product, product_variant=line.variant, description=line.option.full_name,
+            base_price=line.base, discount_amount=line.discount, order_discount_share=line.order_discount, credit_share=line.credit_share,
+        )  # fmt: skip
+    from registration.services import notifications
 
-    batch.subtotal = subtotal
-    batch.discount_amount = discount_total
-    batch.total = subtotal - discount_total
-    batch.save(update_fields=["subtotal", "discount_amount", "total"])
-
+    transaction.on_commit(lambda: notifications.send_confirmation(batch.pk))
     return batch
-
-
-def _is_self_entry(entry, parent) -> bool:
-    """Whether ``entry`` registers the submitter themselves. A named
-    ``existing_member`` decides on its own: mobile re-registration reuses
-    ``is_contact`` as its per-person "Include this person" toggle, so a child's
-    row carries ``is_contact`` too and must still register the child, not the
-    parent. Only a row naming nobody falls back to ``is_contact`` ("this is
-    me" on the public page)."""
-    if entry.existing_member is not None:
-        return entry.existing_member.pk == parent.pk
-    return entry.is_contact
-
-
-def _resolve_entry_member(family, parent, entry):
-    """``parent`` is already safe to reuse here -- the signed-in submitter's
-    own Member, or a fresh one for an anonymous submission (see
-    _resolve_contact_member). ``existing_member`` is only reachable for a
-    signed-in submitter; submit_registration refuses it otherwise."""
-    if _is_self_entry(entry, parent):
-        return parent
-    if entry.existing_member is not None:
-        FamilyMembership.objects.get_or_create(family=family, member=entry.existing_member, defaults={"role": FamilyMembership.FamilyRole.CHILD})
-        return entry.existing_member
-
-    child = Member.objects.create(first_name=entry.first_name.strip(), last_name=entry.last_name.strip(), date_of_birth=entry.date_of_birth)
-    FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
-    return child

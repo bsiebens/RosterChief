@@ -1,147 +1,189 @@
-"""Order invoices: composed fresh from the order's own current line items,
-then cached to disk under a per-invoice path so the (comparatively slow)
-WeasyPrint render only happens once per invoice -- see ``render_invoice_pdf``.
-The ``Invoice`` row itself carries no ``pdf`` field; the cache lives purely
-in ``rosterchief.storage.invoice_cache_storage`` (private, URL-less -- never the
-publicly served default storage), keyed by ``invoice.pk``, and every read goes
-through an authenticated view (InvoicePdfView/mobile ShopInvoiceView).
-
-Cache invalidation is event-driven, not time-based: ``shop.signals`` deletes
-an order's cached PDF the moment ``Order.status`` actually changes (paid,
-delivered, refunded, ... all change what the PDF itself says), so the next
-request regenerates it. Nothing here decides *when* to invalidate; this
-module only knows how to render, cache, and drop a cached copy.
-
-Not shared with club.services.invoicing's own ``render_pdf``/PDF error type --
-same "an app depending on another app's PDF error type for a two-line
-function isn't worth the coupling" reasoning that module's own docstring
-gives for not sharing with management.pdf/billing.services.invoices either.
-"""
+"""Order invoices: one per order, numbered ``INV-<year>-<seq>`` (per club schema). The PDF is rendered on demand from the
+order's current lines and discounts (WeasyPrint, club branding) and cached in the private invoice cache; the cache is
+dropped whenever the order changes (``invalidate_cache``). VAT is shown only when the shop's VAT setting was ``included`` when the invoice was
+issued (kept in its billing snapshot) and the club has a VAT number: the price already contains it, the invoice breaks it out per rate. No
+voiding or credit notes."""
 
 import base64
+import datetime
 import io
+from decimal import ROUND_HALF_UP, Decimal
 
-import qrcode
-from django.conf import settings
+from django.db import transaction
 from django.template.loader import render_to_string
-from django.urls import reverse
-from django.utils.translation import gettext_lazy as _
+from django.utils import timezone
 
-from club.services.invoicing import resolve_document_address
-from rosterchief.pdf import pdf_url_fetcher
+from formbuilder.services.management import Conflict
 from rosterchief.storage import drop_cached_invoice_pdf, read_cached_invoice_pdf, write_cached_invoice_pdf
+from shop.models import Invoice, Order
+from shop.settings_models import ShopSettings
 
-from ..models import Invoice
-
-# "svg" stays for logos stored before new uploads became raster-only (club.validators).
-_LOGO_MIMETYPES = {"svg": "image/svg+xml", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}
-
-
-class ShopInvoicePDFError(Exception):
-    """Raised when WeasyPrint's native libraries aren't available."""
+_LOGO_TYPES = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp", "svg": "image/svg+xml"}
 
 
-def create_invoice_for_order(order):
-    """One Invoice per Order, created the moment the order is placed -- see
-    shop.services.checkout.place_order. billing_snapshot freezes the club's
-    name/address/contact as they were *then*, so a later club-identity edit
-    doesn't rewrite history on an invoice already handed to a member."""
-    club = order.club
-    document_address = resolve_document_address(club)
-    snapshot = {
-        "club_name": club.official_name,
-        "address": document_address.address if document_address else "",
-        "zip_code": document_address.zip_code if document_address else "",
-        "city": document_address.city if document_address else "",
-        "contact_email": club.contact_email,
-        "vat_id": club.vat_id,
-    }
-    return Invoice.objects.create(club=club, order=order, billing_snapshot=snapshot)
+class PDFUnavailable(Exception):
+    pass
 
 
-def _logo_data_uri(club) -> str | None:
-    """Base64-embedded, not a URL -- WeasyPrint renders server-side with no
-    browser session and no guarantee MEDIA_URL is even reachable from wherever
-    this runs, so a data: URI is the only embedding that works regardless of
-    storage backend. Never fatal: a club with no logo, or a logo file that's
-    gone missing from storage, just prints without one."""
-    if not club.logo:
+def _club():
+    from events.services.attendance import current_club
+
+    return current_club()
+
+
+def billing_snapshot(order) -> dict:
+    club = _club()
+    snap = {"club": {}, "purchaser": {"name": str(order.purchaser), "email": order.purchaser.contact_email}, "vat_mode": ShopSettings.current().vat_mode}
+    if club is not None:
+        snap["club"] = {
+            "name": club.legal_name or club.name, "address": club.legal_address, "zip_code": club.legal_zip_code, "city": club.legal_city,
+            "country": str(club.legal_country or ""), "contact_email": club.contact_email, "vat_id": club.vat_id,
+            "payment_instructions": club.payment_instructions,
+        }  # fmt: skip
+    return snap
+
+
+@transaction.atomic
+def create_invoice(order, *, due_date: datetime.date | None = None) -> Invoice:
+    order = Order.objects.select_for_update().get(pk=order.pk)
+    if order.fulfillment_status == Order.FulfillmentStatus.CANCELLED:
+        raise Conflict("This order is cancelled.", code="order_cancelled")
+    if Invoice.objects.filter(order=order).exists():
+        raise Conflict("This order already has an invoice.", code="invoice_exists")
+    due = due_date or timezone.localdate() + datetime.timedelta(days=ShopSettings.current().invoice_due_days)
+    return Invoice.objects.create(order=order, due_date=due, billing_snapshot=billing_snapshot(order))
+
+
+def ensure_invoice(order) -> Invoice:
+    """The order's invoice, issued now (number, due date after the shop's invoice terms) when it has none yet: an order that is ready
+    for pickup always has one. Never raises for an existing invoice; a cancelled order is the caller's business."""
+    existing = Invoice.objects.filter(order=order).first()
+    return existing if existing is not None else create_invoice(order)
+
+
+def _cache_name(invoice) -> str:
+    club = _club()
+    return f"{club.schema_name if club else 'public'}/shop/{invoice.pk}.pdf"
+
+
+def invalidate_cache(order) -> None:
+    invoice = Invoice.objects.filter(order=order).first()
+    if invoice is not None:
+        drop_cached_invoice_pdf(_cache_name(invoice))
+
+
+def vat_rows(order, snapshot) -> list[dict]:
+    """The VAT contained in the invoice, per rate: ``[{"rate", "net", "vat", "gross"}]``. Empty unless the invoice was issued with VAT
+    ``included`` and the club has a VAT number. Order discounts are spread over the lines in proportion; lines at 0% are not listed."""
+    snapshot = snapshot or {}
+    if snapshot.get("vat_mode") != ShopSettings.VatMode.INCLUDED or not (snapshot.get("club") or {}).get("vat_id"):
+        return []
+    lines = list(order.lines.all())
+    gross_total = sum((ln.line_total for ln in lines), Decimal("0"))
+    if gross_total <= 0:
+        return []
+    factor = Decimal(order.total) / gross_total
+    by_rate: dict[Decimal, Decimal] = {}
+    for ln in lines:
+        if ln.vat_rate > 0:
+            by_rate[ln.vat_rate] = by_rate.get(ln.vat_rate, Decimal("0")) + ln.line_total
+    cent = Decimal("0.01")
+    rows = []
+    for rate in sorted(by_rate):
+        gross = (by_rate[rate] * factor).quantize(cent, rounding=ROUND_HALF_UP)
+        vat = (gross * rate / (Decimal("100") + rate)).quantize(cent, rounding=ROUND_HALF_UP)
+        rows.append({"rate": rate, "net": gross - vat, "vat": vat, "gross": gross})
+    return rows
+
+
+def lines_for(order) -> list[dict]:
+    return [
+        {"description": ln.description or ln.product.name + (f" - {ln.variant.name}" if ln.variant else ""), "quantity": ln.quantity, "unit_price": ln.unit_price, "line_total": ln.line_total}
+        for ln in order.lines.select_related("product", "variant")
+    ]  # fmt: skip
+
+
+def payments_for(order) -> list[dict]:
+    """The confirmed payments shown on the invoice (a voucher is named by its number), oldest first."""
+    from shop.models import Payment
+
+    rows = []
+    for p in order.payments.filter(status=Payment.PaymentStatus.CONFIRMED).select_related("voucher").order_by("paid_at", "created"):
+        if p.voucher_id:
+            label = f"Voucher {p.voucher.number}"
+        elif p.provider:
+            label = "Online payment"
+        else:
+            label = p.get_method_display()
+        rows.append({"label": label, "reference": p.reference, "date": p.paid_at or p.created, "amount": p.amount})
+    return rows
+
+
+def _logo_uri(club):
+    if not club or not club.logo:
         return None
     try:
         with club.logo.open("rb") as f:
             data = f.read()
     except FileNotFoundError, ValueError, OSError:
         return None
-
-    extension = club.logo.name.rsplit(".", 1)[-1].lower()
-    mimetype = _LOGO_MIMETYPES.get(extension, "image/png")
-    return f"data:{mimetype};base64,{base64.b64encode(data).decode('ascii')}"
+    mime = _LOGO_TYPES.get(club.logo.name.rsplit(".", 1)[-1].lower(), "image/png")
+    return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
 
 
-def _order_url(order) -> str:
-    """Absolute link to this order's own management page -- not request-
-    bound (render_invoice_pdf has no request to build one from; this can run
-    from a background email-attachment path just as easily as a live
-    download), so built by hand from the club's subdomain + ROSTERCHIEF_BASE_DOMAIN,
-    same tenancy convention as club.tenancy's own subdomain resolution."""
-    path = reverse("management:order_detail", kwargs={"pk": order.pk})
-    return f"https://{order.club.slug}.{settings.ROSTERCHIEF_BASE_DOMAIN}{path}"
+def _qr_uri(order):
+    """QR to the order's management page (scan at pickup); skipped when the club has no domain or qrcode is missing."""
+    try:
+        import qrcode
 
+        from club.models import Domain
 
-def _order_qr_data_uri(order) -> str | None:
-    """A QR code scannable at pickup -- lands staff straight on this order's
-    own management page (mark paid/ready/delivered) without hunting for it
-    by number. Never fatal: a club running before ROSTERCHIEF_BASE_DOMAIN is
-    configured (local dev without it set) just prints without one rather
-    than encoding a broken link."""
-    if not settings.ROSTERCHIEF_BASE_DOMAIN:
+        club = _club()
+        domain = Domain.objects.filter(tenant=club, is_primary=True).first() if club else None
+        if domain is None:
+            return None
+        buffer = io.BytesIO()
+        qrcode.make(f"https://{domain.domain}/shop/orders/{order.pk}").save(buffer, format="PNG")
+        return f"data:image/png;base64,{base64.b64encode(buffer.getvalue()).decode('ascii')}"
+    except Exception:
         return None
 
-    image = qrcode.make(_order_url(order))
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return f"data:image/png;base64,{base64.b64encode(buffer.getvalue()).decode('ascii')}"
+
+def recreate_pdf(invoice) -> None:
+    """Drop the cached PDF and build it again from the order as it is now (the stored billing details stay as issued)."""
+    invalidate_cache(invoice.order)
+    render_pdf(invoice)
 
 
-def _cache_path(invoice) -> str:
-    return f"clubs/{invoice.club.slug}/shop/invoices/cache/{invoice.pk}.pdf"
-
-
-def invalidate_cached_invoice_pdf(invoice) -> None:
-    """Drop invoice's cached PDF, if any -- called from shop.signals the
-    moment its order's status changes. A no-op when nothing was cached yet
-    (a PDF nobody has ever downloaded), which is the common case."""
-    drop_cached_invoice_pdf(_cache_path(invoice))
-
-
-def render_invoice_pdf(invoice) -> bytes:
-    cache_path = _cache_path(invoice)
-    cached = read_cached_invoice_pdf(cache_path)
+def render_pdf(invoice) -> bytes:
+    cached = read_cached_invoice_pdf(_cache_name(invoice))
     if cached is not None:
         return cached
-
-    order = invoice.order
-    lines = order.order_items.select_related("product", "variant", "beneficiary")
-    html = render_to_string(
-        "shop/order_invoice_pdf.html",
-        {
-            "club": invoice.club,
-            "invoice": invoice,
-            "order": order,
-            "lines": lines,
-            "logo_data_uri": _logo_data_uri(invoice.club),
-            "qr_data_uri": _order_qr_data_uri(order),
-        },
-    )
-    pdf_bytes = render_pdf(html)
-    write_cached_invoice_pdf(cache_path, pdf_bytes)
-    return pdf_bytes
-
-
-def render_pdf(html: str) -> bytes:
     try:
         from weasyprint import HTML
     except (ImportError, OSError) as error:
-        raise ShopInvoicePDFError(_("PDF rendering needs the native pango/cairo libraries (on macOS: brew install pango).")) from error
+        raise PDFUnavailable("PDF rendering is not available on this server.") from error
+    from shop.services import payments
 
-    return HTML(string=html, url_fetcher=pdf_url_fetcher()).write_pdf()
+    order = invoice.order
+    club = _club()
+    html = render_to_string(
+        "shop/order_invoice_pdf.html",
+        {
+            "club": club,
+            "invoice": invoice,
+            "order": order,
+            "lines": order.lines.select_related("product", "variant", "beneficiary"),
+            "discounts": order.applied_discounts.all(),
+            "payments": payments_for(order),
+            "amount_paid": payments.amount_paid(order),
+            "amount_due": payments.amount_due(order),
+            "snapshot": invoice.billing_snapshot or {},
+            "vat_rows": vat_rows(order, invoice.billing_snapshot),
+            "logo_data_uri": _logo_uri(club),
+            "qr_data_uri": None if order.kind == Order.Kind.CHARGE else _qr_uri(order),  # the QR is for scanning an order at pickup
+        },
+    )
+    pdf = HTML(string=html).write_pdf()
+    write_cached_invoice_pdf(_cache_name(invoice), pdf)
+    return pdf

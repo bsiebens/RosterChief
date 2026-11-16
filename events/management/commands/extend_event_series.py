@@ -1,26 +1,32 @@
-from events.models import EventSeries
-from events.services import generate_occurrences, horizon
-from features.commands import ScheduledJobCommand
+"""Generate recurring-series occurrences up to the rolling horizon: ``manage.py extend_event_series [--club <slug>]``.
+
+The same work as the daily ``events.extend_event_series`` task; without ``--club`` every active club is processed."""
+
+from django.core.management.base import BaseCommand, CommandError
+from django_tenants.utils import get_public_schema_name, get_tenant_model, schema_context
+
+from events.services.recurrence import extend_all_series, horizon
 
 
-class Command(ScheduledJobCommand):
+class Command(BaseCommand):
     help = "Materialise recurring event occurrences up to the rolling horizon."
-    job_name = "events.tasks.extend_event_series"
 
-    def handle(self, *args, **options):
+    def add_arguments(self, parser):
+        parser.add_argument("--club", help="Only this club (slug).")
+
+    def handle(self, *args, club=None, **options):
+        clubs = get_tenant_model().objects.filter(archived_at__isnull=True).exclude(schema_name=get_public_schema_name())
+        if club:
+            clubs = clubs.filter(slug=club)
+            if not clubs.exists():
+                raise CommandError(f"Unknown club: {club}")
         until = horizon()
-        total = 0
-        series_count = 0
-
-        # .iterator(): this runs across every club's every series in one
-        # sweep -- without it, Django caches the whole queryset in memory
-        # before the loop even starts, which grows with the platform, not
-        # with any one run's actual work.
-        for series in EventSeries.objects.iterator(chunk_size=200):
-            series_count += 1
-            created = generate_occurrences(series, until)
-            total += len(created)
+        total_series = total_created = 0
+        for tenant in clubs:
+            with schema_context(tenant.schema_name):
+                series, created = extend_all_series(until)
+            total_series += series
+            total_created += created
             if created:
-                self.stdout.write(f"{series}: generated {len(created)} occurrence(s).")
-
-        return f"Generated {total} occurrence(s) across {series_count} series."
+                self.stdout.write(f"{tenant.slug}: generated {created} occurrence(s).")
+        self.stdout.write(f"Generated {total_created} occurrence(s) across {total_series} series.")

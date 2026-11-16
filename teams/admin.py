@@ -1,136 +1,147 @@
 from django.contrib import admin
-from django.utils.translation import gettext_lazy as _
 
-from .models import NumberPool, NumberReservation, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
+from rosterchief.admin import ClubAdminMixin
+
+from .models import (
+    NumberPool,
+    NumberReservation,
+    OfficialLevel,
+    OfficialProfile,
+    Position,
+    RefereeLevel,
+    RefereeProfile,
+    StaffAssignment,
+    Team,
+    TeamMembership,
+    TeamPhoto,
+)
 
 
 class TeamMembershipInline(admin.TabularInline):
-    """Roster shown on the Team page."""
-
     model = TeamMembership
     extra = 0
-    raw_id_fields = ("member",)
+    autocomplete_fields = ["member"]
+    fields = ["member", "season", "position", "jersey_number", "is_captain", "is_alternate_captain"]
+    show_change_link = True
 
 
 class StaffAssignmentInline(admin.TabularInline):
-    """Coaching / staff shown on the Team page."""
-
     model = StaffAssignment
     extra = 0
-    raw_id_fields = ("member",)
+    autocomplete_fields = ["member"]
+    fields = ["member", "season", "position"]
 
 
 class TeamPhotoInline(admin.TabularInline):
-    """One photo per season, shown on the Team page."""
-
     model = TeamPhoto
     extra = 0
+    fields = ["season", "image"]
 
 
-@admin.register(Team)
-class TeamAdmin(admin.ModelAdmin):
-    list_display = ["name", "short_name", "club", "referee_management", "pool"]
-    list_filter = ["club", "referee_management", "pool"]
-    search_fields = ["name", "short_name"]
-    inlines = [TeamMembershipInline, StaffAssignmentInline, TeamPhotoInline]
-
-
-@admin.register(NumberPool)
-class NumberPoolAdmin(admin.ModelAdmin):
-    list_display = ["name", "club", "min_number", "max_number"]
-    list_filter = ["club"]
-    search_fields = ["name"]
-
-
-@admin.register(NumberReservation)
-class NumberReservationAdmin(admin.ModelAdmin):
-    list_display = ["pool", "number", "note", "reserved_by"]
-    list_filter = ["pool"]
-    search_fields = ["note", "pool__name"]
+class NumberReservationInline(admin.TabularInline):
+    model = NumberReservation
+    extra = 0
+    fields = ["number", "note", "reserved_by"]
     raw_id_fields = ["reserved_by"]
 
 
-@admin.register(TeamPhoto)
-class TeamPhotoAdmin(admin.ModelAdmin):
-    list_display = ["team", "season"]
-    list_filter = ["team__club", "season"]
-    search_fields = ["team__name"]
+@admin.register(Team)
+class TeamAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["name", "short_name", "ordering", "age_min", "age_max", "pool", "feeds_into", "tournament_only"]
+    list_filter = ["tournament_only", "pool"]
+    search_fields = ["name", "short_name"]
+    list_select_related = ["pool", "feeds_into"]
+    autocomplete_fields = ["feeds_into"]
+    inlines = [TeamMembershipInline, StaffAssignmentInline, TeamPhotoInline]
+
+
+@admin.register(TeamMembership)
+class TeamMembershipAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["member", "team", "season", "position", "jersey_number", "is_captain", "is_alternate_captain"]
+    list_filter = ["season", "team", "position", "is_captain", "is_alternate_captain"]
+    search_fields = ["member__first_name", "member__last_name", "team__name"]
+    list_select_related = ["member", "team", "season", "position"]
+    autocomplete_fields = ["member", "team"]
+
+
+@admin.register(StaffAssignment)
+class StaffAssignmentAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["member", "team", "season", "position"]
+    list_filter = ["season", "team", "position"]
+    search_fields = ["member__first_name", "member__last_name", "team__name"]
+    list_select_related = ["member", "team", "season", "position"]
+    autocomplete_fields = ["member", "team"]
 
 
 @admin.register(Position)
-class PositionAdmin(admin.ModelAdmin):
-    list_display = ["name", "short_name", "club", "staff_position", "ordering"]
-    list_filter = ["club", "staff_position"]
+class PositionAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["name", "short_name", "ordering", "staff_position", "management_position"]
+    list_filter = ["staff_position", "management_position"]
     search_fields = ["name", "short_name"]
     ordering = ["ordering", "name"]
 
 
-@admin.register(TeamMembership)
-class TeamMembershipAdmin(admin.ModelAdmin):
-    list_display = ["team", "member", "season", "position", "jersey_number", "is_captain", "is_alternate_captain"]
-    list_filter = ["team", "season", "position", "is_captain"]
-    search_fields = ["team__name", "member__first_name", "member__last_name"]
-    raw_id_fields = ["member"]
-    fieldsets = [
-        [None, {"fields": ["team", "season", "member", "position"]}],
-        [_("Squad"), {"fields": ["jersey_number", "is_captain", "is_alternate_captain"]}],
-    ]
-
-
-@admin.register(StaffAssignment)
-class StaffAssignmentAdmin(admin.ModelAdmin):
-    list_display = ["team", "member", "season", "position"]
-    list_filter = ["team", "season", "position"]
-    search_fields = ["team__name", "member__first_name", "member__last_name"]
-    raw_id_fields = ["member"]
-
-
-@admin.register(RefereeLevel)
-class RefereeLevelAdmin(admin.ModelAdmin):
-    list_display = ["name", "club", "inherits_from", "team_list"]
-    list_filter = ["club"]
+@admin.register(NumberPool)
+class NumberPoolAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["name", "min_number", "max_number", "min_age_gap_years"]
     search_fields = ["name"]
-    autocomplete_fields = ["teams", "inherits_from"]
-    ordering = ["club", "name"]
-
-    @admin.display(description=_("teams"))
-    def team_list(self, obj):
-        return ", ".join(team.name for team in obj.teams.all())
+    inlines = [NumberReservationInline]
 
 
-@admin.register(RefereeProfile)
-class RefereeProfileAdmin(admin.ModelAdmin):
-    list_display = ["member", "level", "valid_until", "is_eligible"]
-    list_filter = ["level"]
-    search_fields = ["member__first_name", "member__last_name"]
-    autocomplete_fields = ["member"]
-    filter_horizontal = ["excluded_teams"]
+@admin.register(NumberReservation)
+class NumberReservationAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["pool", "number", "note", "reserved_by"]
+    list_filter = ["pool"]
+    search_fields = ["note", "pool__name"]
+    list_select_related = ["pool", "reserved_by"]
+    raw_id_fields = ["reserved_by"]
 
-    @admin.display(description=_("eligible"), boolean=True)
-    def is_eligible(self, obj):
-        return obj.is_eligible
+
+class _LevelAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["name", "inherits_from"]
+    search_fields = ["name"]
+    ordering = ["name"]
+    list_select_related = ["inherits_from"]
+    filter_horizontal = ["teams"]
 
 
 @admin.register(OfficialLevel)
-class OfficialLevelAdmin(admin.ModelAdmin):
-    list_display = ["name", "club", "inherits_from", "team_list"]
-    list_filter = ["club"]
-    search_fields = ["name"]
-    autocomplete_fields = ["teams", "inherits_from"]
-    ordering = ["club", "name"]
+class OfficialLevelAdmin(_LevelAdmin):
+    pass
 
-    @admin.display(description=_("teams"))
-    def team_list(self, obj):
-        return ", ".join(team.name for team in obj.teams.all())
+
+@admin.register(RefereeLevel)
+class RefereeLevelAdmin(_LevelAdmin):
+    pass
+
+
+class _ProfileAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["member", "level", "valid_until", "currently_valid"]
+    list_filter = ["level", "valid_until"]
+    search_fields = ["member__first_name", "member__last_name"]
+    list_select_related = ["member", "level"]
+    autocomplete_fields = ["member"]
+    date_hierarchy = "valid_until"
+
+    @admin.display(boolean=True, description="Currently valid")
+    def currently_valid(self, obj):
+        return obj.is_currently_valid
 
 
 @admin.register(OfficialProfile)
-class OfficialProfileAdmin(admin.ModelAdmin):
-    list_display = ["member", "level", "valid_until", "is_eligible"]
-    list_filter = ["level"]
-    search_fields = ["member__first_name", "member__last_name"]
-    autocomplete_fields = ["member"]
+class OfficialProfileAdmin(_ProfileAdmin):
+    pass
 
-    @admin.display(description=_("eligible"), boolean=True)
-    def is_eligible(self, obj):
-        return obj.is_eligible
+
+@admin.register(RefereeProfile)
+class RefereeProfileAdmin(_ProfileAdmin):
+    filter_horizontal = ["excluded_teams"]
+
+
+@admin.register(TeamPhoto)
+class TeamPhotoAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["team", "season", "image"]
+    list_filter = ["season", "team"]
+    search_fields = ["team__name"]
+    list_select_related = ["team", "season"]
+    autocomplete_fields = ["team"]

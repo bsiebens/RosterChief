@@ -1,104 +1,87 @@
-"""Refreshing a game's score/status from its competition's own data source.
+"""Which competitions a club may use, and resolving a game's competition to its data source class.
 
-Event.competition (free text) and Event.external_game_id (that source's id for this
-fixture) exist so a real integration has somewhere to key off later -- nothing
-fetches anything yet. This is that integration's landing spot: the button and view
-that call it already exist (management/views.py::EventFetchGameInfoView), so wiring
-up a real data source later is a matter of replacing fetch_game_info's body, not
-building the UI around it.
+Competitions are ``club.models.Competition`` rows (public schema): ``name`` is what ``Event.competition`` stores,
+``module`` the dotted path of the module holding the class named ``name`` (``events.competition.hockey`` + ``RBIHF``),
+or the full dotted path of the class itself. Which clubs may use one is decided by its ``feature``: a club needs that
+feature (``features.entitlements``). A competition without a feature is offered to nobody (as the old flagless ones).
 """
 
 import importlib
 
-from django.core.cache import cache
-from django.utils.translation import gettext_lazy as _
+from django.db.models import QuerySet
+from django.utils.translation import gettext as _
 
-from events.models import Competition
-from events.services.game_timeline import refresh_timeline
+from events.services.game_timeline import CompetitionFetchError
 
-#: A source's "live" flag can read false for a moment mid-game (a stopped clock, a
-#: timeout), so a live game only counts as ended after this many consecutive
-#: not-live reads -- one blip must not mark it final or stop the live-score poll.
-NOT_LIVE_READS_TO_END = 3
-NOT_LIVE_READS_TTL = 60 * 60
+__all__ = ["CompetitionFetchError", "available_competitions", "competition_allowed", "competition_class", "competition_for", "entitlements_for", "fetch_game_info"]
 
 
-class CompetitionFetchError(Exception):
-    """A game's info could not be fetched from its competition's data source."""
+def entitlements_for(club_or_features=None):
+    """An ``Entitlements`` for a club, an ``Entitlements`` itself (anything with ``enabled_codes``), or the current
+    schema's club when None. None when there is no club (public schema)."""
+    if club_or_features is not None and hasattr(club_or_features, "enabled_codes"):
+        return club_or_features
+    from features.entitlements import resolve_entitlements
 
+    from .attendance import current_club
 
-def fetch_game_info(event) -> bool:
-    """Refresh `event`'s score/live status from its competition's data source.
-
-    Gated on that competition's own feature flag being active for the event's
-    club: the management form's competition dropdown deliberately shows every
-    competition regardless of flag (see management.forms.EventForm), so this is
-    where per-club access actually gets enforced. No flag, an inactive one, or
-    a competition name that matches nothing -- there's no data source this club
-    is allowed to use, so this quietly does nothing and returns False rather
-    than erroring: missing access isn't a failure to report.
-
-    Returns whether a fetch was actually attempted.
-
-    Two distinct failure modes, deliberately not folded into one generic
-    message any more (see events/competition/hockey.py's own real
-    implementations -- this stopped being "nothing's wired up yet" a while
-    ago): resolving `competition.module`/`competition.name` to an actual
-    class is a *configuration* problem (a typo in either field, or a class
-    that was renamed/removed) -- that's the only case that's genuinely "not
-    configured". Once that class is found, whatever update_game_information
-    itself raises (a network error, an unexpected response shape, a blank
-    event.external_game_id, ...) is a *fetch* problem and gets reported with
-    its own real message instead, so staff looking at a competition that's
-    demonstrably linked correctly aren't told it isn't.
-    """
-    source = competition_for(event)
-    if source is None:
-        return False
-
-    was_live = event.is_live
-    try:
-        source.update_game_information(event=event)
-    except Exception as error:
-        raise CompetitionFetchError(_("Could not fetch game info from “%(name)s”: %(error)s") % {"name": event.competition, "error": error}) from error
-
-    _debounce_not_live(event, was_live)
-
-    # Same instance, so a source can reuse the payload the score fetch just
-    # downloaded. Gated on its own flag; never raises (see game_timeline).
-    refresh_timeline(event, source)
-    return True
-
-
-def _debounce_not_live(event, was_live: bool) -> None:
-    """Keeps a live game live until the source has said "not live"
-    NOT_LIVE_READS_TO_END times in a row (the source's update has already saved
-    False by now, so it is put back)."""
-    key = f"events:not-live-reads:{event.pk}"
-    if event.is_live or not was_live:
-        cache.delete(key)
-        return
-    cache.add(key, 0, NOT_LIVE_READS_TTL)
-    if cache.incr(key) < NOT_LIVE_READS_TO_END:
-        event.is_live = True
-        event.save(update_fields=["is_live"])
-    else:
-        cache.delete(key)
-
-
-def competition_for(event):
-    """An instance of ``event``'s competition class (events.competition.*), or
-    None when there's no data source this club may use (no Competition row, no
-    flag, or the flag is off for the club). A Competition whose module/name
-    doesn't resolve to a class is a configuration problem and raises
-    CompetitionFetchError -- see fetch_game_info's docstring."""
-    competition = Competition.objects.filter(name=event.competition).select_related("flag").first()
-    if competition is None or competition.flag is None or not competition.flag.is_active_for_club(event.club):
+    club = club_or_features if club_or_features is not None else current_club()
+    if club is None:
         return None
+    return resolve_entitlements(club)
 
+
+def available_competitions(club_or_features=None) -> QuerySet:
+    """The Competition rows the club's features allow (the Event competition dropdown, the importers' switch), by
+    name. ``club_or_features`` is a Club, an ``Entitlements`` (e.g. ``request.features``) or None for the current club."""
+    from club.models import Competition
+
+    features = entitlements_for(club_or_features)
+    if features is None:
+        return Competition.objects.none()
+    return Competition.objects.filter(feature__isnull=False, feature__is_active=True, feature__code__in=features.enabled_codes()).select_related("feature", "sport").order_by("name")
+
+
+def competition_allowed(name: str, club_or_features=None) -> bool:
+    """Whether the club may use the competition called ``name`` (e.g. "RBIHF")."""
+    return bool(name) and available_competitions(club_or_features).filter(name=name).exists()
+
+
+def competition_class(competition):
+    """The data source class of a Competition row: ``<module>.<name>``, or ``module`` itself when it names the class.
+    A path that resolves to nothing is a configuration problem: CompetitionFetchError."""
     try:
         module = importlib.import_module(competition.module)
-        competition_class = getattr(module, competition.name)
-    except (ImportError, AttributeError) as error:
+        return getattr(module, competition.name)
+    except ImportError, AttributeError:
+        pass
+    module_path, _dot, class_name = competition.module.rpartition(".")
+    try:
+        return getattr(importlib.import_module(module_path), class_name)
+    except (ImportError, AttributeError, ValueError) as error:
         raise CompetitionFetchError(_("“%(name)s” isn't wired up to a real data source yet.") % {"name": competition.name}) from error
-    return competition_class()
+
+
+def competition_for(event, club_or_features=None):
+    """An instance of ``event``'s competition class (events.competition.*), or None when there is no data source this
+    club may use (no Competition row by that name, or the club lacks its feature). Raises CompetitionFetchError when the
+    row's module/name resolve to no class."""
+    if not event.competition:
+        return None
+    competition = available_competitions(club_or_features).filter(name=event.competition).first()
+    if competition is None:
+        return None
+    return competition_class(competition)()
+
+
+def fetch_game_info(event, club_or_features=None) -> bool:
+    """Refresh ``event``'s score/live status (and timeline) from its competition's data source. Missing access is not a
+    failure: returns False without fetching. A fetch problem raises CompetitionFetchError with the source's message.
+    Returns whether a fetch was attempted. The debounce and timeline half live in events.services.game_timeline."""
+    from events.services import game_timeline
+
+    source = competition_for(event, club_or_features)
+    if source is None:
+        return False
+    game_timeline.fetch_game(event, source)
+    return True

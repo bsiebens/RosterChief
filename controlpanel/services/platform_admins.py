@@ -1,77 +1,76 @@
-"""Granting and revoking platform access (is_staff / is_superuser).
+"""Platform access: who is staff or superuser on the public schema. Superusers manage this; staff cannot.
 
-The guardrails matter more than the plumbing here: it must be impossible to lock
-the platform out of itself. Two rules are enforced for every change:
-
-* you cannot strip your **own** access (you would lose the panel mid-click);
-* the **last superuser** can never be demoted, or nobody could administer the
-  platform again without shell access.
+Rules (carried over from the previous app): superuser implies staff; nobody can strip their own access or their
+own superuser flag; at least one superuser must always remain.
 """
 
-from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.utils.translation import gettext as _
+from django.db.models import Q
+from django_tenants.utils import get_public_schema_name, schema_context
+from tenant_users.permissions.models import UserTenantPermissions
 
-from .accounts import account_for_grant, create_account_for_grant
-
-User = get_user_model()
+from club.services import AccountError, UnverifiedEmailError, resolve_account
 
 
 class PlatformAdminError(Exception):
-    """A change that would leave the platform unadministrable."""
+    pass
 
 
 def platform_admins():
-    return User.objects.platform_admins().order_by("email")
+    """Permission rows of everyone with platform access, with their profile loaded."""
+    with schema_context(get_public_schema_name()):
+        return list(UserTenantPermissions.objects.filter(Q(is_staff=True) | Q(is_superuser=True)).select_related("profile").order_by("profile__email"))
 
 
-def is_last_superuser(user) -> bool:
-    return user.is_superuser and not User.objects.filter(is_superuser=True).exclude(pk=user.pk).exists()
+def _perms_for(user) -> UserTenantPermissions:
+    with schema_context(get_public_schema_name()):
+        return UserTenantPermissions.objects.get(profile=user)
 
 
-def check_access_change(actor, user, *, is_staff: bool, is_superuser: bool) -> None:
-    """Raise PlatformAdminError if this change would lock someone out."""
-    losing_access = not (is_staff or is_superuser)
-
-    if actor.pk == user.pk and losing_access:
-        raise PlatformAdminError(_("You cannot remove your own platform access."))
-
-    if actor.pk == user.pk and user.is_superuser and not is_superuser:
-        raise PlatformAdminError(_("You cannot remove your own superuser rights."))
-
-    if user.is_superuser and not is_superuser and is_last_superuser(user):
-        raise PlatformAdminError(_("At least one superuser must remain."))
-
-
-@transaction.atomic
-def set_platform_access(actor, user, *, is_staff: bool, is_superuser: bool):
-    check_access_change(actor, user, is_staff=is_staff, is_superuser=is_superuser)
-
-    # A superuser without is_staff cannot reach the panel, which is a confusing
-    # half-state; superuser implies staff.
-    user.is_staff = is_staff or is_superuser
-    user.is_superuser = is_superuser
-    user.save(update_fields=["is_staff", "is_superuser"])
-    return user
-
-
-def revoke_platform_access(actor, user):
-    return set_platform_access(actor, user, is_staff=False, is_superuser=False)
+def check_access_change(actor, target, *, is_staff: bool, is_superuser: bool) -> None:
+    has_access = is_staff or is_superuser
+    if actor.pk == target.pk:
+        if not has_access:
+            raise PlatformAdminError("You cannot remove your own platform access.")
+        if not is_superuser:
+            raise PlatformAdminError("You cannot remove your own superuser rights.")
+    if not is_superuser:
+        with schema_context(get_public_schema_name()):
+            others = UserTenantPermissions.objects.filter(is_superuser=True, profile__is_active=True).exclude(profile=target).exists()
+        if _perms_for(target).is_superuser and not others:
+            raise PlatformAdminError("At least one superuser must remain.")
 
 
 @transaction.atomic
-def grant_platform_access(email, *, is_superuser: bool = False):
-    """Give ``email`` platform access, creating the account if it is new.
+def set_platform_access(actor, target, *, is_staff: bool, is_superuser: bool) -> UserTenantPermissions:
+    is_staff = is_staff or is_superuser  # superuser implies staff
+    check_access_change(actor, target, is_staff=is_staff, is_superuser=is_superuser)
+    with schema_context(get_public_schema_name()):
+        perms = UserTenantPermissions.objects.get(profile=target)
+        perms.is_staff, perms.is_superuser = is_staff, is_superuser
+        perms.save(update_fields=["is_staff", "is_superuser"])
+    return perms
 
-    New accounts get an unusable password — they set one through the password
-    reset flow — and, being staff, must enrol a second factor before they can
-    sign in at all. An existing account is only used when it has verified
-    ``email``; otherwise this raises UnverifiedEmailError and changes nothing.
+
+def revoke_platform_access(actor, target) -> UserTenantPermissions:
+    return set_platform_access(actor, target, is_staff=False, is_superuser=False)
+
+
+@transaction.atomic
+def grant_platform_access(email: str, *, is_superuser: bool, first_name: str = "", last_name: str = ""):
+    """Give an account platform access. Returns ``(user, created)``.
+
+    An existing account is only used if that exact address is verified; an unknown address gets a new login-less
+    account (the caller sends the password setup email).
     """
-    email = email.lower()
-    user = account_for_grant(email) or create_account_for_grant(email)
-
-    user.is_staff = True
-    user.is_superuser = is_superuser
-    user.save()
-    return user
+    try:
+        user, created = resolve_account(email, first_name=first_name, last_name=last_name)
+    except UnverifiedEmailError:
+        raise
+    except AccountError as e:
+        raise PlatformAdminError(str(e)) from e
+    with schema_context(get_public_schema_name()):
+        perms = UserTenantPermissions.objects.get(profile=user)
+        perms.is_staff, perms.is_superuser = True, is_superuser
+        perms.save(update_fields=["is_staff", "is_superuser"])
+    return user, created
