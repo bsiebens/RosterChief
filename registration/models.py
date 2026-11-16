@@ -1,203 +1,153 @@
-import secrets
+"""Public registration (club schema, so no club foreign key anywhere). Ported from the old ``registration`` app.
 
-from django.conf import settings
-from django.core.exceptions import ValidationError
+Someone fills in the public join page; that creates a ``RegistrationBatch`` with one ``RegistrationDetails`` per person, and a pending
+``ClubMembership`` for each, whose fee lives on the membership (``fee_amount``, ``early_payment_deadline`` / ``early_payment_discount``).
+Until staff confirm the batch's invoice (``confirmed_at``) its memberships stay out of the Sign-ups queue.
+"""
+
+import secrets
+from decimal import Decimal
+
 from django.db import models
-from django.db.models import UniqueConstraint
-from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from club.models import ClubMembership, Season
-from rosterchief.base import ClubScopedModel, UUIDModel, validate_club_scope
-from shop.models import ProductVariant
-from teams.models import Position, StaffAssignment, Team, TeamMembership
+from members.models import ClubMembership, Member
+from rosterchief.base import UUIDModel
 
 
-def _generate_status_token() -> str:
+def _token() -> str:
     return secrets.token_urlsafe(32)
 
 
-class RegistrationBatch(ClubScopedModel):
-    """One registration session -- a parent registering several kids at once,
-    a single self-registration, or a re-registration for a new season.
-    Purely for grouping + audit: which entries came in together (for the
-    Product-level min_registrants discount, see registration.services.pricing)
-    and who filled the form in. Deliberately carries no *onboarding* status of
-    its own -- each entry becomes a real Member + ClubMembership(status=PENDING)
-    immediately (registration.services.submission.submit_registration), but
-    review from there on is gated behind this batch's own *billing* status
-    (invoice_sent_at and friends, below): a fresh registration is invisible
-    to the Sign-up queue (club.services.onboarding, management.views.
-    SignupDashboardView) until staff has reviewed and confirmed its invoice
-    on the Registrations screen -- see registration.services.invoicing's own
-    module docstring for why. Billing review always comes first; once
-    confirmed, onboarding review (documents, team placement, approval) and
-    payment can each proceed independently of the other from there.
+class RegistrationSettings(UUIDModel):
+    """The club's single registration settings row (``registration.services.settings.get_settings`` creates it)."""
 
-    ``status_token`` is the unguessable key behind the public status page
-    (registration.views.RegistrationStatusView) -- same secrets.token_urlsafe(32)
-    "possession of the link is the credential" idea as mobile.models.
-    CalendarFeedToken, since whoever submitted this may have no account at
-    all. The confirmation email (registration.services.notifications.
-    send_registration_confirmation_email) is what hands that link out -- it
-    carries no money/invoice content itself, on purpose, since none of that
-    exists yet at submission time."""
-
-    season = models.ForeignKey(Season, on_delete=models.PROTECT, related_name="registration_batches", verbose_name=_("season"))
-    submitted_by_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="registration_batches", verbose_name=_("submitted by"), blank=True, null=True)
-    status_token = models.CharField(_("status token"), max_length=64, unique=True, editable=False, default=_generate_status_token)
-
-    contact_first_name = models.CharField(_("contact first name"), max_length=150)
-    contact_last_name = models.CharField(_("contact last name"), max_length=150)
-    contact_email = models.EmailField(_("contact email"))
-    contact_phone = models.CharField(_("contact phone"), max_length=50, blank=True)
-    #: The Member the submission resolved as the person filling in the form
-    #: (registration.services.submission._resolve_contact_member) -- what staff
-    #: billing screens show as "billed to", rather than re-deriving it from the
-    #: typed contact_email, which can name someone else or nobody at all.
-    #: None when that Member has since been removed; screens then fall back to
-    #: the typed contact name/email.
-    contact_member = models.ForeignKey("members.Member", on_delete=models.SET_NULL, related_name="+", null=True, blank=True, verbose_name=_("contact member"))
-
-    subtotal = models.DecimalField(_("subtotal"), max_digits=10, decimal_places=2, default=0)
-    discount_amount = models.DecimalField(
-        _("discount amount"), max_digits=10, decimal_places=2, default=0, help_text=_("The immediate (min-registrants) portion only -- an early-payment discount isn't confirmed until paid, see ClubMembership.early_payment_discount.")
-    )
-    total = models.DecimalField(_("total"), max_digits=10, decimal_places=2, default=0)
-
-    #: Presence of invoice_sent_at is the confirmation flag read everywhere --
-    #: the family-facing status page/mobile app/invoice PDF all stay hidden
-    #: until it's set, and it's what "registrations awaiting confirmation"
-    #: (registration.services.invoicing.registrations_awaiting_confirmation)
-    #: filters on. Set only by registration.services.invoicing.
-    #: confirm_and_send_invoice, never by submit_registration.
-    invoice_number = models.CharField(_("invoice number"), max_length=255, blank=True)
-    invoice_sent_at = models.DateTimeField(_("invoice sent at"), null=True, blank=True)
-    invoice_due_date = models.DateField(_("invoice due date"), null=True, blank=True)
-
-    manual_discount_amount = models.DecimalField(_("manual discount amount"), max_digits=10, decimal_places=2, default=0, help_text=_("An extra discount staff can apply when confirming the invoice, on top of any multi-registrant discount."))
-    manual_discount_note = models.CharField(_("manual discount note"), max_length=255, blank=True, help_text=_("Shown as the discount's own label on the invoice, e.g. “Loyalty discount”. Falls back to a generic label when left blank."))
-
-    invoice_last_reminder_sent_at = models.DateTimeField(_("invoice last reminder sent at"), null=True, blank=True)
-    invoice_reminder_count = models.PositiveIntegerField(_("invoice reminders sent"), default=0)
+    is_open = models.BooleanField(_("open for registrations"), default=False)
+    intro_text = models.TextField(_("introduction"), blank=True, help_text=_("Shown at the top of the join page."))
+    terms_text = models.TextField(_("terms"), blank=True, help_text=_("Shown above the submit button."))
+    payment_instructions = models.TextField(_("payment instructions"), blank=True, help_text=_("Printed on the invoice and in its email."))
+    invoice_due_days = models.PositiveSmallIntegerField(_("invoice due days"), default=30)
+    installment_offsets = models.JSONField(_("days between the first due date and later instalments"), default=list, blank=True)
+    installment_grace_days = models.PositiveSmallIntegerField(_("instalment signup grace period in days"), default=0)
+    installment_block_kinds = models.JSONField(_("event types blocked by late instalments"), default=list, blank=True)
 
     class Meta:
-        verbose_name = _("registration batch")
-        verbose_name_plural = _("registration batches")
-        ordering = ["-created"]
-        constraints = [
-            UniqueConstraint(fields=["club", "invoice_number"], name="unique_registration_invoice_number_per_club", condition=~models.Q(invoice_number="")),
-        ]
-        indexes = [
-            # registrations_awaiting_confirmation/registration_invoices_due_for_reminder's
-            # own club + invoice_sent_at__isnull filter -- unindexed before this.
-            models.Index(fields=["club", "invoice_sent_at"]),
-        ]
-
-    def clean(self):
-        validate_club_scope(self, self.club_id, same_club_fields=("season",))
+        verbose_name = _("registration settings")
+        verbose_name_plural = _("registration settings")
 
     def __str__(self):
-        return f"{self.contact_first_name} {self.contact_last_name} ({self.season})"
+        return "Registration settings"
 
-    def generate_invoice_number(self) -> str:
-        """Next per-club registration invoice number for the current year:
-        ``REG-<year>-<seq>``. Same numbering shape as club.models.DuesInvoice's
-        own generate_number, duplicated rather than shared across apps -- see
-        that method's own docstring on why. Allocated explicitly by
-        registration.services.invoicing.confirm_and_send_invoice, NOT on
-        every save() the way DuesInvoice's own is: a batch is saved many
-        times before it's ever confirmed (subtotal/discount_amount/total at
-        submission), and none of those saves should mint a number."""
-        prefix = f"REG-{timezone.now().year}-"
-        sequences = [int(suffix) for existing in RegistrationBatch.objects.filter(club=self.club, invoice_number__startswith=prefix).values_list("invoice_number", flat=True) if (suffix := existing.removeprefix(prefix)).isdigit()]
-        return f"{prefix}{max(sequences, default=0) + 1:05d}"
+
+class RegistrationBatch(UUIDModel):
+    """One submission of the join page: a contact registering themselves and/or the people they are a parent of."""
+
+    #: The possession of this token is the registrant's credential for the status page (no login).
+    status_token = models.CharField(_("status token"), max_length=64, unique=True, editable=False, default=_token)
+    # Original v1 invoice lines kept for finance when a membership appeared on several legacy invoices.
+    legacy_invoice_history = models.JSONField(blank=True, default=dict)
+    contact = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="registration_batches", verbose_name=_("contact"))
+    season = models.ForeignKey("events.Season", on_delete=models.PROTECT, related_name="registration_batches", verbose_name=_("season"))
+    submitted_at = models.DateTimeField(_("submitted at"), auto_now_add=True)
+    #: The billing review gate: a batch with no ``confirmed_at`` is invisible in the Sign-ups queue.
+    confirmed_at = models.DateTimeField(_("confirmed at"), null=True, blank=True)
+    cancelled_at = models.DateTimeField(_("cancelled at"), null=True, blank=True)
+    confirmation_sent_at = models.DateTimeField(_("confirmation sent at"), null=True, blank=True)
+    invoice_number = models.CharField(_("invoice number"), max_length=50, blank=True, unique=True, null=True)
+    invoice_due_date = models.DateField(_("invoice due date"), null=True, blank=True)
+    installment_offsets = models.JSONField(_("days between the first due date and later instalments"), default=list, blank=True)
+    invoice_sent_at = models.DateTimeField(_("invoice sent at"), null=True, blank=True)
+    manual_discount_amount = models.DecimalField(_("manual discount"), max_digits=10, decimal_places=2, default=Decimal("0.00"))
+    manual_discount_note = models.CharField(_("manual discount note"), max_length=255, blank=True)
+    language = models.CharField(_("language"), max_length=5, blank=True, help_text=_("The registrant's language (from their browser), used for the emails."))
+
+    class Meta:
+        verbose_name = _("registration")
+        verbose_name_plural = _("registrations")
+        ordering = ["-submitted_at"]
+
+    def __str__(self):
+        return f"{self.contact or '?'} ({self.submitted_at:%Y-%m-%d})"
+
+    @property
+    def status(self) -> str:
+        if self.cancelled_at:
+            return "cancelled"
+        return "confirmed" if self.confirmed_at else "awaiting"
 
 
 class RegistrationDetails(UUIDModel):
-    """What was actually requested when a ClubMembership came from this
-    module -- a team/role preference and which price line was chosen, kept
-    separate from ClubMembership itself so that model stays exactly what it
-    already was (club/services/onboarding.py's own queue, unchanged) rather
-    than growing registration-specific fields. Not itself club-scoped -- its
-    club is reached through ``membership``, same reasoning as
-    club.models.FeePayment.
-
-    A plain FK, not OneToOne -- one membership (one person, one club, one
-    season) can carry more than one of these: a kid playing on two teams, or
-    playing *and* refereeing, is two separate requests against the same
-    season-long ClubMembership, not two memberships (ClubMembership has
-    ``unique_member_per_club_per_season`` -- see club.models). registration.
-    services.submission.submit_registration always creates a new row here
-    rather than updating an existing one, adding the new entry's price onto
-    the membership's own fee_amount -- see that function's own docstring."""
+    """One person in a batch: who, what they signed up for and what it costs (before the manual discount)."""
 
     class EntryKind(models.TextChoices):
-        PLAYER = "player", _("Player")
-        VOLUNTEER = "volunteer", _("Volunteer")
+        PLAYER = "player", _("player")
+        VOLUNTEER = "volunteer", _("volunteer")
 
-    membership = models.ForeignKey(ClubMembership, on_delete=models.CASCADE, related_name="registration_details", verbose_name=_("membership"))
-    batch = models.ForeignKey(RegistrationBatch, on_delete=models.CASCADE, related_name="entries", verbose_name=_("batch"))
-
-    entry_kind = models.CharField(_("entry kind"), max_length=20, choices=EntryKind.choices, default=EntryKind.PLAYER)
-
-    #: A request, not a placement -- see SignupPlaceInTeamView (players) and
-    #: the Volunteer list's own placement action (volunteers), both of which
-    #: still create the real TeamMembership/StaffAssignment by hand. Null also
-    #: covers "volunteer, no team preference yet".
-    requested_team = models.ForeignKey(Team, on_delete=models.SET_NULL, related_name="registration_requests", verbose_name=_("requested team"), blank=True, null=True)
-    requested_position = models.ForeignKey(Position, on_delete=models.SET_NULL, related_name="registration_requests", verbose_name=_("requested position"), blank=True, null=True, limit_choices_to={"staff_position": True})
-    #: A request, not a placement -- same as requested_team/requested_position
-    #: above. Only meaningful for a player entry with a requested_team whose
-    #: pool is set; see teams.services.numbers for the availability rules and
-    #: SignupPlaceInTeamView/the team roster forms for where this becomes a
-    #: real TeamMembership.jersey_number.
-    requested_jersey_number = models.PositiveSmallIntegerField(_("requested jersey number"), blank=True, null=True)
-
-    product_variant = models.ForeignKey(ProductVariant, on_delete=models.SET_NULL, related_name="registration_requests", verbose_name=_("product variant"), blank=True, null=True)
-    #: Staff-editable up until the batch's own invoice is confirmed/sent
-    #: (registration.services.invoicing.active_batch_entries), via the
-    #: Registrations review screen -- see RegistrationBatch's own docstring
-    #: on the billing review step. Unedited, this is simply what
-    #: registration.services.submission.submit_registration priced it at.
-    price = models.DecimalField(_("price"), max_digits=10, decimal_places=2, default=0, help_text=_("This entry's own share of the batch subtotal, before any discount."))
-    discount_amount = models.DecimalField(_("discount amount"), max_digits=10, decimal_places=2, default=0, help_text=_("This entry's own share of the batch's immediate (min-registrants) discount."))
-    #: Staff can drop one person's charge from the invoice without deleting
-    #: this row -- the roster request/onboarding data it carries
-    #: (requested_team, jersey number, ...) has to survive regardless of the
-    #: billing decision.
-    excluded_from_invoice = models.BooleanField(_("excluded from invoice"), default=False)
-
-    #: What requested_team/requested_jersey_number actually became once staff
-    #: confirmed them on the Registrations review screen (management.views.
-    #: RegistrationInvoiceReviewView) -- players' own counterpart to
-    #: resulting_staff_assignment below. club.services.cancellation.
-    #: cancel_membership deletes this specific TeamMembership (only this
-    #: one, not every placement the member happens to have that season) when
-    #: this membership is later cancelled.
-    resulting_team_membership = models.OneToOneField(TeamMembership, on_delete=models.SET_NULL, related_name="registration_details", verbose_name=_("resulting team membership"), blank=True, null=True)
-    resulting_staff_assignment = models.OneToOneField(StaffAssignment, on_delete=models.SET_NULL, related_name="registration_details", verbose_name=_("resulting staff assignment"), blank=True, null=True)
+    batch = models.ForeignKey(RegistrationBatch, on_delete=models.CASCADE, related_name="details", verbose_name=_("registration"))
+    membership = models.OneToOneField(ClubMembership, on_delete=models.CASCADE, related_name="registration_details", verbose_name=_("membership"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="registration_details", verbose_name=_("member"))
+    entry_kind = models.CharField(_("kind"), max_length=20, choices=EntryKind.choices, default=EntryKind.PLAYER)
+    requested_team = models.ForeignKey("teams.Team", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("requested team"))
+    requested_position = models.ForeignKey("teams.Position", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("requested position"))
+    requested_jersey_number = models.PositiveSmallIntegerField(_("requested jersey number"), null=True, blank=True)
+    #: What was bought: the product, and its variant (none for a product without variants, which is bought "as is").
+    product = models.ForeignKey("shop.Product", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("product"))
+    product_variant = models.ForeignKey("shop.ProductVariant", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("variant"))
+    description = models.CharField(_("description"), max_length=255, blank=True, help_text=_("The product name when it was bought."))
+    base_price = models.DecimalField(_("price"), max_digits=10, decimal_places=2, default=Decimal("0.00"))
+    #: The registrant discount (tiers) already taken off ``base_price``; the line's price is ``base_price - discount_amount``.
+    discount_amount = models.DecimalField(_("discount"), max_digits=10, decimal_places=2, default=Decimal("0.00"))
+    #: This line's share of the registration's credits (negative-priced products), already out of what the person pays. Internal: it is not shown on
+    #: the line (the credit is its own line), it only keeps each person's fee right.
+    credit_share = models.DecimalField(_("credit share"), max_digits=10, decimal_places=2, default=Decimal("0.00"))
+    #: This line's share of a *per registration* multi-registrant discount (a product tier with scope "per order"), already out of what the person
+    #: pays. Internal like ``credit_share``: the discount is shown as its own line per product. Older registrations spread it over ``discount_amount``.
+    order_discount_share = models.DecimalField(_("registration discount share"), max_digits=10, decimal_places=2, default=Decimal("0.00"))
+    #: Staff's override of the line price in the billing review (``None`` = the computed price).
+    price_override = models.DecimalField(_("price override"), max_digits=10, decimal_places=2, null=True, blank=True)
+    excluded = models.BooleanField(_("excluded"), default=False, help_text=_("Left out of the invoice in the billing review."))
+    resulting_team_membership = models.ForeignKey("teams.TeamMembership", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("resulting roster spot"))
 
     class Meta:
-        verbose_name = _("registration details")
-        verbose_name_plural = _("registration details")
-        ordering = ["batch", "created"]
-
-    def clean(self):
-        if self.entry_kind == self.EntryKind.PLAYER and self.requested_position_id:
-            raise ValidationError({"requested_position": _("Only a volunteer entry can request a position.")})
+        verbose_name = _("registration entry")
+        verbose_name_plural = _("registration entries")
+        ordering = ["created"]
 
     def __str__(self):
-        return f"{self.membership} ({self.get_entry_kind_display()})"
+        return f"{self.member} - {self.description}"
 
     @property
-    def created_membership(self):
-        """Whether this entry's batch is what created ``membership``, as
-        opposed to adding a request onto one that already existed (a second
-        team for someone already signed up this season). submit_registration
-        creates the batch before any of its memberships, so a membership the
-        batch created is never older than the batch -- one that predates it
-        was there already. Only a membership the batch created may be
-        cancelled or have documents uploaded from the batch's own status
-        page (registration.views)."""
-        return self.membership.created >= self.batch.created
+    def is_credit(self) -> bool:
+        """A line of a negative-priced product: not charged itself, it takes money off the registration's other lines."""
+        return self.base_price < 0
+
+    @property
+    def price(self) -> Decimal:
+        """What this line costs on its own: the override, else base - its own discount (a per-person registrant tier); nothing when excluded. For a credit
+        line: its negative amount (never overridden). The per-registration discount and the credits are separate lines, not part of this."""
+        if self.excluded:
+            return Decimal("0.00")
+        if self.is_credit:
+            return self.base_price
+        if self.price_override is not None:
+            return self.price_override
+        return max(self.base_price - self.discount_amount, Decimal("0.00"))
+
+    @property
+    def order_share(self) -> Decimal:
+        """The part of the per-registration discount that comes off this line: nothing for a credit line, an excluded line or a line staff gave their own
+        price (that price replaces everything)."""
+        if self.excluded or self.is_credit or self.price_override is not None:
+            return Decimal("0.00")
+        return min(self.order_discount_share, self.price)
+
+    @property
+    def before_credit(self) -> Decimal:
+        """What the line costs after the per-registration discount and before the credits (0 for a credit line)."""
+        return Decimal("0.00") if self.is_credit else self.price - self.order_share
+
+    @property
+    def payable(self) -> Decimal:
+        """What the person pays before the manual discount: the line less its shares of the per-registration discount and of the credits, never below 0
+        (0 for a credit line). This is what the membership's fee is made of."""
+        return Decimal("0.00") if self.is_credit else max(self.before_credit - self.credit_share, Decimal("0.00"))

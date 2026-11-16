@@ -1,28 +1,31 @@
-"""Bust a Due's invoice's cached PDF the moment its status/amount_paid
-actually changes -- a payment recorded or removed (both funnel through
-billing.services.dues._resettle), or the period waived. Same "pre_save,
-compare against what's still in the database" shape as club.signals' own
-invalidate_dues_pdf_on_fee_status_change, for the same reason: the PDF
-renders the running payment list and current balance/status, not just the
-period's own frozen amount/dates.
-"""
-
-from django.db.models.signals import pre_save
+from django.db import connection
+from django.db.models.signals import post_migrate, post_save
 from django.dispatch import receiver
-
-from .models import Due, Invoice
-from .services.invoices import invalidate_cached_invoice_pdf
+from django_tenants.utils import get_public_schema_name
 
 
-@receiver(pre_save, sender=Due)
-def invalidate_invoice_pdf_on_due_change(sender, instance, **kwargs):
-    if not instance.pk:
+@receiver(post_save, sender="features.Plan")
+def ensure_terms(sender, instance, created, **kwargs):
+    """Every plan has billing terms (defaults until the platform edits them)."""
+    from .models import PlanTerms
+
+    PlanTerms.objects.get_or_create(plan=instance)
+
+
+@receiver(post_migrate)
+def seed_billing(sender, **kwargs):
+    """Give existing plans terms, and let the default plan be billed (at no charge) until a price is set."""
+    if sender.name != "billing" or connection.schema_name != get_public_schema_name():
         return
+    import datetime
 
-    previous = Due.objects.filter(pk=instance.pk).values("status", "amount_paid").first()
-    if previous is None or (previous["status"] == instance.status and previous["amount_paid"] == instance.amount_paid):
-        return
+    from features.catalog import DEFAULT_PLAN
+    from features.models import Plan
 
-    invoice = Invoice.objects.filter(due_id=instance.pk).first()
-    if invoice is not None:
-        invalidate_cached_invoice_pdf(invoice)
+    from .models import PlanPrice, PlanTerms
+
+    for plan in Plan.objects.all():
+        PlanTerms.objects.get_or_create(plan=plan)
+    free = Plan.objects.filter(code=DEFAULT_PLAN).first()
+    if free is not None and not PlanPrice.objects.filter(plan=free).exists():
+        PlanPrice.objects.create(plan=free, active_from=datetime.date(2000, 1, 1), amount=0)

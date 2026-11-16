@@ -1,508 +1,258 @@
-import datetime
+"""News notifications (audience, language, dedupe, sweep, editors), the public feed and the member feed."""
 
-from django.contrib.auth import get_user_model
-from django.core import mail
-from django.core.cache import cache
-from django.core.files.uploadedfile import SimpleUploadedFile
-from django.core.management import call_command
-from django.core.management.base import CommandError
-from django.db import IntegrityError
+import datetime
+from unittest import mock
+
+from django.db import connection
 from django.test import TestCase
 from django.utils import timezone
-
-from club.models import Club, ClubMembership, ClubRole
-from features.models import JobRun, JobToggle, Maintenance
-from members.models import Family, FamilyMembership, Member
-from notifications.models import Notification, NotificationCategory
-from rosterchief.test_support import make_season
-from teams.models import Position, Team, TeamMembership
-
-from .models import News, NewsPhoto
-from .services import notify_editors_of_pending_review, render_body_html, send_publish_notification
-
-User = get_user_model()
-
-
-def make_photo(news_item, *, is_main=False):
-    image = SimpleUploadedFile("photo.jpg", b"fake-image-bytes", content_type="image/jpeg")
-    return NewsPhoto.objects.create(news_item=news_item, image=image, is_main=is_main)
-
-
-class RenderBodyHtmlTests(TestCase):
-    """news.services.render_body_html -- Markdown source to sanitised HTML."""
-
-    def test_a_table_renders_as_real_table_markup(self):
-        body = "| Name | Position |\n| --- | --- |\n| Finn | Forward |"
-
-        html = render_body_html(body)
-
-        self.assertIn("<table>", html)
-        self.assertIn("<th>Name</th>", html)
-        self.assertIn("<td>Finn</td>", html)
-
-    def test_column_alignment_survives_sanitisation_as_an_align_attribute(self):
-        # use_align_attribute=True (news/services.py) -- the extension's default
-        # inline style="text-align: ..." would otherwise be stripped outright,
-        # since style isn't in _ALLOWED_ATTRIBUTES.
-        body = "| Name | Goals |\n| --- | ---: |\n| Finn | 12 |"
-
-        html = render_body_html(body)
-
-        self.assertIn('<th align="right">Goals</th>', html)
-        self.assertIn('<td align="right">12</td>', html)
-        self.assertNotIn("style=", html)
-
-    def test_a_script_tag_inside_a_table_cell_is_still_stripped(self):
-        body = "| Name |\n| --- |\n| <script>alert(1)</script> |"
-
-        html = render_body_html(body)
-
-        self.assertNotIn("<script", html)
-
-
-class NewsModelTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-
-    def test_slug_is_derived_from_title(self):
-        item = News.objects.create(club=self.club, title="Season Kickoff", body="Body text.")
-
-        self.assertEqual(item.slug, "season-kickoff")
-
-    def test_slug_is_unique_per_club_not_globally(self):
-        News.objects.create(club=self.club, title="Season Kickoff", body="First.")
-        second = News.objects.create(club=self.club, title="Season Kickoff", body="Second.")
-
-        self.assertEqual(second.slug, "season-kickoff-2")
-
-    def test_two_clubs_can_share_the_same_slug(self):
-        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
-        News.objects.create(club=self.club, title="Season Kickoff", body="First.")
-
-        other = News.objects.create(club=other_club, title="Season Kickoff", body="Other club.")
-
-        self.assertEqual(other.slug, "season-kickoff")
-
-    def test_defaults_to_draft_and_internal(self):
-        item = News.objects.create(club=self.club, title="Draft item", body="Body.")
-
-        self.assertEqual(item.status, News.Status.DRAFT)
-        self.assertEqual(item.visibility, News.Visibility.INTERNAL)
-        self.assertIsNone(item.published_at)
-
-    def test_publish_defaults_the_publish_date_to_now(self):
-        item = News.objects.create(club=self.club, title="Item", body="Body.")
-
-        item.publish()
-
-        self.assertEqual(item.status, News.Status.PUBLISHED)
-        self.assertIsNotNone(item.published_at)
-        self.assertFalse(item.is_scheduled)
-
-    def test_publish_accepts_a_future_date_and_is_scheduled(self):
-        item = News.objects.create(club=self.club, title="Item", body="Body.")
-        future = timezone.now() + datetime.timedelta(days=7)
-
-        item.publish(at=future)
-
-        self.assertEqual(item.status, News.Status.PUBLISHED)
-        self.assertEqual(item.published_at, future)
-        self.assertTrue(item.is_scheduled)
-
-    def test_submit_for_review_moves_a_draft_to_pending_review(self):
-        item = News.objects.create(club=self.club, title="Item", body="Body.")
-
-        item.submit_for_review()
-
-        self.assertEqual(item.status, News.Status.PENDING_REVIEW)
-
-    def test_unpublish_clears_the_publish_date(self):
-        item = News.objects.create(club=self.club, title="Item", body="Body.")
-        item.publish()
-
-        item.unpublish()
-
-        self.assertEqual(item.status, News.Status.DRAFT)
-        self.assertIsNone(item.published_at)
-
-    def test_effective_english_falls_back_to_the_original_when_blank(self):
-        item = News.objects.create(club=self.club, title="Seizoensstart", body="We beginnen het seizoen.")
-
-        self.assertEqual(item.effective_title_en, "Seizoensstart")
-        self.assertEqual(item.effective_body_en, "We beginnen het seizoen.")
-
-    def test_effective_english_uses_its_own_text_when_set(self):
-        item = News.objects.create(club=self.club, title="Seizoensstart", body="We beginnen het seizoen.", title_en="Season kickoff", body_en="We're starting the season.")
-
-        self.assertEqual(item.effective_title_en, "Season kickoff")
-        self.assertEqual(item.effective_body_en, "We're starting the season.")
-
-    def test_effective_english_stays_current_after_the_original_changes(self):
-        # Read-time fallback, not copy-on-save: editing the Dutch text later must
-        # not leave a stale English "copy" behind.
-        item = News.objects.create(club=self.club, title="Seizoensstart", body="We beginnen het seizoen.")
-
-        item.title, item.body = "Nieuwe titel", "Nieuwe tekst."
-        item.save(update_fields=["title", "body"])
-
-        self.assertEqual(item.effective_title_en, "Nieuwe titel")
-        self.assertEqual(item.effective_body_en, "Nieuwe tekst.")
-
-
-class NewsPhotoModelTests(TestCase):
-    def setUp(self):
-        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        self.item = News.objects.create(club=self.club, title="Match report", body="Body.")
-
-    def test_a_second_main_photo_is_rejected_at_the_database_level(self):
-        make_photo(self.item, is_main=True)
-
-        with self.assertRaises(IntegrityError):
-            make_photo(self.item, is_main=True)
-
-    def test_two_non_main_photos_are_fine(self):
-        make_photo(self.item, is_main=False)
-        make_photo(self.item, is_main=False)
-
-        self.assertEqual(self.item.photos.count(), 2)
-
-    def test_two_different_news_items_can_each_have_a_main_photo(self):
-        other_item = News.objects.create(club=self.club, title="Other item", body="Body.")
-
-        make_photo(self.item, is_main=True)
-        make_photo(other_item, is_main=True)
-
-        self.assertEqual(NewsPhoto.objects.filter(is_main=True).count(), 2)
-
-    def test_object_position_defaults_to_dead_centre(self):
-        photo = make_photo(self.item)
-
-        self.assertEqual(photo.object_position, "50% 50%")
-
-    def test_object_position_reflects_a_custom_focal_point(self):
-        photo = make_photo(self.item)
-        photo.focal_x = 20
-        photo.focal_y = 80
-        photo.save(update_fields=["focal_x", "focal_y"])
-
-        self.assertEqual(photo.object_position, "20% 80%")
-
-    def test_the_upload_path_is_keyed_by_id_not_by_the_potentially_long_slug(self):
-        # A long, real-world title (Storage.get_available_name() couldn't find
-        # a free name under ImageField's default max_length=100 once the slug
-        # -- not a stable id -- was part of the path, a 400 SuspiciousFileOperation
-        # in production). Every other upload_to in this codebase already keys
-        # off an id (sponsor_logo_path, onboarding_document_path, ...) --
-        # this is that same fix for news.
-        long_title_item = News.objects.create(club=self.club, title="Drie Sharks bij het U15 National Team op het 5 Nations toernooi in Mechelen", body="Body.")
-
-        photo = make_photo(long_title_item)
-
-        self.assertIn(str(long_title_item.pk), photo.image.name)
-        self.assertNotIn(long_title_item.slug, photo.image.name)
-
-
-class SendPublishNotificationTests(TestCase):
-    """news.services.send_publish_notification -- the audience is this item's
-    teams' current rosters, or every active member if it's club-wide. Called
-    directly here (not through the sweep command) to test audience
-    resolution in isolation; NotifyPublishedNewsCommandTests below covers
-    the sweep's own due/already-notified/toggle behavior."""
+from django_tenants.utils import schema_context
+
+from authorization.services import assign_role, create_role
+from club.models import Club, Domain
+from club.services import create_club, grant_login
+from controlpanel.tests import make_user
+from events.models import Season
+from members.models import ClubMembership, Family, FamilyMembership, Member
+from news import services as svc
+from news import tasks
+from news.models import News
+from news.services import notifications
+from notifications.models import InboxNotification
+from teams.models import Team, TeamMembership
+
+
+class NewsClubMixin:
+    """A club with a season, two teams, members with and without logins, a family and a publisher."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._mfa = mock.patch("authorization.middleware.is_local_development", return_value=True)
+        cls._mfa.start()
+        super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        connection.set_schema_to_public()
+        cls._mfa.stop()
 
     @classmethod
     def setUpTestData(cls):
-        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        cls.season = make_season(cls.club)
-        cls.position = Position.objects.create(club=cls.club, name="Player", short_name="P")
+        cls.owner = make_user("owner@news.test", first="Olivia", last="Owner")
+        public = Club(schema_name="public", name="Platform", owner=cls.owner)
+        public.auto_create_schema = False
+        public.save()
+        Domain.objects.create(domain="testserver", tenant=public, is_primary=True)
+        cls.club = create_club("News FC", cls.owner)
+        cls.host = Domain.objects.get(tenant=cls.club, is_primary=True).domain
+        today = datetime.date.today()
+        with schema_context(cls.club.schema_name):
+            cls.season = Season.objects.create(start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+            cls.team = Team.objects.create(name="Under 12", short_name="U12")
+            cls.other_team = Team.objects.create(name="Under 14", short_name="U14")
 
-    def make_member(self, first_name, *, status=ClubMembership.StatusChoices.ACTIVE, kind=ClubMembership.Kind.MEMBER, email=None):
-        member = Member.objects.create(first_name=first_name, last_name="Member", email=email or f"{first_name.lower()}@example.com")
-        if email:
-            User.objects.create_user(email=email, password="pw-secret-123")
-            member.user = User.objects.get(email=email)
-            member.save(update_fields=["user"])
-        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=status, kind=kind)
-        return member
+            def member(first, email=None, *, team=None, status=ClubMembership.StatusChoices.ACTIVE, language=""):
+                m = Member.objects.create(first_name=first, last_name="Test", email=email or "", language=language)
+                if status:
+                    ClubMembership.objects.create(member=m, season=cls.season, status=status)
+                if team:
+                    TeamMembership.objects.create(member=m, team=team, season=cls.season)
+                return m
 
-    def test_club_wide_news_notifies_every_active_member(self):
-        member = self.make_member("Jamie", email="jamie@example.com")
-        news_item = News.objects.create(club=self.club, title="Big news", body="Something happened.", status=News.Status.PUBLISHED, published_at=timezone.now())
-
-        notifications = send_publish_notification(news_item)
-
-        self.assertTrue(Notification.objects.filter(club=self.club, member=member, title="Big news").exists())
-        self.assertEqual(Notification.objects.get(member=member).category, NotificationCategory.NEWS)
-        self.assertEqual(len(notifications), 1)
-
-    def test_publish_notification_stores_both_languages_with_user_text_untouched(self):
-        member = self.make_member("Jamie", email="jamie@example.com")
-        news_item = News.objects.create(club=self.club, title="Big news", body="Something happened.", status=News.Status.PUBLISHED, published_at=timezone.now())
-
-        send_publish_notification(news_item)
-
-        translations = Notification.objects.get(member=member).translations
-        self.assertEqual(set(translations), {"en", "nl"})
-        self.assertEqual(translations["nl"]["title"], "Big news")
-        self.assertEqual(translations["en"], translations["nl"])
-
-    def test_external_only_news_is_never_notified(self):
-        # Mobile's own home/list views (mobile.views.HomeView/NewsListView)
-        # exclude visibility=EXTERNAL, so notifying members about one would
-        # point them at an article the app never surfaces.
-        self.make_member("Jamie", email="jamie@example.com")
-        news_item = News.objects.create(club=self.club, title="Sponsor announcement", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now(), visibility=News.Visibility.EXTERNAL)
-
-        notifications = send_publish_notification(news_item)
-
-        self.assertEqual(notifications, [])
-        self.assertFalse(Notification.objects.exists())
-
-    def test_team_scoped_news_only_notifies_that_teams_roster(self):
-        team = Team.objects.create(club=self.club, name="U16", short_name="U16")
-        other_team = Team.objects.create(club=self.club, name="U18", short_name="U18")
-        on_team = self.make_member("Jamie", email="jamie@example.com")
-        off_team = self.make_member("Alex", email="alex@example.com")
-        TeamMembership.objects.create(team=team, member=on_team, season=self.season, position=self.position)
-        TeamMembership.objects.create(team=other_team, member=off_team, season=self.season, position=self.position)
-        news_item = News.objects.create(club=self.club, title="Team news", body="Training moved.", status=News.Status.PUBLISHED, published_at=timezone.now())
-        news_item.teams.add(team)
-
-        send_publish_notification(news_item)
-
-        self.assertTrue(Notification.objects.filter(member=on_team).exists())
-        self.assertFalse(Notification.objects.filter(member=off_team).exists())
-
-    def test_excludes_an_inactive_member(self):
-        self.make_member("Jamie", status=ClubMembership.StatusChoices.PENDING, email="jamie@example.com")
-        news_item = News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
-
-        send_publish_notification(news_item)
-
-        self.assertFalse(Notification.objects.exists())
-
-    def test_excludes_a_guardian(self):
-        self.make_member("Alex", kind=ClubMembership.Kind.GUARDIAN, email="alex@example.com")
-        news_item = News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
-
-        send_publish_notification(news_item)
-
-        self.assertFalse(Notification.objects.exists())
-
-    def test_siblings_sharing_a_guardian_are_notified_once(self):
-        # Two children, no login of their own, both reachable only through the
-        # same parent -- one Notification/one email for the family, not two.
-        parent_user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
-        parent = Member.objects.create(first_name="Pat", last_name="Parent", email="parent@example.com", user=parent_user)
-        family = Family.objects.create(club=self.club, name="Parent family")
-        FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
-        child_a = Member.objects.create(first_name="Ana", last_name="Parent")
-        child_b = Member.objects.create(first_name="Ben", last_name="Parent")
-        for child in (child_a, child_b):
-            FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
-            ClubMembership.objects.create(club=self.club, member=child, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-        news_item = News.objects.create(club=self.club, title="Club news", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
-
-        notifications = send_publish_notification(news_item)
-
-        self.assertEqual(Notification.objects.filter(club=self.club, title="Club news").count(), 1)
-        self.assertEqual(len(notifications), 1)
-        self.assertEqual(len(mail.outbox), 1)
-        self.assertEqual(mail.outbox[0].to, ["parent@example.com"])
-
-    def test_children_with_different_guardians_are_each_notified(self):
-        family_one = Family.objects.create(club=self.club, name="First family")
-        family_two = Family.objects.create(club=self.club, name="Second family")
-        for family_name, family in (("one", family_one), ("two", family_two)):
-            parent_user = User.objects.create_user(email=f"parent-{family_name}@example.com", password="pw-secret-123")
-            parent = Member.objects.create(first_name=f"Parent{family_name}", last_name="Adult", email=f"parent-{family_name}@example.com", user=parent_user)
-            FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
-            child = Member.objects.create(first_name=f"Child{family_name}", last_name="Kid")
-            FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
-            ClubMembership.objects.create(club=self.club, member=child, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-        news_item = News.objects.create(club=self.club, title="Club news", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now())
-
-        notifications = send_publish_notification(news_item)
-
-        self.assertEqual(Notification.objects.filter(club=self.club, title="Club news").count(), 2)
-        self.assertEqual(len(notifications), 2)
-        self.assertEqual(len(mail.outbox), 2)
-
-    def test_the_body_is_plain_text_not_markdown(self):
-        member = self.make_member("Jamie", email="jamie@example.com")
-        news_item = News.objects.create(club=self.club, title="News", body="**Bold** text.", status=News.Status.PUBLISHED, published_at=timezone.now())
-
-        send_publish_notification(news_item)
-
-        notification = Notification.objects.get(member=member)
-        self.assertEqual(notification.body, "Bold text.")
-        self.assertEqual(len(mail.outbox), 1)
-
-    def test_a_long_body_is_shortened_to_a_teaser(self):
-        # The notification is an inbox row + push toast, not a place to read
-        # the whole article -- a long body used to be copied in full.
-        member = self.make_member("Jamie", email="jamie@example.com")
-        long_body = " ".join(f"word{i}" for i in range(60))
-        news_item = News.objects.create(club=self.club, title="News", body=long_body, status=News.Status.PUBLISHED, published_at=timezone.now())
-
-        send_publish_notification(news_item)
-
-        notification = Notification.objects.get(member=member)
-        self.assertLess(len(notification.body), len(long_body))
-        self.assertTrue(notification.body.endswith("…"))
-
-
-class NotifyPublishedNewsCommandTests(TestCase):
-    """The notify_published_news management command -- the periodic sweep that
-    replaced the old Celery ETA-scheduled dispatch. See that command's own
-    docstring for the News.notified_at idempotency design."""
-
-    @classmethod
-    def setUpTestData(cls):
-        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        cls.season = make_season(cls.club)
-        cls.member = Member.objects.create(first_name="Jamie", last_name="Member", email="jamie@example.com")
-        User.objects.create_user(email="jamie@example.com", password="pw-secret-123")
-        cls.member.user = User.objects.get(email="jamie@example.com")
-        cls.member.save(update_fields=["user"])
-        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+            cls.ann = member("Ann", "ann@news.test", team=cls.team)
+            cls.bob = member("Bob", "bob@news.test")
+            cls.cara = member("Cara", "cara@news.test", team=cls.team, language="en")
+            cls.dan = member("Dan", "dan@news.test", team=cls.team, status=ClubMembership.StatusChoices.LAPSED)
+            cls.kid = member("Kid", team=cls.team)
+            cls.kid2 = member("Kid2", team=cls.team)
+            cls.parent = member("Parent", "parent@news.test", status=None)
+            cls.eve = member("Eve", "eve@news.test", status=None)
+            family = Family.objects.create(name="Test")
+            FamilyMembership.objects.create(family=family, member=cls.parent, role=FamilyMembership.FamilyRole.PARENT)
+            for kid in (cls.kid, cls.kid2):
+                FamilyMembership.objects.create(family=family, member=kid, role=FamilyMembership.FamilyRole.CHILD)
+        for m in (cls.ann, cls.bob, cls.cara, cls.dan, cls.parent, cls.eve):
+            setattr(cls, f"{m.first_name.lower()}_user", grant_login(cls.club, m)[0])
+        with schema_context(cls.club.schema_name):
+            role = create_role("Editors", ["news.publish_newsitems"], slug="editors")
+            assign_role(cls.eve_user, role)
+        cls.owner = type(cls.owner).objects.get(pk=cls.owner.pk)
 
     def setUp(self):
-        # JobToggle/Maintenance are cache-backed (see their own models -- a flip has to
-        # reach every process, not just the one that made it), so a toggle left disabled
-        # by one test would otherwise leak into the next via the shared LocMemCache.
-        cache.clear()
-        self.addCleanup(cache.clear)
+        connection.set_tenant(self.club)
+        self.addCleanup(connection.set_schema_to_public)
 
-    def test_notifies_a_published_item_past_its_publish_time(self):
-        news_item = News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(minutes=1))
+    def news(self, title="Big win", *, teams=(), status=News.Status.PUBLISHED, visibility="both", published_at=None, notified_at=None, author=None, **kw):
+        item = News.objects.create(
+            title=title, body=kw.pop("body", "Hello **world** this is the body"), status=status, visibility=visibility, notified_at=notified_at, created_by=author, published_at=published_at or timezone.now() - datetime.timedelta(minutes=1), **kw
+        )
+        item.teams.set(teams)
+        return item
 
-        result = call_command("notify_published_news")
-
-        self.assertTrue(Notification.objects.filter(member=self.member, title="News").exists())
-        news_item.refresh_from_db()
-        self.assertIsNotNone(news_item.notified_at)
-        self.assertIn("Notified 1 member(s) across 1 news item(s)", result)
-
-    def test_skips_a_news_item_already_notified(self):
-        already = timezone.now() - datetime.timedelta(hours=1)
-        News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(minutes=1), notified_at=already)
-
-        call_command("notify_published_news")
-
-        self.assertFalse(Notification.objects.exists())
-
-    def test_skips_a_news_item_not_yet_due(self):
-        News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() + datetime.timedelta(hours=1))
-
-        call_command("notify_published_news")
-
-        self.assertFalse(Notification.objects.exists())
-
-    def test_skips_a_news_item_that_is_not_published(self):
-        News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.DRAFT)
-
-        call_command("notify_published_news")
-
-        self.assertFalse(Notification.objects.exists())
-
-    def test_skips_a_news_item_opted_out_of_notification(self):
-        # notified_at set immediately at publish time (management.views.NewsPublishView.
-        # form_valid, when notify_members is unchecked) -- opted out entirely, not just
-        # delayed, so the sweep must never send one regardless of why notified_at is set.
-        News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(minutes=1), notified_at=timezone.now())
-
-        call_command("notify_published_news")
-
-        self.assertFalse(Notification.objects.exists())
-
-    def test_a_quiet_sweep_is_not_an_error(self):
-        result = call_command("notify_published_news")
-
-        self.assertIn("Notified 0 member(s) across 0 news item(s)", result)
-
-    def test_writes_a_job_run_row(self):
-        News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(minutes=1))
-
-        call_command("notify_published_news")
-
-        job_run = JobRun.objects.get(name="news.tasks.notify_news_published")
-        self.assertEqual(job_run.status, JobRun.Status.SUCCESS)
-
-    def test_stands_down_when_disabled_via_job_toggle(self):
-        JobToggle.set_enabled("news.tasks.notify_news_published", False)
-        News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(minutes=1))
-
-        with self.assertRaises(CommandError):
-            call_command("notify_published_news")
-
-        self.assertFalse(Notification.objects.exists())
-        job_run = JobRun.objects.get(name="news.tasks.notify_news_published")
-        self.assertEqual(job_run.status, JobRun.Status.FAILURE)
-
-    def test_stands_down_during_maintenance(self):
-        Maintenance.start(message="Upgrading.")
-        News.objects.create(club=self.club, title="News", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(minutes=1))
-
-        with self.assertRaises(CommandError):
-            call_command("notify_published_news")
-
-        self.assertFalse(Notification.objects.exists())
+    def inbox(self, user):
+        return list(InboxNotification.objects.filter(user=user))
 
 
-class NotifyEditorsOfPendingReviewTests(TestCase):
-    """news.services.notify_editors_of_pending_review -- in-app only (no
-    email), every ADMIN/EDITOR for the club."""
+class PublishNotificationTests(NewsClubMixin, TestCase):
+    def test_club_wide_goes_to_active_members_and_guardians_once(self):
+        item = self.news()
+        self.assertEqual(notifications.notify_now(item.pk), 4)  # ann, bob, cara and the parent (once, for two kids)
+        for user in (self.ann_user, self.bob_user, self.cara_user, self.parent_user):
+            self.assertEqual(len(self.inbox(user)), 1, user)
+        self.assertEqual(self.inbox(self.dan_user), [])  # lapsed
+        self.assertEqual(self.inbox(self.eve_user), [])
+        note = self.inbox(self.ann_user)[0]
+        self.assertEqual((note.title, note.href), ("Big win", f"/news/{item.pk}"))
+        self.assertEqual(note.body, "Hello world this is the body")
+        item.refresh_from_db()
+        self.assertIsNotNone(item.notified_at)
 
-    @classmethod
-    def setUpTestData(cls):
-        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+    def test_team_item_only_reaches_that_roster_and_guardians(self):
+        item = self.news(teams=[self.team])
+        notifications.notify_now(item.pk)
+        self.assertEqual(self.inbox(self.bob_user), [])
+        self.assertEqual(self.inbox(self.dan_user), [])
+        for user in (self.ann_user, self.cara_user, self.parent_user):
+            self.assertEqual(len(self.inbox(user)), 1)
+        other = self.news("Elsewhere", teams=[self.other_team])
+        notifications.notify_now(other.pk)
+        self.assertEqual(len(self.inbox(self.ann_user)), 1)
 
-    def make_role(self, first_name, role):
-        member = Member.objects.create(first_name=first_name, last_name="Staff")
-        ClubRole.objects.create(club=self.club, member=member, role=role)
-        return member
+    def test_excerpt_is_about_fifteen_words(self):
+        item = self.news(body=" ".join(f"w{i}" for i in range(40)))
+        notifications.notify_now(item.pk)
+        body = self.inbox(self.ann_user)[0].body
+        self.assertTrue(body.endswith(" …"))
+        self.assertEqual(len(body.split()), 16)
 
-    def test_notifies_admins_and_editors(self):
-        admin = self.make_role("Ada", ClubRole.Roles.ADMIN)
-        editor = self.make_role("Ed", ClubRole.Roles.EDITOR)
-        author = self.make_role("Cara", ClubRole.Roles.MEMBER)
-        news_item = News.objects.create(club=self.club, title="Draft item", body="Body.", created_by=author)
+    def test_language_per_recipient(self):
+        item = self.news(title="Grote winst", body="Nederlandse tekst", title_en="Big win", body_en="English text")
+        notifications.notify_now(item.pk)
+        self.assertEqual((self.inbox(self.ann_user)[0].title, self.inbox(self.ann_user)[0].body), ("Grote winst", "Nederlandse tekst"))
+        self.assertEqual((self.inbox(self.cara_user)[0].title, self.inbox(self.cara_user)[0].body), ("Big win", "English text"))
 
-        notify_editors_of_pending_review(news_item)
+    def test_external_only_tells_nobody_but_is_marked(self):
+        item = self.news(visibility="external")
+        self.assertEqual(notifications.notify_now(item.pk), 0)
+        self.assertFalse(InboxNotification.objects.exists())
+        item.refresh_from_db()
+        self.assertIsNotNone(item.notified_at)
 
-        self.assertTrue(Notification.objects.filter(member=admin).exists())
-        self.assertTrue(Notification.objects.filter(member=editor).exists())
-        self.assertFalse(Notification.objects.filter(member=author).exists())
+    def test_never_twice(self):
+        item = self.news()
+        notifications.notify_now(item.pk)
+        self.assertEqual(notifications.notify_now(item.pk), 0)
+        self.assertEqual(len(self.inbox(self.ann_user)), 1)
 
-    def test_stores_english_and_genuinely_dutch_translations(self):
-        admin = self.make_role("Ada", ClubRole.Roles.ADMIN)
-        author = self.make_role("Cara", ClubRole.Roles.MEMBER)
-        news_item = News.objects.create(club=self.club, title="Draft item", body="Body.", created_by=author)
+    def test_failure_releases_the_claim(self):
+        item = self.news()
+        with mock.patch.object(notifications, "send_publish_notification", side_effect=RuntimeError):
+            with self.assertRaises(RuntimeError):
+                notifications.notify_now(item.pk)
+        item.refresh_from_db()
+        self.assertIsNone(item.notified_at)
 
-        notify_editors_of_pending_review(news_item)
+    def test_dispatch_queues_a_task(self):
+        with mock.patch.object(tasks.notify_published, "delay") as delay:
+            notifications.dispatch_publish_notification("abc")
+        delay.assert_called_once_with("abc")
+        with mock.patch.object(tasks.notify_editors_of_pending_review, "delay") as delay:
+            notifications.dispatch_notify_editors_of_pending_review("abc")
+        delay.assert_called_once_with("abc")
+        with mock.patch.object(tasks.notify_published, "delay", side_effect=OSError):
+            notifications.dispatch_publish_notification("abc")  # a broker hiccup does not raise
 
-        notification = Notification.objects.get(member=admin)
-        self.assertEqual(notification.title, "“Draft item” is ready for review")
-        self.assertEqual(notification.category, NotificationCategory.ADMIN)
-        self.assertEqual(notification.translations["en"]["title"], "“Draft item” is ready for review")
-        self.assertEqual(notification.translations["nl"]["title"], "“Draft item” wacht op controle")
-        self.assertIn("ter controle ingediend", notification.translations["nl"]["body"])
-        self.assertIn("submitted this news item for review", notification.translations["en"]["body"])
+    def test_publish_service_queues_notification_after_commit(self):
+        item = self.news(status=News.Status.DRAFT, published_at=None)
+        item.published_at = None
+        item.save()
+        with mock.patch.object(tasks.notify_published, "delay") as delay, self.captureOnCommitCallbacks(execute=True):
+            svc.publish(self.owner, item)
+        delay.assert_called_once_with(str(item.pk))
 
-    def test_sends_no_email(self):
-        self.make_role("Ada", ClubRole.Roles.ADMIN)
-        news_item = News.objects.create(club=self.club, title="Draft item", body="Body.")
 
-        notify_editors_of_pending_review(news_item)
+class SweepTests(NewsClubMixin, TestCase):
+    def test_sweep_notifies_due_items_only(self):
+        due = self.news("Due", published_at=timezone.now() - datetime.timedelta(hours=1))
+        future = self.news("Future", published_at=timezone.now() + datetime.timedelta(hours=1))
+        done = self.news("Done", notified_at=timezone.now())
+        draft = self.news("Draft", status=News.Status.DRAFT)
+        counts = notifications.notify_due()
+        self.assertEqual(counts["items"], 1)
+        titles = set(InboxNotification.objects.values_list("title", flat=True))
+        self.assertEqual(titles, {"Due"})
+        for item in (due, future, done, draft):
+            item.refresh_from_db()
+        self.assertIsNotNone(due.notified_at)
+        self.assertIsNone(future.notified_at)
+        self.assertIsNone(draft.notified_at)
+        self.assertEqual(notifications.notify_due(), {"items": 0, "told": 0})
 
-        self.assertEqual(len(mail.outbox), 0)
-        self.assertIsNone(Notification.objects.first().sent_at)
+    def test_task_runs_across_clubs(self):
+        self.news("Due")
+        connection.set_schema_to_public()
+        result = tasks.notify_due_news()
+        self.assertIn("news item(s)", result)
+        with schema_context(self.club.schema_name):
+            self.assertTrue(InboxNotification.objects.filter(title="Due").exists())
 
-    def test_the_notification_names_the_author(self):
-        self.make_role("Ada", ClubRole.Roles.ADMIN)
-        author = Member.objects.create(first_name="Cara", last_name="Coach")
-        news_item = News.objects.create(club=self.club, title="Draft item", body="Body.", created_by=author)
+    def test_beat_entry_registered(self):
+        from rosterchief.celery import app
 
-        notify_editors_of_pending_review(news_item)
+        self.assertEqual(app.conf.beat_schedule["news-notify-due-news"]["task"], "news.notify_due_news")
+        self.assertIn("news.notify_due_news", app.tasks)
 
-        self.assertIn("Cara Coach", Notification.objects.first().body)
+
+class EditorNotificationTests(NewsClubMixin, TestCase):
+    def test_publishers_hear_about_a_pending_item_except_the_author(self):
+        item = self.news(status=News.Status.PENDING_REVIEW, author=self.ann, published_at=None)
+        self.assertEqual(notifications.notify_editors_of_pending_review(item), 2)  # the Owner and Eve
+        for user in (self.owner, self.eve_user):
+            (note,) = self.inbox(user)
+            self.assertIn("Ann Test", note.body)
+            self.assertIn("Big win", note.title)
+        self.assertEqual(self.inbox(self.ann_user), [])
+        self.assertEqual(self.inbox(self.bob_user), [])
+
+    def test_author_who_is_a_publisher_is_not_told(self):
+        item = self.news(status=News.Status.PENDING_REVIEW, author=self.eve, published_at=None)
+        notifications.notify_editors_of_pending_review(item)
+        self.assertEqual(self.inbox(self.eve_user), [])
+        self.assertEqual(len(self.inbox(self.owner)), 1)
+
+    def test_in_app_only_no_email(self):
+        item = self.news(status=News.Status.PENDING_REVIEW, author=self.ann, published_at=None)
+        with mock.patch("notifications.inbox.notify") as notify:
+            notifications.notify_editors_of_pending_review(item)
+        for call in notify.call_args_list:
+            self.assertFalse(call.kwargs["send_email"])
+
+    def test_author_is_told_with_the_reviewers_note_when_sent_back(self):
+        item = self.news(status=News.Status.DRAFT, author=self.ann, published_at=None)
+        item.review_note = "Please add a photo."
+        item.save()
+        self.assertEqual(notifications.notify_author_of_send_back(item.pk, self.owner.pk), 1)
+        (note,) = self.inbox(self.ann_user)
+        self.assertEqual(note.body, "Please add a photo.")
+        self.assertIn("needs changes", note.title)
+        self.assertEqual(notifications.notify_author_of_send_back(item.pk, self.ann_user.pk), 0)  # not to the person who did it
+
+    def test_task_wrapper(self):
+        item = self.news(status=News.Status.PENDING_REVIEW, author=self.ann, published_at=None)
+        self.assertEqual(tasks.notify_editors_of_pending_review(str(item.pk)), "told 2 editor(s)")
+
+
+class FeedTests(NewsClubMixin, TestCase):
+    def test_member_feed_and_public_feed(self):
+        internal = self.news("Internal", visibility="internal")
+        external = self.news("External", visibility="external")
+        both = self.news("Both", visibility="both")
+        tomorrow = timezone.now() + datetime.timedelta(days=1)
+        for visibility in ("internal", "external", "both"):  # not live until the publish date has passed, whoever it is meant for
+            self.news(f"Scheduled {visibility}", visibility=visibility, published_at=tomorrow)
+            self.news(f"Draft {visibility}", visibility=visibility, status=News.Status.DRAFT)
+        self.assertEqual(set(svc.member_news()), {internal, both})
+        self.assertEqual(set(svc.public_news()), {external, both})
+        self.assertEqual(svc.localized_news(both, "en-GB")[2], "en")
+        self.assertEqual(svc.localized_news(both, "nl")[2], "default")

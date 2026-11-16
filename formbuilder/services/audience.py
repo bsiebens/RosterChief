@@ -1,184 +1,156 @@
-"""Resolve who a FormSend's audience actually is.
+"""Who a FormSend is addressed to.
 
-Same union/subtract shape as events.services.attendance.effective_members --
-team rosters (for the send's season) union group members, or every active
-ClubMembership for a club_wide send, then union invited_members and subtract
-excluded_members. Deliberately NOT sharing code with events: there's no
-onboarding-requirement subtraction here (that's keyed on Event.kind, which
-forms have no equivalent of) and no Attendance-like row to sync -- this is a
-pure query helper, not a persisted reconciliation.
+Same union/subtract shape as ``events.services.attendance``: the rosters of the send's teams (for its season) plus every
+member of its groups, or every ACTIVE club member of the season for a club-wide send, plus the invited members, minus the
+excluded members (exclusion wins). Everybody in a group counts (``GroupMembership.must_respond`` is an event concept and
+is ignored here). A send without a season uses the current season.
 """
+
+from collections import defaultdict
 
 from django.utils import timezone
 
-from club.models import ClubMembership
-from club.services.access import current_season
-from formbuilder.models import FormSend, Submission
-from members.models import GroupMembership, Member
+from events.models import Season
+from members.models import ClubMembership, FamilyMembership, GroupMembership, Member
 from teams.models import TeamMembership
 
 
-def resolve_season(send):
-    """The season whose rosters define the send's audience."""
+def resolve_season(send) -> Season | None:
+    """The season whose rosters define the send's audience: its own ``season``, else the current one."""
     if send.season_id is not None:
         return send.season
-    return current_season(send.club)
+    return Season.get_current()
+
+
+def audience_ids_by_send(sends) -> dict:
+    """``{send.pk: {member ids}}`` for every send, resolved in a fixed number of queries (plus one per send for its M2M
+    ids, which are small) -- what lists with an audience count use."""
+    sends = list(sends)
+    if not sends:
+        return {}
+    current = None
+    season_of = {}
+    for send in sends:
+        if send.season_id is not None:
+            season_of[send.pk] = send.season_id
+        else:
+            current = current or Season.get_current()
+            season_of[send.pk] = current.pk if current else None
+
+    club_wide_seasons = {season_of[s.pk] for s in sends if s.club_wide and season_of[s.pk]}
+    active = defaultdict(set)
+    if club_wide_seasons:
+        for season_id, member_id in ClubMembership.objects.filter(season_id__in=club_wide_seasons, status=ClubMembership.StatusChoices.ACTIVE).values_list("season_id", "member_id"):
+            active[season_id].add(member_id)
+
+    scoped = [s for s in sends if not s.club_wide]
+    teams = {s.pk: set(s.teams.values_list("pk", flat=True)) for s in scoped}
+    groups = {s.pk: set(s.groups.values_list("pk", flat=True)) for s in scoped}
+    team_ids = set().union(*teams.values()) if teams else set()
+    group_ids = set().union(*groups.values()) if groups else set()
+    seasons = {season_of[s.pk] for s in scoped if season_of[s.pk]}
+
+    roster = defaultdict(set)
+    if team_ids and seasons:
+        for team_id, season_id, member_id in TeamMembership.objects.filter(team_id__in=team_ids, season_id__in=seasons).values_list("team_id", "season_id", "member_id"):
+            roster[(team_id, season_id)].add(member_id)
+    group_members = defaultdict(set)
+    if group_ids:
+        for group_id, member_id in GroupMembership.objects.filter(group_id__in=group_ids).values_list("group_id", "member_id"):
+            group_members[group_id].add(member_id)
+
+    result = {}
+    for send in sends:
+        season_id = season_of[send.pk]
+        ids = set()
+        if send.club_wide:
+            if season_id:
+                ids |= active[season_id]
+        else:
+            if season_id:
+                for team_id in teams[send.pk]:
+                    ids |= roster[(team_id, season_id)]
+            for group_id in groups[send.pk]:
+                ids |= group_members[group_id]
+        ids |= set(send.invited_members.values_list("pk", flat=True))
+        ids -= set(send.excluded_members.values_list("pk", flat=True))
+        result[send.pk] = ids
+    return result
+
+
+def effective_member_ids(send) -> set:
+    return audience_ids_by_send([send])[send.pk]
 
 
 def effective_members(send):
-    """Return the ``Member`` queryset this send is addressed to."""
-    season = resolve_season(send)
-
-    member_ids = set()
-    if send.club_wide:
-        if season is not None:
-            member_ids.update(ClubMembership.objects.filter(club=send.club, season=season, status=ClubMembership.StatusChoices.ACTIVE).values_list("member_id", flat=True))
-    else:
-        if season is not None:
-            team_ids = list(send.teams.values_list("id", flat=True))
-            if team_ids:
-                member_ids.update(TeamMembership.objects.filter(team_id__in=team_ids, season=season).values_list("member_id", flat=True))
-
-        group_ids = list(send.groups.values_list("id", flat=True))
-        if group_ids:
-            member_ids.update(Member.objects.filter(group_memberships__group_id__in=group_ids).values_list("id", flat=True))
-
-    member_ids.update(send.invited_members.values_list("id", flat=True))
-    member_ids.difference_update(send.excluded_members.values_list("id", flat=True))
-
-    return Member.objects.filter(id__in=member_ids)
+    """The ``Member`` queryset this send is addressed to."""
+    return Member.objects.filter(pk__in=effective_member_ids(send))
 
 
-def addressed_to(send, members):
-    """Whether ``send``'s audience includes ``members`` -- one Member, or an
-    iterable of them (any one of them counts, e.g. a parent's own record
-    plus their managed children). The single check both submitting
-    (submission._check_open) and viewing a send (mobile's FormFillView)
-    go through, so who may see a form and who may answer it can't drift."""
+def audience_count(send) -> int:
+    return len(effective_member_ids(send))
+
+
+def addressed_people(send, members) -> list:
+    """The subset of ``members`` (one Member or an iterable) the send is addressed to, in the order given."""
+    if isinstance(members, Member):
+        members = [members]
+    members = [m for m in members if m is not None]
+    if not members:
+        return []
+    audience = effective_member_ids(send)
+    return [m for m in members if m.pk in audience]
+
+
+def addressed_to(send, members) -> bool:
+    """Whether the audience includes ``members`` (one Member, or any one of an iterable)."""
     return bool(addressed_people(send, members))
 
 
-def addressed_people(send, members):
-    """The subset of ``members`` (one Member or an iterable) that ``send`` is
-    addressed to, in the order given -- e.g. which of a parent's own record
-    and their managed children a form can be filled in for."""
-    if isinstance(members, Member):
-        members = [members]
-    members = [member for member in members if member is not None]
-    if not members:
-        return []
-    audience_ids = set(effective_members(send).filter(pk__in=[member.pk for member in members]).values_list("pk", flat=True))
-    return [member for member in members if member.pk in audience_ids]
-
-
 def members_not_yet_submitted(send):
-    """``effective_members(send)`` minus anyone with an existing Submission --
-    "who still needs to do this", the shared query behind the mobile home
-    card, the Me page, and the reminder job."""
-    submitted_ids = send.submissions.values_list("member_id", flat=True)
-    return effective_members(send).exclude(id__in=submitted_ids)
+    """``effective_members`` minus anyone with a submission to this send: who still needs to respond (the reminder job)."""
+    submitted = send.submissions.exclude(member__isnull=True).values_list("member_id", flat=True)
+    return effective_members(send).exclude(pk__in=submitted)
 
 
-def is_send_open(send, when=None):
-    """Whether ``send`` is currently accepting submissions -- its own
-    is_active/opens_at/closes_at window, independent of Form.is_active
-    (which only governs whether the template can be picked for a *new*
-    send, see Form's own docstring, and shouldn't retroactively hide a send
-    already out)."""
+def is_send_open(send, when=None) -> bool:
+    """Whether the send accepts submissions now: its own is_active / opens_at / closes_at window."""
     when = when or timezone.now()
     if not send.is_active:
         return False
     if send.opens_at is not None and when < send.opens_at:
         return False
+    return not (send.closes_at is not None and when > send.closes_at)
+
+
+def send_status(send, when=None) -> str:
+    """``inactive`` (switched off), ``closed`` (past closes_at), ``scheduled`` (before opens_at) or ``open``."""
+    when = when or timezone.now()
+    if not send.is_active:
+        return "inactive"
     if send.closes_at is not None and when > send.closes_at:
-        return False
-    return True
+        return "closed"
+    if send.opens_at is not None and when < send.opens_at:
+        return "scheduled"
+    return "open"
 
 
-def _effective_member_ids_by_send(sends):
-    """``{send.pk: {member ids}}`` for every ``send`` in ``sends``, resolved in a
-    handful of queries shared across the whole list -- what form_status_rows_for
-    needs when it walks every FormSend the club has ever created, instead of
-    effective_members()'s own ~4-6 queries repeated independently per send (a
-    club with a season or two of history could turn that into 50-150+ queries
-    on a single page load)."""
-    sends = list(sends)
-    if not sends:
-        return {}
-
-    season_by_send = {send.pk: resolve_season(send) for send in sends}
-    club_wide_sends = [send for send in sends if send.club_wide]
-    scoped_sends = [send for send in sends if not send.club_wide]
-
-    club_wide_seasons = {season_by_send[send.pk] for send in club_wide_sends if season_by_send[send.pk] is not None}
-    active_ids_by_season = {}
-    if club_wide_seasons:
-        for season_id, member_id in ClubMembership.objects.filter(club=sends[0].club, season__in=club_wide_seasons, status=ClubMembership.StatusChoices.ACTIVE).values_list("season_id", "member_id"):
-            active_ids_by_season.setdefault(season_id, set()).add(member_id)
-
-    team_ids_by_send = {send.pk: set(send.teams.values_list("id", flat=True)) for send in scoped_sends}
-    group_ids_by_send = {send.pk: set(send.groups.values_list("id", flat=True)) for send in scoped_sends}
-    all_team_ids = {team_id for ids in team_ids_by_send.values() for team_id in ids}
-    all_group_ids = {group_id for ids in group_ids_by_send.values() for group_id in ids}
-    scoped_seasons = {season_by_send[send.pk] for send in scoped_sends if season_by_send[send.pk] is not None}
-
-    member_ids_by_team_season = {}
-    if all_team_ids and scoped_seasons:
-        for team_id, season_id, member_id in TeamMembership.objects.filter(team_id__in=all_team_ids, season_id__in=scoped_seasons).values_list("team_id", "season_id", "member_id"):
-            member_ids_by_team_season.setdefault((team_id, season_id), set()).add(member_id)
-
-    member_ids_by_group = {}
-    if all_group_ids:
-        for group_id, member_id in GroupMembership.objects.filter(group_id__in=all_group_ids).values_list("group_id", "member_id"):
-            member_ids_by_group.setdefault(group_id, set()).add(member_id)
-
-    invited_ids_by_send = {send.pk: set(send.invited_members.values_list("id", flat=True)) for send in sends}
-    excluded_ids_by_send = {send.pk: set(send.excluded_members.values_list("id", flat=True)) for send in sends}
-
-    result = {}
-    for send in sends:
-        season = season_by_send[send.pk]
-        if send.club_wide:
-            member_ids = set(active_ids_by_season.get(season.pk, set())) if season is not None else set()
-        else:
-            member_ids = set()
-            if season is not None:
-                for team_id in team_ids_by_send[send.pk]:
-                    member_ids.update(member_ids_by_team_season.get((team_id, season.pk), set()))
-            for group_id in group_ids_by_send[send.pk]:
-                member_ids.update(member_ids_by_group.get(group_id, set()))
-        member_ids.update(invited_ids_by_send[send.pk])
-        member_ids.difference_update(excluded_ids_by_send[send.pk])
-        result[send.pk] = member_ids
-    return result
+def guardian_ids_of(member) -> set:
+    """Ids of the parents / guardians in the families where ``member`` is a child (a login is not required)."""
+    families = FamilyMembership.objects.filter(member=member, role=FamilyMembership.FamilyRole.CHILD).values("family_id")
+    return set(FamilyMembership.objects.filter(family_id__in=families, role__in=FamilyMembership.GUARDIAN_ROLES).exclude(member=member).values_list("member_id", flat=True))
 
 
-def form_status_rows_for(members, club):
-    """Every FormSend any of ``members`` is or was ever addressed to, one
-    row per (send, member) pair -- ``{"send": ..., "member": ...,
-    "submission": ..., "submitted_at": ...}`` (the latter two ``None`` while
-    still pending). Newest send first. The one shared building block behind
-    mobile's Home "Forms to complete" card, Me's Forms counter, and the
-    dedicated Forms list page (which also uses ``submission`` to link a
-    completed row to that submission's own read-only "my responses" screen)
-    -- each just filters/caps this differently rather than re-deriving it.
+def is_guardian_of(guardian, child) -> bool:
+    return guardian is not None and child is not None and guardian.pk in guardian_ids_of(child)
 
-    ``members`` is a small, already-resolved list (the viewer's own
-    person-scope, e.g. self + managed children); the audience for every one
-    of the club's sends is resolved together via _effective_member_ids_by_send
-    rather than independently per send."""
-    members_by_id = {member.pk: member for member in members}
-    if not members_by_id:
-        return []
 
-    submission_by_send_and_member = {(submission.send_id, submission.member_id): submission for submission in Submission.objects.filter(send__club=club, member_id__in=members_by_id)}
+def managed_children(guardian) -> list:
+    """The children of the families ``guardian`` is a parent / guardian in."""
+    families = FamilyMembership.objects.filter(member=guardian, role__in=FamilyMembership.GUARDIAN_ROLES).values("family_id")
+    return list(Member.objects.filter(family_memberships__family_id__in=families, family_memberships__role=FamilyMembership.FamilyRole.CHILD).exclude(pk=guardian.pk).distinct())
 
-    sends = list(FormSend.objects.filter(club=club).select_related("form").order_by("-created"))
-    audience_ids_by_send = _effective_member_ids_by_send(sends)
 
-    rows = []
-    for send in sends:
-        for member_id in audience_ids_by_send[send.pk] & members_by_id.keys():
-            submission = submission_by_send_and_member.get((send.pk, member_id))
-            rows.append({"send": send, "member": members_by_id[member_id], "submission": submission, "submitted_at": submission.submitted_at if submission else None})
-    return rows
+def fillable_members(send, viewer) -> list:
+    """Who ``viewer`` (a Member) may fill ``send`` in for: themself and their children, restricted to the audience."""
+    return addressed_people(send, [viewer, *managed_children(viewer)])

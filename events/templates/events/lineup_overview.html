@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Line-up {{ event.title }}</title>
+<style>
+@page { size: A4; margin: 14mm 14mm 18mm; @bottom-center { content: "Generated {{ generated_at|date:'j F Y, H:i' }} - line-up: {{ status }} - page " counter(page) " / " counter(pages); font-size: 8pt; color: #666; } }
+body { font-family: sans-serif; font-size: 10pt; color: #111; }
+h1 { font-size: 18pt; margin: 0 0 1mm; }
+h2 { font-size: 9pt; text-transform: uppercase; letter-spacing: .06em; color: #444; background: #eee; margin: 0; padding: 1.5mm 3mm; }
+.muted { color: #666; }
+.accent { color: {{ club.primary_color|default:"#4f46e5" }}; }
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6mm; }
+.brand { display: flex; align-items: center; }
+.logo { height: 14mm; width: 14mm; object-fit: contain; margin-right: 4mm; }
+.brand-name { font-size: 12pt; font-weight: bold; }
+.right { text-align: right; }
+.boxes { column-count: 2; column-gap: 5mm; }
+.box { border: 1px solid #bbb; margin-bottom: 5mm; break-inside: avoid; }
+table { width: 100%; border-collapse: collapse; }
+td { padding: 1.6mm 3mm; border-top: 1px solid #ddd; }
+td.slot { width: 14mm; font-size: 8pt; font-weight: bold; color: #666; text-transform: uppercase; }
+td.num { width: 9mm; text-align: right; font-weight: bold; }
+.dash { color: #888; }
+.summary { margin-top: 2mm; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="brand">
+    {% if logo_data_uri %}<img class="logo" src="{{ logo_data_uri }}" alt="">{% endif %}
+    <div class="brand-name">{{ club.legal_name|default:club.name }}</div>
+  </div>
+  <div class="right">
+    <h1 class="accent">{{ event.title }}</h1>
+    <div>{{ when|date:"l j F Y, H:i" }}</div>
+    {% if location %}<div class="muted">Location: {{ location }}</div>{% endif %}
+    {% if opponent %}<div class="muted">Opponent: {{ opponent }}</div>{% endif %}
+  </div>
+</div>
+
+{% if groups %}
+<div class="boxes">
+{% for g in groups %}
+  <div class="box">
+    <h2>{{ g.label }}</h2>
+    <table>
+    {% for s in g.slots %}
+      <tr><td class="slot">{{ s.label }}</td>{% if s.player %}<td class="num">{{ s.player.number|default_if_none:"" }}</td><td>{{ s.player.name }}</td>{% else %}<td class="num"></td><td class="dash">&ndash;</td>{% endif %}</tr>
+    {% endfor %}
+    </table>
+  </div>
+{% endfor %}
+</div>
+{% if loose %}
+<div class="box">
+  <h2>Not in a line ({{ loose|length }})</h2>
+  <table>{% for p in loose %}<tr><td class="num">{{ p.number|default_if_none:"" }}</td><td>{{ p.name }}</td></tr>{% endfor %}</table>
+</div>
+{% endif %}
+{% else %}
+<div class="boxes">
+{% for g in by_position %}
+  <div class="box">
+    <h2>{{ g.label|default:"Players" }}</h2>
+    <table>{% for p in g.players %}<tr><td class="num">{{ p.number|default_if_none:"" }}</td><td>{{ p.name }}</td></tr>{% endfor %}</table>
+  </div>
+{% empty %}
+  <p class="muted">No players picked.</p>
+{% endfor %}
+</div>
+{% endif %}
+<p class="summary muted">Selected: {{ picked_count }} &middot; Not selected: {{ not_selected }}</p>
+</body>
+</html>

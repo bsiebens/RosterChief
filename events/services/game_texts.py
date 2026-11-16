@@ -153,7 +153,7 @@ LINES = {
 def current_score(event, moments) -> dict:
     """The score as of the latest moment known for the game: this batch's first, then earlier ones
     (a penalty carries no score of its own). 0-0 when nothing has scored yet."""
-    for moment in [*reversed(moments), *event.moments.order_by("-game_seconds", "-created_at")[:50]]:
+    for moment in [*reversed(moments), *event.moments.order_by("-game_seconds", "-created")[:50]]:
         score = (moment.payload or {}).get("score")
         if score:
             return score

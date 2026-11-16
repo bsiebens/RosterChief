@@ -1,49 +1,47 @@
-"""Who may see a member's player picture (Member.player_photo, stored privately).
-The profile picture (Member.profile_photo) is visible to everyone in the club, never public.
+"""Who may see a member's picture. Pictures live in private storage (``rosterchief.storage``) and are only ever
+streamed by ``members.views.MemberPhotoView`` after this check; there is no public URL for them.
 
-* anyone, once the member gave ``photo_public_consent`` (the public roster);
-* the member themselves, and their parents/guardians -- a PARENT/GUARDIAN in
-  any family where the member is a CHILD -- on any host;
-* on a club's host, staff whose authority over that member comes from that
-  club: whoever may manage members (for anyone attached to the club), and
-  everyone else by the same ``members_visible_to`` rule the member detail page
-  uses. Teammates are deliberately not included.
+* ``profile_photo``, the self-service picture the apps show: the member themselves, and anyone who is a user of the
+  club the request is for. Never public.
+* ``player_photo``, the official picture: anyone once ``photo_public_consent`` is set (the public roster); otherwise the
+  member themselves, and on a club's own host whoever may manage members (``members.manage_members``), plus the
+  platform owner for support.
+* no ``field``: the *effective* picture, the profile picture, else the player picture. The player picture used as that
+  fallback is shown club-wide like a profile picture (otherwise rosters would show broken images); asked for directly
+  it keeps the stricter rules.
+
+Parents and guardians (families) do exist now (``members.models.FamilyMembership``) but do not grant picture access
+yet; if that is wanted, the check belongs next to the "member themselves" checks below.
 """
 
-from django.db.models import Q
+from django.core.exceptions import ObjectDoesNotExist
 
-from members.models import FamilyMembership, Member
-
-
-def is_guardian_of(user, member: Member) -> bool:
-    return Member.objects.filter(
-        user=user,
-        family_memberships__role__in=[FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN],
-        family_memberships__family__memberships__member=member,
-        family_memberships__family__memberships__role=FamilyMembership.FamilyRole.CHILD,
-    ).exists()
+from members.models import Member
+from members.services import access
+from members.services.access import MANAGE_MEMBERS  # noqa: F401  (re-exported)
 
 
-def _attached_to_club(member: Member, club) -> bool:
-    return Member.objects.filter(pk=member.pk).filter(Q(member_of__club=club) | Q(team_memberships__team__club=club) | Q(staff_assignments__team__club=club) | Q(roles__club=club)).exists()
+def is_member_themselves(user, member: Member) -> bool:
+    return member.user_id is not None and member.user_id == user.pk
 
 
-def _is_in_club(user, club) -> bool:
-    from club.services.access import can_manage_members
+def is_user_of_club(user, club) -> bool:
+    """A signed-in user with a permissions row in ``club`` (checked in the club's schema, which the request has active)."""
+    if club is None:
+        return False
+    try:
+        return user.tenant_perms is not None
+    except ObjectDoesNotExist:
+        return False
 
-    if can_manage_members(user, club):
-        return True
-    own = Member.objects.filter(user=user).first()
-    return own is not None and _attached_to_club(own, club)
+
+def can_manage_members(user, club) -> bool:
+    return club is not None and access.can_manage_members(user)
 
 
 def can_view_member_photo(user, member: Member, club=None, field: str | None = None) -> bool:
-    """``field`` is ``player_photo`` (the official picture: the rules above),
-    ``profile_photo`` (the self-service picture used in the apps: anyone in
-    the club may see it, never the public) or None for the *effective* picture
-    -- the profile picture, else the player picture. The player picture used as
-    that fallback is shown club-wide like a profile picture (otherwise rosters
-    would show broken images); asked for directly it keeps the stricter rules."""
+    """``field`` is ``"player_photo"``, ``"profile_photo"`` or ``None`` for the effective picture."""
+    authenticated = user is not None and user.is_authenticated and user.is_active
     if field is None:
         if member.profile_photo:
             field = "profile_photo"
@@ -52,26 +50,11 @@ def can_view_member_photo(user, member: Member, club=None, field: str | None = N
         else:
             field = "player_photo"
     if field == "profile_photo":
-        if user is None or not user.is_authenticated:
+        if not authenticated:
             return False
-        if member.user_id is not None and member.user_id == user.pk:
-            return True
-        if is_guardian_of(user, member):
-            return True
-        return club is not None and _attached_to_club(member, club) and _is_in_club(user, club)
+        return is_member_themselves(user, member) or is_user_of_club(user, club) or can_manage_members(user, club)
     if member.photo_public_consent:
         return True
-    if user is None or not user.is_authenticated:
+    if not authenticated:
         return False
-    if member.user_id is not None and member.user_id == user.pk:
-        return True
-    if is_guardian_of(user, member):
-        return True
-    if club is None:
-        return False
-
-    from club.services.access import can_manage_members, members_visible_to
-
-    if can_manage_members(user, club):
-        return _attached_to_club(member, club)
-    return members_visible_to(user, club, include_guardians=True).filter(pk=member.pk).exists()
+    return is_member_themselves(user, member) or can_manage_members(user, club)

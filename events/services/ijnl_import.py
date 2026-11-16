@@ -1,20 +1,13 @@
-"""Importing a team's fixture list from IJshockey Nederland (IJNL, the Dutch
-ice hockey federation) at ijshockey.nl.
+"""Importing a team's fixture list from IJshockey Nederland (IJNL, the Dutch ice hockey federation) at ijshockey.nl.
 
-The public team page (``https://www.ijshockey.nl/competities/team/<team_id>?seizoen=2026%2F27``)
-renders its schedule client-side from a JSON endpoint next to it
-(``.../team/<team_id>/data?seizoen=...``), which is what's fetched here. One
-response covers *every* division (``onderdeel``: regular season, playoffs, cup,
-...) the team plays in that season, so one import brings them all in.
+The public team page (``https://www.ijshockey.nl/competities/team/<team_id>?seizoen=2026%2F27``) renders its schedule
+client-side from a JSON endpoint next to it (``.../team/<team_id>/data?seizoen=...``), which is what is fetched here. One
+response covers every division (``onderdeel``: regular season, playoffs, cup, ...) the team plays in that season.
 
-Each game is keyed by its ``gameGuid`` (a UUID), and has its own JSON endpoint
-(``/competities/wedstrijd/<uuid>/data``) that the site polls for live scores --
-that backs the single-game score refresh, events.competition.hockey.IJNL.
+Each game is keyed by its ``gameGuid`` (a UUID) and has its own JSON endpoint (``/competities/wedstrijd/<uuid>/data``)
+the site polls for live scores: that backs the single-game score refresh, events.competition.hockey.IJNL.
 
-Same two-step preview/confirm flow as events.services.rbihf_import, sharing its
-diff/apply core (``plan_from_fixtures``/``apply_plan``): ``fetch_team_data``
-returns plain JSON text a view can stash in the session, and ``build_plan`` is
-pure with respect to the network once it has that text.
+Same two-step flow as events.services.rbihf_import, sharing its diff/apply core.
 """
 
 import json
@@ -26,7 +19,7 @@ from zoneinfo import ZoneInfo
 import requests
 from bs4 import BeautifulSoup
 from django.utils import timezone
-from django.utils.translation import gettext_lazy as _
+from django.utils.translation import gettext as _
 
 from events.services.rbihf_import import ImportPlan, ScrapedFixture, apply_plan, plan_from_fixtures
 
@@ -60,10 +53,9 @@ class IJNLImportError(Exception):
 
 
 def extract_ids(url: str) -> tuple[str, str]:
-    """Returns (team_id, season) from an ijshockey.nl team page URL -- season
-    (e.g. "2026/27") is "" when the URL has no ``seizoen``, meaning "whatever
-    season the site currently shows" (see ``season_of``)."""
-    parts = urlsplit(url.strip())
+    """Returns (team_id, season) from an ijshockey.nl team page URL. ``season`` (e.g. "2026/27") is "" when the URL has
+    no ``seizoen``, meaning "whatever season the site currently shows" (see ``season_of``)."""
+    parts = urlsplit((url or "").strip())
     match = TEAM_PATH_RE.match(parts.path)
     if parts.scheme not in ("http", "https") or parts.hostname not in HOSTS or not match:
         raise IJNLImportError(_("That doesn't look like an ijshockey.nl team page -- expected something like https://www.ijshockey.nl/competities/team/64414?seizoen=2026%2F27."))
@@ -75,16 +67,14 @@ def extract_ids(url: str) -> tuple[str, str]:
 
 
 def source_id(team_id, season) -> str:
-    """What's stored as Event.external_source_id for an IJNL import -- the team
-    *and* season ("64414/2026/27"), since the team id carries over between
-    seasons while its schedule doesn't."""
+    """Event.external_source_id for an IJNL import: the team *and* season ("64414/2026/27"), since the team id carries
+    over between seasons while its schedule doesn't."""
     return f"{team_id}/{season}"
 
 
 def team_page_url(team_id, season) -> str:
-    """The canonical team page URL for (team, season) -- what's remembered on
-    Team.import_sources, so a re-check keeps asking for the same season even if
-    staff pasted a URL without one."""
+    """The canonical team page URL for (team, season): what is remembered on Team.import_sources, so a re-check keeps
+    asking for the same season even if staff pasted a URL without one."""
     return TEAM_PAGE_URL.format(team_id=team_id, season=quote(season, safe=""))
 
 
@@ -114,8 +104,7 @@ def _load_team_data(raw_json: str) -> dict:
 
 
 def fetch_team_data(team_id: str, season: str = "") -> str:
-    """Fetches the team's whole season (every division) and returns it as JSON
-    text -- a plain str so a view can stash it in the session."""
+    """Fetches the team's whole season (every division) and returns it as JSON text."""
     params = {"seizoen": season} if season else None
     raw_json = _get(TEAM_DATA_URL.format(team_id=team_id), params=params)
     _load_team_data(raw_json)  # fail here, at fetch time, rather than later at preview time
@@ -131,8 +120,8 @@ def season_of(raw_json: str) -> str:
 
 
 def _games(payload: dict) -> list[dict]:
-    """Upcoming (``programma``) and played (``uitslagen``) games together -- a game
-    moves from one list to the other once it's been played."""
+    """Upcoming (``programma``) and played (``uitslagen``) games together: a game moves from one list to the other once
+    it has been played."""
     return [game for game in [*payload.get("programma", []), *(payload.get("uitslagen") or [])] if isinstance(game, dict)]
 
 
@@ -148,13 +137,11 @@ def _start(game: dict) -> datetime | None:
     return naive_start.replace(tzinfo=SOURCE_TIMEZONE)
 
 
-def parse_fixtures(raw_json: str, team_id: str) -> tuple[str, list[ScrapedFixture], list[str]]:
-    """Returns (the team's own display name, its upcoming fixtures, the ids of
-    listed games that have no date yet).
+def parse_fixtures(raw_json: str, team_id: str, include_past: bool = False) -> tuple[str, list[ScrapedFixture], list[str]]:
+    """Returns (the team's own display name, its upcoming fixtures, the ids of listed games with no date yet).
 
-    A game with no date yet ("TBD" on the site) can't become an Event, but it's
-    still on the schedule -- typically a postponed game waiting for a new date --
-    so its id is reported separately for ``build_plan`` to keep rather than
+    A game with no date yet ("TBD" on the site) can't become an Event, but it is still on the schedule (typically a
+    postponed game waiting for a new date), so its id is reported separately for ``build_plan`` to keep rather than
     delete an already-imported copy."""
     payload = _load_team_data(raw_json)
     team_id = str(team_id)
@@ -170,7 +157,7 @@ def parse_fixtures(raw_json: str, team_id: str) -> tuple[str, list[ScrapedFixtur
         elif str(away.get("teamId")) == team_id:
             is_home, opponent_name = False, home.get("naam", "")
         else:
-            continue  # shouldn't happen on a team's own schedule -- skip rather than guess
+            continue  # shouldn't happen on a team's own schedule: skip rather than guess
 
         game_id = str(game.get("gameGuid") or "")
         if not game_id:
@@ -179,8 +166,8 @@ def parse_fixtures(raw_json: str, team_id: str) -> tuple[str, list[ScrapedFixtur
         if start is None:
             undated_game_ids.append(game_id)
             continue
-        if start <= now:
-            continue  # already played (or under way) -- only upcoming games are imported, same as RBIHF
+        if start <= now and not include_past:
+            continue  # already played (or under way): only upcoming games are imported unless asked
 
         fixtures.append(ScrapedFixture(external_game_id=game_id, start=start, is_home=is_home, opponent_name=(opponent_name or "").strip(), venue_text=(game.get("locatie") or "").strip()))
 
@@ -190,17 +177,16 @@ def parse_fixtures(raw_json: str, team_id: str) -> tuple[str, list[ScrapedFixtur
     return team_name, fixtures, undated_game_ids
 
 
-def build_plan(club, team, source_id: str, raw_json: str, competition_label: str = "") -> ImportPlan:
-    """IJNL counterpart to events.services.rbihf_import.build_plan -- ``source_id``
-    is ``source_id(team_id, season)``, ``raw_json`` what fetch_team_data returned."""
+def build_plan(team, source_id: str, raw_json: str, competition_label: str = "", include_past: bool = False) -> ImportPlan:
+    """IJNL counterpart to rbihf_import.build_plan: ``source_id`` is ``source_id(team_id, season)``, ``raw_json`` what
+    fetch_team_data returned."""
     team_id = source_id.split("/", 1)[0]
-    scraped_team_name, fixtures, undated_game_ids = parse_fixtures(raw_json, team_id)
-    return plan_from_fixtures(club, team, competition=COMPETITION, source_id=source_id, scraped_team_name=scraped_team_name, fixtures=fixtures, competition_label=competition_label, keep_game_ids=undated_game_ids)
+    scraped_team_name, fixtures, undated_game_ids = parse_fixtures(raw_json, team_id, include_past)
+    return plan_from_fixtures(team, competition=COMPETITION, source_id=source_id, scraped_team_name=scraped_team_name, fixtures=fixtures, competition_label=competition_label, keep_game_ids=undated_game_ids)
 
 
 def fetch_game(game_id: str) -> dict:
-    """One game's live ``/data`` response (``part=live``: just the scoreboard,
-    what the site's own game page polls with)."""
+    """One game's live ``/data`` response (``part=live``: just the scoreboard, what the site's own game page polls)."""
     raw_json = _get(GAME_DATA_URL.format(game_id=quote(str(game_id), safe="")), params={"part": "live"})
     try:
         payload = json.loads(raw_json)
@@ -212,8 +198,8 @@ def fetch_game(game_id: str) -> dict:
 
 
 def parse_score(game: dict) -> tuple[int | None, int | None]:
-    """(home, away) from a ``fetch_game`` response's scoreboard markup -- both
-    None before the game starts (the site shows "-")."""
+    """(home, away) from a ``fetch_game`` response's scoreboard markup: both None before the game starts (the site
+    shows "-")."""
     html = (game.get("sections") or {}).get("scoreboard") or game.get("html") or ""
     score = BeautifulSoup(html, "html.parser").select_one(".mp-score")
     spans = score.find_all("span", recursive=False) if score else []

@@ -1,0 +1,13 @@
+{% autoescape off %}{{ t.hello }}
+
+{% if user_created %}{{ t.created }}{% else %}{{ t.existing }}{% endif %}
+
+{% if user_created %}{{ t.button_set }}: {{ set_password_url }}
+
+{% endif %}{{ t.login_line }}: {{ login_url }}
+{{ t.email_line }}: {{ login_email }}
+
+--
+{{ club_name }}
+{{ t.footer }}
+{% endautoescape %}

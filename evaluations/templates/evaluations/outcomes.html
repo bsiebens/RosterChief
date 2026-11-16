@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Evaluation meeting outcomes</title>
+<style>
+@page { size: A4; margin: 15mm 15mm 18mm; @bottom-center { content: "Evaluation outcomes - page " counter(page) " / " counter(pages); font-size: 8pt; color: #666; } }
+body { font-family: sans-serif; font-size: 10pt; color: #111; }
+h1 { font-size: 18pt; margin: 0 0 1mm; }
+.muted { color: #666; }
+.accent { color: {{ club.primary_color|default:"#4f46e5" }}; }
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8mm; }
+.brand { display: flex; align-items: center; }
+.logo { height: 14mm; width: 14mm; object-fit: contain; margin-right: 4mm; }
+.brand-name { font-size: 12pt; font-weight: bold; }
+.right { text-align: right; }
+table { width: 100%; border-collapse: collapse; }
+thead { display: table-header-group; }
+th { text-align: left; font-size: 8.5pt; text-transform: uppercase; color: #666; border-bottom: 1.5px solid #111; padding: 2mm; }
+tr { page-break-inside: avoid; }
+td { padding: 2.5mm 2mm; border-bottom: 1px solid #bbb; vertical-align: top; }
+td.player { width: 50mm; font-weight: bold; }
+td.decision { white-space: pre-wrap; }
+.empty { margin-top: 10mm; text-align: center; color: #666; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="brand">
+    {% if logo_data_uri %}<img class="logo" src="{{ logo_data_uri }}" alt="">{% endif %}
+    <div class="brand-name">{{ club.legal_name|default:club.name }}</div>
+  </div>
+  <div class="right">
+    <h1 class="accent">{{ checklist.name }}: evaluation outcomes</h1>
+    <div class="muted">Meeting of {{ session.started_at|date:"j F Y" }}{% if session.ended_at %}, ended {{ session.ended_at|date:"H:i" }}{% else %} (still open){% endif %}</div>
+    <div class="muted">Printed {{ printed_at|date:"j F Y, H:i" }}</div>
+  </div>
+</div>
+{% if outcomes %}
+<table>
+<thead><tr><th>Player</th><th>Decision</th></tr></thead>
+<tbody>
+{% for o in outcomes %}<tr><td class="player">{{ o.player }}</td><td class="decision">{{ o.decision }}</td></tr>{% endfor %}
+</tbody>
+</table>
+{% else %}
+<p class="empty">No decisions were recorded in this meeting.</p>
+{% endif %}
+</body>
+</html>

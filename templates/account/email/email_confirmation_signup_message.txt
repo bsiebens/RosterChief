@@ -1,0 +1,12 @@
+{% autoescape off %}{{ t.heading }}
+
+{{ t.intro }}
+
+{% if code %}{{ code }}{% else %}{{ t.button }}: {{ activate_url }}
+
+{{ t.link_note }}{% endif %}
+
+--
+{{ club_name }}
+{{ t.footer }}
+{% endautoescape %}

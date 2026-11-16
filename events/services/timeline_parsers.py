@@ -250,6 +250,29 @@ def rbihf_extract_gd(game_page_html: str) -> dict:
         raise TimelineParseError("The RBIHF game page's timeline data isn't valid JSON.") from error
 
 
+def rbihf_extract_lineups(game_page_html: str) -> dict:
+    """Who dressed for each side, from the game page's tabs (``#game-home`` and ``#game-visit``; ``#game-away`` is
+    accepted too): ``{"home": [{"pos", "number", "license", "name"}], "away": [...]}``. A side without a table is
+    left out; names are as RBIHF prints them ("Jacobs Tristan")."""
+    soup = BeautifulSoup(game_page_html or "", "html.parser")
+    lineups = {}
+    for side, ids in (("home", ("game-home",)), ("away", ("game-visit", "game-away"))):
+        tab = next((found for found in (soup.find(id=i) for i in ids) if found is not None), None)
+        table = (tab if tab is not None and tab.name == "table" else tab.find("table")) if tab is not None else None
+        if table is None:
+            continue
+        players = []
+        for row in table.find_all("tr"):
+            cells = {(cell.get("class") or [""])[0]: cell.get_text(strip=True) for cell in row.find_all("td")}
+            if not cells.get("name"):
+                continue
+            number = cells.get("nr", "")
+            players.append({"pos": cells.get("pos", ""), "number": int(number) if number.isdigit() else None, "license": cells.get("lic", ""), "name": cells["name"]})
+        if players:
+            lineups[side] = players
+    return lineups
+
+
 def rbihf_form_fields(gd: dict) -> list[tuple[str, str]]:
     """``gd`` flattened into jQuery-style nested form fields (gd[home][team][18438][nr]=35)."""
     fields = []
@@ -265,7 +288,7 @@ def rbihf_form_fields(gd: dict) -> list[tuple[str, str]]:
     return fields
 
 
-def parse_rbihf(timeline_json: str, gd: dict) -> dict:
+def parse_rbihf(timeline_json: str, gd: dict, lineups: dict | None = None) -> dict:
     try:
         payload = json.loads(timeline_json)
     except ValueError as error:
@@ -335,7 +358,10 @@ def parse_rbihf(timeline_json: str, gd: dict) -> dict:
         if event["period"] is None:
             event["period"] = period_for(event["seconds"], period_seconds)
     events = with_ids(chronological(events, newest_first=True), "rbihf")
-    return {"source": "RBIHF", "events": events}
+    document = {"source": "RBIHF", "events": events}
+    if lineups:
+        document["lineups"] = lineups
+    return document
 
 
 # --- CEHL -------------------------------------------------------------------

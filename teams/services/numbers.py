@@ -1,117 +1,151 @@
-"""Jersey-number-pool availability rules.
+"""Jersey-number rules (no earlier implementation existed; implemented from the model help texts).
 
-A number is unique *within a pool* (a club-defined grouping of one or more
-Teams, see teams.models.NumberPool/Team.pool), not per team -- two teams
-sharing a pool can never field the same number at once. "In use" counts both
-a real, placed TeamMembership.jersey_number and a pending, not-yet-placed
-registration.models.RegistrationDetails.requested_jersey_number, so a number
-is blocked the moment someone registers for it, paid or not (see
-RegistrationDetails' own docstring on why a request isn't a placement yet).
-
-The one exception -- two different people sharing a number -- is an age gap
-of at least the pool's own NumberPool.min_age_gap_years (5 by default, 0
-turns sharing off entirely), sized in days (years * 365.25) rather than
-naively diffing years, so it doesn't misfire around a birthday. A missing date_of_birth on either side is
-treated conservatively as "not available": the gap can't be verified, so it
-isn't assumed.
+* A number is "held" by a team membership in the given season. Numbers are only compared within one season.
+* Teams sharing a ``NumberPool`` compete for its numbers; a team without a pool only competes with itself.
+* Two holders may share a number only when the pool's ``min_age_gap_years`` > 0, both have a date of birth, are
+  on different teams, and were born at least that many years apart. Two players on the same team never share.
+* A ``NumberReservation`` blocks its number for everyone.
 """
 
 import datetime
-import itertools
 
-from club.models import Season
-from members.models import Member
-from registration.models import RegistrationDetails
 from teams.models import NumberReservation, TeamMembership
 
-#: NumberPool.min_age_gap_years' own default -- for has_unresolved_conflict
-#: callers that have no pool at hand.
-DEFAULT_MIN_AGE_GAP_YEARS = 5
+
+def reserver_name(reservation) -> str | None:
+    by = reservation.reserved_by
+    if by is None:
+        return None
+    return (getattr(by, "get_full_name", lambda: "")() or getattr(by, "email", None)) or None
 
 
-def _previous_season(season: Season) -> Season | None:
-    return Season.objects.filter(club_id=season.club_id, start_date__lt=season.start_date).order_by("-start_date").first()
+def can_release(actor, reservation) -> bool:
+    """A reservation can be released by a settings admin or by the person who made it."""
+    from members.services.access import can_manage_settings
 
-
-def numbers_taken(pool, season: Season) -> dict[int, list[Member]]:
-    """Every number currently claimed in ``pool`` for ``season`` or the
-    season immediately before it, keyed by number, mapping to every member
-    holding it (almost always one, but see NumberPool's own docstring on a
-    member legitimately holding more than one distinct number)."""
-    seasons = [season.pk]
-    previous = _previous_season(season)
-    if previous is not None:
-        seasons.append(previous.pk)
-
-    taken: dict[int, list[Member]] = {}
-
-    placed = TeamMembership.objects.filter(team__pool=pool, season_id__in=seasons).exclude(jersey_number=None).select_related("member")
-    for membership in placed:
-        taken.setdefault(membership.jersey_number, []).append(membership.member)
-
-    pending = RegistrationDetails.objects.filter(requested_team__pool=pool, membership__season_id__in=seasons).exclude(requested_jersey_number=None).select_related("membership__member")
-    for details in pending:
-        taken.setdefault(details.requested_jersey_number, []).append(details.membership.member)
-
-    return taken
-
-
-def _age_gap_exempts(holder: Member, for_member: Member | None, min_age_gap_years: int) -> bool:
-    if for_member is None or holder.pk == for_member.pk or min_age_gap_years <= 0:
+    if actor is None or not getattr(actor, "is_authenticated", False):
         return False
-    if holder.date_of_birth is None or for_member.date_of_birth is None:
+    return can_manage_settings(actor) or (reservation.reserved_by_id is not None and reservation.reserved_by_id == actor.pk)
+
+
+def reservation_info(reservation, actor) -> dict:
+    return {"id": reservation.pk, "note": reservation.note, "reserved_by_name": reserver_name(reservation), "can_release": can_release(actor, reservation)}
+
+
+def add_years(d: datetime.date, years: int) -> datetime.date:
+    try:
+        return d.replace(year=d.year + years)
+    except ValueError:  # 29 Feb
+        return d.replace(year=d.year + years, day=28)
+
+
+def can_share(a: TeamMembership, b: TeamMembership, pool) -> bool:
+    """Two roster spots may carry the same number when they are the same person on different teams (a player keeping
+    their number when they also play up a team), or when the age gap rule of the pool allows it."""
+    if a.member_id == b.member_id:
+        return a.team_id != b.team_id
+    if pool is None or not pool.min_age_gap_years or a.team_id == b.team_id:
         return False
-    return abs(holder.date_of_birth - for_member.date_of_birth) >= datetime.timedelta(days=round(min_age_gap_years * 365.25))
-
-
-def is_number_available(pool, season: Season, number: int, *, for_member: Member | None = None) -> bool:
-    """Whether ``number`` can be claimed in ``pool`` for ``season`` -- by
-    ``for_member`` if given (used to apply the age-gap exception and to let a
-    member keep their own number), or in the abstract otherwise."""
-    if NumberReservation.objects.filter(pool=pool, number=number).exists():
+    da, db = a.member.date_of_birth, b.member.date_of_birth
+    if da is None or db is None:
         return False
-
-    return _holders_allow(numbers_taken(pool, season).get(number, []), pool, for_member)
-
-
-def has_unresolved_conflict(holders: list[Member], *, min_age_gap_years: int = DEFAULT_MIN_AGE_GAP_YEARS) -> bool:
-    """Whether ``holders`` (everyone currently sharing one number) includes a
-    pair the age-gap exception doesn't cover -- the only way that happens is
-    an admin's explicit override on TeamMembershipForm (see issue #6): a
-    member management/ADMIN grant may knowingly place someone on a number
-    is_number_available would otherwise reject, e.g. to carry over historical
-    data from before numbers were tracked accurately. Two holders the age gap
-    *does* cover is a legitimate, by-design share, not a conflict to flag --
-    management.views.NumberListView uses this to tell the two apart on the
-    Numbers page.
-
-    The same member appearing more than once (on two teams sharing a pool, or
-    placed on one and pending on another) is one player, not a clash with
-    themselves, so a pair with the same pk is never a conflict."""
-    return any(a.pk != b.pk and not _age_gap_exempts(a, b, min_age_gap_years) for a, b in itertools.combinations(holders, 2))
+    older, younger = (da, db) if da <= db else (db, da)
+    return add_years(older, pool.min_age_gap_years) <= younger
 
 
-def available_numbers(pool, season: Season, *, for_member: Member | None = None) -> list[int]:
-    """``pool``'s full range, minus whatever is_number_available rejects."""
-    # Same rule as is_number_available, but the reservations and holders are read once for the whole range
-    # rather than re-queried per number (a 1-99 pool was ~400 queries).
+def memberships_for(season, team=None, pool=None):
+    """Numbered memberships of ``season`` in ``pool``'s teams (or just ``team`` when it has no pool)."""
+    qs = TeamMembership.objects.filter(season=season, jersey_number__isnull=False).select_related("member", "team")
+    if pool is not None:
+        return qs.filter(team__pool=pool)
+    return qs.filter(team=team)
+
+
+def holders_of(number, season, team, exclude_pk=None):
+    pool = team.pool
+    qs = memberships_for(season, team, pool).filter(jersey_number=number)
+    if exclude_pk is not None:
+        qs = qs.exclude(pk=exclude_pk)
+    return list(qs)
+
+
+def clash_message(number, season, team, member, exclude_pk=None) -> str | None:
+    """``None`` if ``member`` may wear ``number`` on ``team`` in ``season``, else a sentence naming the blocker."""
+    pool = team.pool
+    if pool is not None:
+        res = NumberReservation.objects.filter(pool=pool, number=number).first()
+        if res is not None:
+            return f"Number {number} is reserved" + (f": {res.note}." if res.note else ".")
+    probe = TeamMembership(team=team, member=member, season=season, jersey_number=number)
+    for other in holders_of(number, season, team, exclude_pk):
+        if not can_share(probe, other, pool):
+            where = "this team" if other.team_id == team.pk else other.team.name
+            return f"Number {number} is already held by {other.member} ({where})."
+    return None
+
+
+def range_message(number, team) -> str | None:
+    pool = team.pool
+    if pool is not None and not (pool.min_number <= number <= pool.max_number):
+        return f"Must be between {pool.min_number} and {pool.max_number} (pool '{pool.name}')."
+    return None
+
+
+def probe_membership(team, season, date_of_birth=None, number=None) -> TeamMembership:
+    """An unsaved roster spot for a person who is not a member yet (only the date of birth matters for the age gap rule). Each probe is a
+    different person, so two probes never count as one player keeping their number across teams."""
+    from members.models import Member
+
+    return TeamMembership(team=team, member=Member(date_of_birth=date_of_birth), season=season, jersey_number=number)
+
+
+def number_available(number, season, team, date_of_birth=None, extra=()) -> bool:
+    """Whether a new player born on ``date_of_birth`` (``None`` = unknown: nobody shares) may wear ``number`` on ``team`` in ``season``. ``extra``
+    are further unsaved ``probe_membership`` spots (people in the same registration) that count as holders. No names are ever involved."""
+    if range_message(number, team) is not None:
+        return False
+    pool = team.pool
+    if pool is not None and NumberReservation.objects.filter(pool=pool, number=number).exists():
+        return False
+    probe = probe_membership(team, season, date_of_birth, number)
+    holders = holders_of(number, season, team) + [e for e in extra if e.jersey_number == number]
+    return all(can_share(probe, other, pool) for other in holders)
+
+
+def available_numbers(team, season, date_of_birth=None, taken_in_batch=(), batch=()) -> dict:
+    """The numbers a new player born on ``date_of_birth`` could wear on ``team`` in ``season``.
+
+    ``{"pool": {"name", "min", "max"} | None, "numbers": [free numbers] | None, "taken": [numbers in the range that are not free]}``.
+    A team without a pool has no range: ``numbers`` is ``None`` (any number) and ``taken`` lists the numbers its own roster holds.
+    ``taken_in_batch`` are numbers to leave out whatever their holders (people in the same form); ``batch`` are unsaved ``probe_membership``
+    spots that count as holders like roster members (the age gap rule can still let a younger / older sibling on another team share)."""
+    pool = team.pool
+    blocked = {int(n) for n in taken_in_batch}
+    by_number: dict[int, list] = {}
+    for holder in [*memberships_for(season, team, pool), *batch]:
+        by_number.setdefault(holder.jersey_number, []).append(holder)
+    if pool is None:
+        return {"pool": None, "numbers": None, "taken": sorted(set(by_number) | blocked)}
     reserved = set(NumberReservation.objects.filter(pool=pool).values_list("number", flat=True))
-    taken = numbers_taken(pool, season)
-    return [number for number in range(pool.min_number, pool.max_number + 1) if number not in reserved and _holders_allow(taken.get(number, []), pool, for_member)]
+    probe = probe_membership(team, season, date_of_birth)
+    free, taken = [], []
+    for n in range(pool.min_number, pool.max_number + 1):
+        ok = n not in reserved and n not in blocked and all(can_share(probe, other, pool) for other in by_number.get(n, ()))
+        (free if ok else taken).append(n)
+    return {"pool": {"name": pool.name, "min": pool.min_number, "max": pool.max_number}, "numbers": free, "taken": taken}
 
 
-def _holders_allow(holders: list[Member], pool, for_member: Member | None) -> bool:
-    return all((for_member is not None and holder.pk == for_member.pk) or _age_gap_exempts(holder, for_member, pool.min_age_gap_years) for holder in holders)
-
-
-def member_current_number(member: Member, pool, season: Season) -> int | None:
-    """The lowest jersey number ``member`` holds on any team in ``pool``, for
-    ``season`` or the immediately preceding one -- a lapsed member
-    re-registering still sees their old number. None if they hold none."""
-    seasons = [season.pk]
-    previous = _previous_season(season)
-    if previous is not None:
-        seasons.append(previous.pk)
-
-    numbers = TeamMembership.objects.filter(member=member, team__pool=pool, season_id__in=seasons).exclude(jersey_number=None).order_by("jersey_number").values_list("jersey_number", flat=True)
-    return numbers.first()
+def status_for(holders, reservation, pool) -> str:
+    if reservation is not None:
+        return "conflict" if holders else "reserved"
+    if not holders:
+        return "free"
+    if len(holders) == 1:
+        return "taken"
+    if pool is None:
+        return "shared"  # independent teams without a pool never clash with each other
+    for i, a in enumerate(holders):
+        for b in holders[i + 1 :]:
+            if not can_share(a, b, pool):
+                return "conflict"
+    return "shared"

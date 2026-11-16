@@ -1,0 +1,56 @@
+{
+	email {$CADDY_ACME_EMAIL}
+	# Empty when the Cloudflare proxy is off; trusts only Cloudflare's ranges when it is on.
+	import /etc/rosterchief/cloudflare-ips.caddy
+}
+
+{$ROSTERCHIEF_BASE_DOMAIN}, *.{$ROSTERCHIEF_BASE_DOMAIN} {
+	# Written for this host's access mode (Cloudflare DNS certificate, or Caddy's own CA when reached by IP).
+	import /etc/rosterchief/tls.caddy
+	encode zstd gzip
+
+	# Answers only to a loopback peer. Health checks send a forged CF-Connecting-IP and expect to see
+	# 127.0.0.1 back, proving that the header is ignored unless the peer is Cloudflare.
+	@probe {
+		path /_rc/client-ip
+		remote_ip 127.0.0.1 ::1
+	}
+	handle @probe {
+		respond "{client_ip}"
+	}
+
+	handle_path /static/* {
+		root * /opt/rosterchief/current/staticfiles
+		file_server
+	}
+	handle_path /media/* {
+		root * /var/lib/rosterchief/media
+		header X-Content-Type-Options nosniff
+		file_server
+	}
+
+	@control host control.{$ROSTERCHIEF_BASE_DOMAIN}
+	handle @control {
+		@django path /healthz /admin /admin/* /accounts /accounts/* /_allauth/browser/*
+		handle @django {
+			reverse_proxy 127.0.0.1:8000 {
+				header_up Host {$ROSTERCHIEF_BASE_DOMAIN}
+			}
+		}
+		handle {
+			reverse_proxy 127.0.0.1:5173 {
+				header_up X-Forwarded-For {client_ip}
+			}
+		}
+	}
+
+	@django path /healthz /admin /admin/* /accounts /accounts/* /_allauth/browser/*
+	handle @django {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle {
+		reverse_proxy 127.0.0.1:5174 {
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+}

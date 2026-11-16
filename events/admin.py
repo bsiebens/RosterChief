@@ -1,16 +1,18 @@
-from django import forms
 from django.contrib import admin
-from django.utils.translation import gettext_lazy as _
+
+from rosterchief.admin import ClubAdminMixin
 
 from .models import (
     Attendance,
-    Competition,
+    AttendanceChange,
+    CalendarFeed,
     Event,
     EventAttachment,
     EventFollow,
     EventOfficial,
     EventReferee,
     EventSeries,
+    EventSubtype,
     EventTask,
     EventTaskClaim,
     GameFollow,
@@ -19,304 +21,276 @@ from .models import (
     GameTimeline,
     Lineup,
     LineupSelection,
+    LineupSlotAssignment,
     Location,
     OfficialSignup,
+    OfficiatingInvitation,
     Opponent,
     RefereeSignup,
+    Season,
+    StatsRefresh,
 )
 
 
-@admin.register(Opponent)
-class OpponentAdmin(admin.ModelAdmin):
-    list_display = ["name", "club"]
-    list_filter = ["club"]
-    search_fields = ["name"]
+class OccurrenceInline(admin.TabularInline):
+    model = Event
+    fk_name = "series"
+    extra = 0
+    max_num = 0
+    can_delete = False
+    fields = ["title", "start", "end", "cancelled", "detached"]
+    readonly_fields = fields
+    show_change_link = True
+    ordering = ["start"]
+
+
+@admin.register(Event)
+class EventAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["title", "kind", "start", "location", "opponent", "season", "cancelled", "is_live"]
+    list_filter = ["kind", "season", "cancelled", "is_friendly", "club_wide", "detached"]
+    search_fields = ["title", "competition", "external_game_id", "opponent__name", "location__name"]
+    date_hierarchy = "start"
+    ordering = ["-start"]
+    list_select_related = ["location", "opponent", "season"]
+    raw_id_fields = ["series", "created_by"]
+    autocomplete_fields = ["location", "opponent", "invited_members", "excluded_members"]
+    filter_horizontal = ["teams", "groups"]
+    readonly_fields = ["live_score_polling_done_at", "deadline_reminder_sent_at"]
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        """``competition`` only offers the competitions this club's features allow (events.services.competitions)."""
+        if db_field.name == "competition":
+            from django import forms
+
+            from .services.competitions import available_competitions
+
+            names = list(available_competitions(getattr(request, "tenant", None)).values_list("name", flat=True))
+            return forms.TypedChoiceField(choices=[("", "---------"), *[(name, name) for name in names]], required=False, label=db_field.verbose_name, help_text=db_field.help_text)
+        return super().formfield_for_dbfield(db_field, request, **kwargs)
+
+
+@admin.register(EventSeries)
+class EventSeriesAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["title", "kind", "rrule", "dtstart", "until", "location", "opponent"]
+    list_filter = ["kind", "club_wide"]
+    search_fields = ["title", "rrule"]
+    date_hierarchy = "dtstart"
+    list_select_related = ["location", "opponent"]
+    autocomplete_fields = ["location", "opponent", "invited_members", "excluded_members"]
+    filter_horizontal = ["teams", "groups"]
+    readonly_fields = ["generated_until"]
+    inlines = [OccurrenceInline]
 
 
 @admin.register(Location)
-class LocationAdmin(admin.ModelAdmin):
-    list_display = ["name", "city", "club"]
-    list_filter = ["club"]
-    search_fields = ["name", "city"]
+class LocationAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["name", "address", "zip_code", "city", "is_home"]
+    list_filter = ["is_home", "city"]
+    search_fields = ["name", "address", "city", "zip_code"]
+    ordering = ["name"]
 
 
-class AttendanceInline(admin.TabularInline):
-    model = Attendance
+@admin.register(Opponent)
+class OpponentAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["name", "logo"]
+    search_fields = ["name"]
+    ordering = ["name"]
+    readonly_fields = ["alternative_names"]
+
+
+@admin.register(EventSubtype)
+class EventSubtypeAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["name", "kind", "title_template", "ordering"]
+    list_filter = ["kind"]
+    search_fields = ["name"]
+
+
+@admin.register(Season)
+class SeasonAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["name", "start_date", "end_date"]
+    date_hierarchy = "start_date"
+    ordering = ["-start_date"]
+
+
+@admin.register(Attendance)
+class AttendanceAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["event", "member", "status", "showed_up", "answered_by_coach"]
+    list_filter = ["status", "showed_up", "answered_by_coach"]
+    search_fields = ["event__title", "member__first_name", "member__last_name"]
+    list_select_related = ["event", "member"]
+    raw_id_fields = ["event", "member", "coach_set_by"]
+
+
+@admin.register(AttendanceChange)
+class AttendanceChangeAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["attendance", "from_status", "to_status", "changed_by_name", "via", "created"]
+    list_filter = ["via", "to_status"]
+    search_fields = ["changed_by_name", "attendance__event__title", "attendance__member__first_name", "attendance__member__last_name"]
+    raw_id_fields = ["attendance", "changed_by"]
+
+
+class LineupSelectionInline(admin.TabularInline):
+    model = LineupSelection
     extra = 0
     raw_id_fields = ["member"]
 
 
-class EventRefereeInline(admin.TabularInline):
-    model = EventReferee
+@admin.register(Lineup)
+class LineupAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["event", "team", "published_at", "scheduled_publish_at"]
+    search_fields = ["event__title", "team__name"]
+    list_select_related = ["event", "team"]
+    raw_id_fields = ["event", "team", "created_by"]
+    inlines = [LineupSelectionInline]
+
+
+class EventTaskClaimInline(admin.TabularInline):
+    model = EventTaskClaim
     extra = 0
-    raw_id_fields = ["member", "assigned_by"]
+    raw_id_fields = ["member"]
 
 
-class EventOfficialInline(admin.TabularInline):
-    model = EventOfficial
-    extra = 0
-    raw_id_fields = ["member", "assigned_by"]
-
-
-class EventTaskInline(admin.TabularInline):
-    model = EventTask
-    extra = 0
-    raw_id_fields = ["created_by"]
-
-
-class EventAttachmentInline(admin.TabularInline):
-    model = EventAttachment
-    extra = 0
-    fields = ["name", "file", "size", "uploaded_by"]
-    readonly_fields = ["size"]
-    raw_id_fields = ["uploaded_by"]
+@admin.register(EventTask)
+class EventTaskAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["title", "event", "needed_quantity"]
+    search_fields = ["title", "event__title"]
+    list_select_related = ["event"]
+    raw_id_fields = ["event", "created_by"]
+    inlines = [EventTaskClaimInline]
 
 
 @admin.register(EventAttachment)
-class EventAttachmentAdmin(admin.ModelAdmin):
+class EventAttachmentAdmin(ClubAdminMixin, admin.ModelAdmin):
     list_display = ["name", "event", "size", "uploaded_by", "created"]
     search_fields = ["name", "event__title"]
+    list_select_related = ["event", "uploaded_by"]
     raw_id_fields = ["event", "uploaded_by"]
-
-
-@admin.register(EventSeries)
-class EventSeriesAdmin(admin.ModelAdmin):
-    list_display = ["title", "kind", "rrule", "dtstart", "until", "generated_until", "club"]
-    list_filter = ["kind", "club"]
-    search_fields = ["title"]
-    autocomplete_fields = ["location", "opponent", "teams", "groups", "invited_members", "excluded_members"]
-    fieldsets = [
-        [None, {"fields": ["title", "kind"]}],
-        [_("Recurrence"), {"fields": ["rrule", "dtstart", "until", "excluded_dates", "generated_until"]}],
-        [_("Timing"), {"fields": ["duration", "gathering_offset", "deadline_offset"]}],
-        [_("Audience"), {"fields": ["teams", "groups", "club_wide", "invited_members", "excluded_members"]}],
-        [_("Where"), {"fields": ["location", "opponent"]}],
-    ]
-
-
-class EventAdminForm(forms.ModelForm):
-    """The `competition` field is a plain CharField on Event (it just stores a
-    name), but the admin should only ever offer a competition this club is
-    actually allowed to use -- one whose feature flag is active for it, set
-    from the control panel's Features page. A competition with no flag never
-    appears at all."""
-
-    class Meta:
-        model = Event
-        fields = [
-            "title",
-            "kind",
-            "season",
-            "series",
-            "detached",
-            "cancelled",
-            "teams",
-            "groups",
-            "club_wide",
-            "invited_members",
-            "excluded_members",
-            "start",
-            "end",
-            "gathering",
-            "deadline",
-            "location",
-            "opponent",
-            "competition",
-            "is_friendly",
-            "external_game_id",
-            "score_for",
-            "score_against",
-            "is_live",
-            "max_referees",
-            "max_officials",
-        ]
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        club = self.instance.club if self.instance.club_id else None
-        competitions = Competition.objects.filter(flag__isnull=False).select_related("flag")
-        if club is not None:
-            competitions = [competition for competition in competitions if competition.flag.is_active_for_club(club)]
-        self.fields["competition"] = forms.ChoiceField(
-            choices=[("", "---------"), *[(competition.name, competition.name) for competition in competitions]],
-            required=False,
-            label=self.fields["competition"].label,
-            help_text=_("Only competitions whose feature flag is active for this club are offered here."),
-        )
-
-
-@admin.register(Event)
-class EventAdmin(admin.ModelAdmin):
-    form = EventAdminForm
-    list_display = ["title", "kind", "start", "season", "series", "detached", "club"]
-    list_filter = ["kind", "club", "teams", "detached", "cancelled"]
-    search_fields = ["title"]
-    date_hierarchy = "start"
-    autocomplete_fields = ["season", "series", "location", "opponent", "teams", "groups", "invited_members", "excluded_members"]
-    inlines = [AttendanceInline, EventRefereeInline, EventOfficialInline, EventTaskInline, EventAttachmentInline]
-    fieldsets = [
-        [None, {"fields": ["title", "kind", "season"]}],
-        [_("Series"), {"fields": ["series", "detached", "cancelled"]}],
-        [_("Audience"), {"fields": ["teams", "groups", "club_wide", "invited_members", "excluded_members"]}],
-        [_("When"), {"fields": ["start", "end", "gathering", "deadline"]}],
-        [_("Where"), {"fields": ["location", "opponent"]}],
-        [_("Game"), {"fields": ["competition", "is_friendly", "external_game_id", "score_for", "score_against", "is_live", "max_referees", "max_officials"]}],
-    ]
-
-
-@admin.register(Competition)
-class CompetitionAdmin(admin.ModelAdmin):
-    list_display = ["name", "sport_type", "module", "flag"]
-    list_filter = ["sport_type"]
-    search_fields = ["name", "module"]
-    raw_id_fields = ["flag"]
-
-
-@admin.register(Attendance)
-class AttendanceAdmin(admin.ModelAdmin):
-    list_display = ["event", "member", "status", "showed_up"]
-    list_filter = ["status", "showed_up", "event__kind"]
-    search_fields = ["event__title", "member__first_name", "member__last_name"]
-    raw_id_fields = ["event", "member"]
+    readonly_fields = ["size"]
 
 
 @admin.register(GameTimeline)
-class GameTimelineAdmin(admin.ModelAdmin):
-    """Written by the fetchers (events.services.game_timeline) -- an existing
-    row is shown read-only so a hand edit can't fight the next fetch."""
-
+class GameTimelineAdmin(ClubAdminMixin, admin.ModelAdmin):
     list_display = ["event", "source", "status", "fetched_at", "changed_at", "finalized_at"]
-    list_filter = ["source", "status"]
-    search_fields = ["event__title", "event__external_game_id"]
+    list_filter = ["status", "source"]
+    search_fields = ["event__title"]
+    list_select_related = ["event"]
     raw_id_fields = ["event"]
-
-    def get_readonly_fields(self, request, obj=None):
-        if obj is None:
-            return []
-        return ["event", "source", "data", "data_hash", "raw", "status", "fetched_at", "changed_at", "finalized_at", "last_error"]
+    readonly_fields = ["data_hash", "fetched_at", "changed_at", "finalized_at"]
 
 
 @admin.register(GameMoment)
-class GameMomentAdmin(admin.ModelAdmin):
-    """Detected by events.services.game_moments -- an existing row is shown read-only."""
-
-    list_display = ["event", "kind", "game_seconds", "notifiable", "created_at", "delivered_at"]
+class GameMomentAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["event", "kind", "game_seconds", "notifiable", "delivered_at"]
     list_filter = ["kind", "notifiable"]
     search_fields = ["event__title", "key"]
+    list_select_related = ["event"]
     raw_id_fields = ["event"]
 
-    def get_readonly_fields(self, request, obj=None):
-        if obj is None:
-            return []
-        return ["event", "key", "kind", "payload", "game_seconds", "notifiable", "created_at", "delivered_at"]
+
+@admin.register(GameStat)
+class GameStatAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["event", "team", "stat_type", "value", "is_ours", "member", "player_name"]
+    list_filter = ["stat_type", "is_ours", "season"]
+    search_fields = ["event__title", "player_name", "member__first_name", "member__last_name"]
+    list_select_related = ["event", "team", "member"]
+    raw_id_fields = ["event", "team", "season", "member"]
 
 
 @admin.register(GameFollow)
-class GameFollowAdmin(admin.ModelAdmin):
-    list_display = ["user", "team", "club"]
-    list_filter = ["club"]
+class GameFollowAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["user", "team", "created"]
     search_fields = ["user__email", "team__name"]
+    list_select_related = ["user", "team"]
     raw_id_fields = ["user", "team"]
 
 
 @admin.register(EventFollow)
-class EventFollowAdmin(admin.ModelAdmin):
-    list_display = ["user", "event", "club"]
-    list_filter = ["club"]
+class EventFollowAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["user", "event", "created"]
     search_fields = ["user__email", "event__title"]
+    list_select_related = ["user", "event"]
     raw_id_fields = ["user", "event"]
 
 
-@admin.register(Lineup)
-class LineupAdmin(admin.ModelAdmin):
-    list_display = ["event", "team", "published_at", "created_by"]
-    list_filter = ["team"]
-    search_fields = ["event__title", "team__name"]
-    raw_id_fields = ["event", "team", "created_by"]
-
-
 @admin.register(LineupSelection)
-class LineupSelectionAdmin(admin.ModelAdmin):
-    list_display = ["lineup", "member"]
+class LineupSelectionAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["lineup", "member", "created"]
     search_fields = ["lineup__event__title", "member__first_name", "member__last_name"]
+    list_select_related = ["lineup__event", "lineup__team", "member"]
     raw_id_fields = ["lineup", "member"]
 
 
-@admin.register(EventReferee)
-class EventRefereeAdmin(admin.ModelAdmin):
-    list_display = ["event", "display_name", "fee", "km", "total_payable", "assigned_by"]
-    search_fields = ["event__title", "member__first_name", "member__last_name", "external_name"]
-    raw_id_fields = ["event", "member", "assigned_by"]
-
-    @admin.display(description=_("referee"))
-    def display_name(self, obj):
-        return obj.display_name
-
-    @admin.display(description=_("total payable"))
-    def total_payable(self, obj):
-        return obj.total_payable
-
-
-@admin.register(RefereeSignup)
-class RefereeSignupAdmin(admin.ModelAdmin):
-    list_display = ["event", "member", "status", "responded_at"]
-    list_filter = ["status"]
-    search_fields = ["event__title", "member__first_name", "member__last_name"]
-    raw_id_fields = ["event", "member"]
-
-
-@admin.register(EventOfficial)
-class EventOfficialAdmin(admin.ModelAdmin):
-    list_display = ["event", "display_name", "fee", "km", "total_payable", "assigned_by"]
-    search_fields = ["event__title", "member__first_name", "member__last_name", "external_name"]
-    raw_id_fields = ["event", "member", "assigned_by"]
-
-    @admin.display(description=_("official"))
-    def display_name(self, obj):
-        return obj.display_name
-
-    @admin.display(description=_("total payable"))
-    def total_payable(self, obj):
-        return obj.total_payable
-
-
-@admin.register(OfficialSignup)
-class OfficialSignupAdmin(admin.ModelAdmin):
-    list_display = ["event", "member", "status", "responded_at"]
-    list_filter = ["status"]
-    search_fields = ["event__title", "member__first_name", "member__last_name"]
-    raw_id_fields = ["event", "member"]
-
-
-@admin.register(EventTask)
-class EventTaskAdmin(admin.ModelAdmin):
-    list_display = ["event", "title", "needed_quantity", "claim_count", "created_by"]
-    search_fields = ["event__title", "title"]
-    raw_id_fields = ["event", "created_by"]
-
-    @admin.display(description=_("claims"))
-    def claim_count(self, obj):
-        return obj.claims.count()
+@admin.register(LineupSlotAssignment)
+class LineupSlotAssignmentAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["lineup", "member", "slot"]
+    search_fields = ["lineup__event__title", "member__first_name", "member__last_name", "slot"]
+    list_select_related = ["lineup__event", "lineup__team", "member"]
+    raw_id_fields = ["lineup", "member"]
 
 
 @admin.register(EventTaskClaim)
-class EventTaskClaimAdmin(admin.ModelAdmin):
-    list_display = ["task", "member", "claimed_at"]
+class EventTaskClaimAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["task", "member", "created"]
     search_fields = ["task__title", "member__first_name", "member__last_name"]
+    list_select_related = ["task__event", "member"]
     raw_id_fields = ["task", "member"]
 
 
-@admin.register(GameStat)
-class GameStatAdmin(admin.ModelAdmin):
-    """Derived from the game timelines (events.services.game_stats) and rebuilt on every
-    sync -- an existing row is shown read-only so a hand edit can't survive the next one."""
+@admin.register(StatsRefresh)
+class StatsRefreshAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ("member", "team", "status", "games", "updated", "created", "finished_at")
+    list_filter = ("status",)
+    raw_id_fields = ("member", "team")
 
-    list_display = ["event", "team", "stat_type", "value", "is_ours", "player_name", "member"]
-    list_filter = ["stat_type", "is_ours"]
-    search_fields = ["event__title", "player_name"]
+
+class _AssignmentAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["event", "member", "external_name", "referee_type", "fee", "no_fee"]
+    search_fields = ["event__title", "member__first_name", "member__last_name", "external_name"]
+    list_select_related = ["event", "member", "referee_type"]
+    raw_id_fields = ["event", "member", "assigned_by"]
+
+
+@admin.register(EventReferee)
+class EventRefereeAdmin(_AssignmentAdmin):
+    pass
+
+
+@admin.register(EventOfficial)
+class EventOfficialAdmin(_AssignmentAdmin):
+    pass
+
+
+class _SignupAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["event", "member", "created"]
+    search_fields = ["event__title", "member__first_name", "member__last_name"]
+    list_select_related = ["event", "member"]
     raw_id_fields = ["event", "member"]
 
-    def get_readonly_fields(self, request, obj=None):
-        if obj is None:
-            return []
-        return [field.name for field in self.model._meta.fields]
+
+@admin.register(RefereeSignup)
+class RefereeSignupAdmin(_SignupAdmin):
+    pass
+
+
+@admin.register(OfficialSignup)
+class OfficialSignupAdmin(_SignupAdmin):
+    pass
+
+
+@admin.register(OfficiatingInvitation)
+class OfficiatingInvitationAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["event", "member", "kind", "declined", "notified"]
+    list_filter = ["kind", "declined", "notified"]
+    search_fields = ["event__title", "member__first_name", "member__last_name"]
+    list_select_related = ["event", "member"]
+    raw_id_fields = ["event", "member"]
+
+
+@admin.register(CalendarFeed)
+class CalendarFeedAdmin(ClubAdminMixin, admin.ModelAdmin):
+    """The token is the secret in the subscription link, so it is never shown or editable here."""
+
+    list_display = ["user", "created"]
+    search_fields = ["user__email"]
+    raw_id_fields = ["user"]
+    exclude = ["token"]

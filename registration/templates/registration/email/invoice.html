@@ -1,77 +1,21 @@
-{% extends "email/_base.html" %}
-{% load i18n club_email %}
-
-{% comment %}
-    HTML sibling of invoice.txt -- same content, same context (club, batch,
-    contact_first_name, total, status_url, request). Kept in lockstep with
-    the .txt version by hand, same as confirmation.html/dues_invoice.html.
-{% endcomment %}
-
-{% block title %}{% blocktrans with club=club.name number=batch.invoice_number %}{{ club }} — invoice {{ number }}{% endblocktrans %}{% endblock title %}
-
-{% block preheader %}{% blocktrans with club=club.name %}{{ club }} has confirmed your registration and sent you an invoice.{% endblocktrans %}{% endblock preheader %}
-
-{% block header %}
-    {% absolute_media_url club.logo as logo_url %}
-    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
-        <tr>
-            <td valign="middle">
-                {% if club.logo %}
-                    <img src="{{ logo_url }}" alt="{{ club.name }}" width="48" height="48" style="display:block; width:48px; height:48px; border-radius:24px; object-fit:contain; background-color:#f3f4f6;">
-                {% else %}
-                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="48" style="width:48px;">
-                        <tr>
-                            <td align="center" valign="middle" width="48" height="48" bgcolor="{{ club.secondary_color|default:"#ec4899" }}" style="width:48px; height:48px; border-radius:24px; background-color:{{ club.secondary_color|default:"#ec4899" }}; color:{{ club|secondary_text_color:"#ec4899" }}; font-family: Arial, Helvetica, sans-serif; font-size:16px; font-weight:bold;">
-                                {{ club.initials }}
-                            </td>
-                        </tr>
-                    </table>
-                {% endif %}
-            </td>
-            <td style="padding-left:14px;" valign="middle">
-                <span style="font-family: Arial, Helvetica, sans-serif; font-size:18px; font-weight:bold; color:#111827;">{{ club.name }}</span>
-            </td>
-        </tr>
-    </table>
-{% endblock header %}
-
-{% block content %}
-    <p style="margin:0 0 16px 0;">{% blocktrans with name=contact_first_name %}Hello {{ name }},{% endblocktrans %}</p>
-
-    <p style="margin:0 0 20px 0;">{% blocktrans with club=club.name %}{{ club }} has confirmed your registration and sent you an invoice.{% endblocktrans %}</p>
-
-    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 24px 0; border:1px solid #e5e7eb; border-radius:8px;">
-        <tr>
-            <td style="padding:16px 20px;">
-                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
-                    <tr>
-                        <td style="font-size:13px; color:#6b7280;">{% trans "Amount due" %}</td>
-                        <td align="right" style="font-size:18px; font-weight:bold; color:#111827;">€{{ total }}</td>
-                    </tr>
-                    <tr>
-                        <td style="font-size:13px; color:#6b7280; padding-top:6px;">{% trans "Due date" %}</td>
-                        <td align="right" style="font-size:13px; color:#111827; padding-top:6px;">{{ batch.invoice_due_date|date:"j F Y" }}</td>
-                    </tr>
-                    <tr>
-                        <td style="font-size:13px; color:#6b7280; padding-top:6px;">{% trans "Invoice number" %}</td>
-                        <td align="right" style="font-size:13px; color:#111827; padding-top:6px;">{{ batch.invoice_number }}</td>
-                    </tr>
-                </table>
-            </td>
-        </tr>
-    </table>
-
-    <p style="margin:0 0 20px 0;">{% trans "A PDF copy of this invoice is attached." %}</p>
-
-    {% trans "Check status & documents" as status_label %}
-    {% include "email/_button.html" with href=status_url label=status_label bg=club.primary_color|default:"#4f46e5" fg=club|primary_text_color:"#4f46e5" %}
-
-    <p style="margin:0; font-size:13px; color:#6b7280;">{% trans "That link is for you alone — please don't forward it." %}</p>
-{% endblock content %}
-
-{% block footer %}
-    {% if club.contact_email %}
-        <p style="margin:0 0 8px 0;">{% blocktrans with email=club.contact_email %}Questions about this invoice? Reply to this note or write to {{ email }}.{% endblocktrans %}</p>
-    {% endif %}
-    <p style="margin:0;">{% blocktrans with club=club.name %}— {{ club }}{% endblocktrans %}</p>
-{% endblock footer %}
+{% extends "club/email/layout.html" %}
+{% block heading %}{{ t.heading }}{% endblock %}
+{% block intro %}{{ t.hello }}<br>{{ t.intro }}{% endblock %}
+{% block details %}
+      <tr><td style="padding:0 32px 8px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;line-height:1.5;color:#334155;">
+          {% for l in lines %}<tr><td style="padding:8px 0;border-bottom:1px solid #f1f5f9;"><strong style="color:#0f172a;">{{ l.title }}</strong><br><span style="color:#64748b;">{{ l.sub }}</span></td><td align="right" style="padding:8px 0;border-bottom:1px solid #f1f5f9;white-space:nowrap;{% if l.negative %}color:#b91c1c;{% endif %}">{{ l.amount }}</td></tr>{% endfor %}
+          {% if unused_credit %}<tr><td style="padding:8px 0;color:#64748b;">{{ t.credit_unused }}</td><td align="right" style="padding:8px 0;white-space:nowrap;">{{ unused_credit }}</td></tr>{% endif %}
+          {% if discount %}<tr><td style="padding:8px 0;color:#b91c1c;">{{ t.discount }}{% if discount_note %}: {{ discount_note }}{% endif %}</td><td align="right" style="padding:8px 0;color:#b91c1c;white-space:nowrap;">-{{ discount }}</td></tr>{% endif %}
+          <tr><td style="padding:12px 0 4px;border-top:2px solid #0f172a;font-weight:700;color:#0f172a;">{{ t.total }}</td><td align="right" style="padding:12px 0 4px;border-top:2px solid #0f172a;font-weight:700;color:#0f172a;white-space:nowrap;">{{ total }}</td></tr>
+        </table>
+        {% if installments %}<p style="margin:12px 0 0;font-size:14px;color:#0f172a;font-weight:600;">{{ t.installments }}</p>
+        {% for row in installments %}<p style="margin:6px 0 0;font-size:13px;">{{ row.due_date|date:"d/m/Y" }} · {{ row.amount }}</p>{% endfor %}
+        {% elif due %}<p style="margin:12px 0 0;font-size:14px;color:#0f172a;font-weight:600;">{{ t.due }}</p>{% endif %}
+        {% for line in t.early_lines %}<p style="margin:6px 0 0;font-size:13px;color:#15803d;">{{ line }}</p>{% endfor %}
+      </td></tr>
+      {% if how_to_pay %}
+      <tr><td style="padding:16px 32px 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:10px;"><tr><td style="padding:14px 18px;font-size:14px;line-height:1.6;color:#334155;"><strong style="color:#0f172a;">{{ t.how_to_pay }}</strong><br><span style="white-space:pre-line;">{{ how_to_pay }}</span></td></tr></table></td></tr>
+      {% endif %}
+      <tr><td style="padding:16px 32px 0;font-size:13px;"><a href="{{ status_url }}" style="color:{{ primary }};font-weight:600;">{{ t.button }}</a></td></tr>
+{% endblock %}

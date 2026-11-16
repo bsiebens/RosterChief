@@ -1,184 +1,180 @@
-"""Signal wiring that keeps attendance in sync with the event audience.
+"""Keep attendance in sync with the event audience. Registered from ``EventsConfig.ready``.
 
-Registered from ``EventsConfig.ready``. Triggers:
+Triggers (only upcoming events are ever touched, history is never rewritten):
 
-* editing an event (its ``start``, or its ``teams`` / ``groups`` /
-  ``invited_members`` / ``excluded_members``) re-syncs that event;
-* adding or removing a member from a team roster re-syncs that team's future
-  events;
-* adding or removing a member from a group re-syncs that group's future
-  events;
-* a club membership going active/inactive re-syncs every future club_wide
-  event for that club;
-* a game's timeline changing (events.services.game_timeline.store) records the
-  "moments" in it -- goals, penalties, the result (events.services.game_moments).
+* saving an event, or changing its ``teams`` / ``groups`` / ``invited_members`` / ``excluded_members`` (from either side
+  of the relation), re-syncs that event;
+* adding or removing a roster spot (``teams.TeamMembership``) re-syncs that member on the team's upcoming events;
+* adding or removing a group member re-syncs that member on the group's upcoming events;
+* a club membership being created, deleted or changing status re-syncs the upcoming club-wide events (in the Celery
+  task ``events.sync_club_wide_events``, queued after the commit);
+* saving a club-wide event or changing its invited/excluded members queues ``events.sync_event_attendances`` instead of
+  syncing inline (its audience is the whole club);
+* deleting a team or group re-syncs the upcoming events it was on.
 
-Joining a team/group specifically (not a plain field edit, not a removal)
-also sends one summary notification (events.services.attendance.
-notify_newly_invited) for however many upcoming events that just put on the
-member's calendar -- one notification, not one per event, even if a whole
-recurring series is already scheduled.
+A fresh roster spot or group membership also sends ONE inbox notification (with push) summarising the upcoming events
+that just landed on the member's calendar. Membership rows removed because their member is being deleted are skipped:
+that member's attendance rows go with them.
+
+Roster, group and other m2m syncs stay inline (they touch one member, or one team's events). Every receiver works through ``events.services.attendance.sync_attendances`` (bulk, a fixed number of queries); none of
+them saves an Event or a membership row, so they cannot trigger each other.
 """
 
-from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models.signals import m2m_changed, post_delete, post_save
+from django.db.models import QuerySet
+from django.db.models.signals import m2m_changed, post_delete, post_save, pre_delete
 from django.dispatch import receiver
 from django.utils import timezone
-from django.utils.translation import gettext_lazy as _
 
-from club.models import ClubMembership
-from events.models import Attendance, Event, EventAttachment, EventSeries
-from events.services import live_activity, notify_newly_invited, sync_event_attendances
-from events.services.crew_invites import resync_upcoming_invites
-from events.services.game_moments import game_timeline_changed, record_moments
-from events.services.officials import sync_official_invites
-from events.services.referees import sync_referee_invites
-from members.models import Group, GroupMembership
-from teams.models import OfficialLevel, OfficialProfile, RefereeLevel, RefereeProfile, Team, TeamMembership
+from events.models import Event
+from events.services import (
+    attachments,  # noqa: F401  (connects the attachment file-cleanup receiver)
+    attendance,
+)
+from members.models import ClubMembership, Group, GroupMembership, Member
+from teams.models import Team, TeamMembership
 
 M2M_SYNC_ACTIONS = {"post_add", "post_remove", "post_clear"}
+EVENT_AUDIENCE_FIELDS = {"start", "season", "club_wide"}
 
 
-@receiver(m2m_changed, sender=Event.teams.through)
-@receiver(m2m_changed, sender=EventSeries.teams.through)
-def validate_teams_same_club(sender, instance, action, reverse, pk_set, **kwargs):
-    # Reject teams from another club before they're attached (forward adds only;
-    # the reverse direction — team.scheduled_events.add(...) — is not a used path).
-    if action != "pre_add" or reverse:
-        return
-    if Team.objects.filter(pk__in=pk_set).exclude(club_id=instance.club_id).exists():
-        raise ValidationError(_("Teams must belong to the same club as the event."))
+def _origin_is(origin, *models) -> bool:
+    """Whether a delete was started by deleting an instance (or queryset) of one of ``models`` (a cascade)."""
+    if isinstance(origin, QuerySet):
+        return issubclass(origin.model, models)
+    return isinstance(origin, models)
 
 
-@receiver(m2m_changed, sender=Event.groups.through)
-@receiver(m2m_changed, sender=EventSeries.groups.through)
-def validate_groups_same_club(sender, instance, action, reverse, pk_set, **kwargs):
-    if action != "pre_add" or reverse:
-        return
-    if Group.objects.filter(pk__in=pk_set).exclude(club_id=instance.club_id).exists():
-        raise ValidationError(_("Groups must belong to the same club as the event."))
+def _enqueue(task_name: str, *args) -> None:
+    """Queue an events task after the commit (it then sees the saved state; a rollback queues nothing). The tenant-aware
+    Celery app runs it in the club schema it was queued from."""
+    from events import tasks
+
+    task = getattr(tasks, task_name)
+    transaction.on_commit(lambda: task.delay(*args))
 
 
-@receiver(post_save, sender=Event)
+def _sync_event(event) -> None:
+    """Sync one event: inline for team/group events (small), in a task for a club-wide one (the whole club)."""
+    if event.club_wide:
+        if event.start >= timezone.now():
+            _enqueue("sync_event_attendances", str(event.pk))
+    else:
+        attendance.sync_event_attendances(event)
+
+
+def _skip_save(kwargs, relevant: set) -> bool:
+    if kwargs.get("raw"):
+        return True
+    update_fields = kwargs.get("update_fields")
+    return update_fields is not None and not (set(update_fields) & relevant)
+
+
+# --- events --------------------------------------------------------------------------------------------------------
+
+
+@receiver(post_save, sender=Event, dispatch_uid="events.attendance.event_saved")
 def sync_on_event_save(sender, instance, **kwargs):
-    sync_event_attendances(instance)
-    sync_referee_invites(instance)
-    sync_official_invites(instance)
+    if _skip_save(kwargs, EVENT_AUDIENCE_FIELDS):
+        return
+    _sync_event(instance)  # no-op for past events
 
 
-@receiver(m2m_changed, sender=Event.teams.through)
-@receiver(m2m_changed, sender=Event.groups.through)
-@receiver(m2m_changed, sender=Event.invited_members.through)
-@receiver(m2m_changed, sender=Event.excluded_members.through)
+@receiver(m2m_changed, sender=Event.teams.through, dispatch_uid="events.attendance.teams_changed")
+@receiver(m2m_changed, sender=Event.groups.through, dispatch_uid="events.attendance.groups_changed")
+@receiver(m2m_changed, sender=Event.invited_members.through, dispatch_uid="events.attendance.invited_changed")
+@receiver(m2m_changed, sender=Event.excluded_members.through, dispatch_uid="events.attendance.excluded_changed")
 def sync_on_audience_change(sender, instance, action, reverse, model, pk_set, **kwargs):
+    if not reverse:
+        if action in M2M_SYNC_ACTIONS:
+            _sync_event(instance)
+        return
+
+    # Reverse side edited, e.g. team.scheduled_events.add(event) or member.invited_to_events.clear().
+    # post_clear carries no pk_set, so remember the events on pre_clear.
+    stash = f"_attendance_clear_{sender._meta.db_table}"
+    if action == "pre_clear":
+        through_field = sender._meta.get_field(instance._meta.model_name).attname
+        setattr(instance, stash, set(sender.objects.filter(**{through_field: instance.pk}).values_list("event_id", flat=True)))
+        return
     if action not in M2M_SYNC_ACTIONS:
         return
-
-    if isinstance(instance, Event):
-        sync_event_attendances(instance)
-    else:
-        # Reverse relation edited (e.g. member.invited_to_events.add(event)).
-        for event in Event.objects.filter(pk__in=pk_set or []):
-            sync_event_attendances(event)
-
-
-@receiver(m2m_changed, sender=Event.teams.through)
-def sync_referee_invites_on_teams_change(sender, instance, action, reverse, **kwargs):
-    # Referee eligibility only depends on `teams` (needs_referee_management),
-    # not groups/invited/excluded_members -- a separate, narrower receiver
-    # rather than folding into sync_on_audience_change above, which is about
-    # attendance specifically. reverse (team.scheduled_events.add(...)) isn't
-    # a used path -- see validate_teams_same_club's own comment.
-    if action not in M2M_SYNC_ACTIONS or reverse or not isinstance(instance, Event):
+    event_ids = getattr(instance, stash, set()) if action == "post_clear" else (pk_set or set())
+    if not event_ids:
         return
-    sync_referee_invites(instance)
-    sync_official_invites(instance)
+    events = attendance.future_events(pk__in=event_ids)
+    if isinstance(instance, Member):
+        attendance.sync_attendances(events, member_ids=[instance.pk])
+    else:
+        attendance.sync_attendances(events)
 
 
-@receiver(post_save, sender=TeamMembership)
-@receiver(post_delete, sender=TeamMembership)
-def sync_on_roster_change(sender, instance, **kwargs):
-    now = timezone.now()
-    events = list(Event.objects.filter(teams=instance.team_id, start__gte=now).distinct())
-
-    # Only a fresh addition to the roster has anything new to tell the member
-    # about -- a plain field edit (jersey number, position) re-saves the same
-    # row (kwargs["created"] is False), and a removal has nothing new to add.
-    # post_delete carries no "created" key at all, hence the default.
-    newly_invited = []
-    if kwargs.get("created", False):
-        already_invited_ids = set(Attendance.objects.filter(member=instance.member, event__in=events).values_list("event_id", flat=True))
-        newly_invited = [event for event in events if event.pk not in already_invited_ids]
-
-    for event in events:
-        sync_event_attendances(event)
-
-    if newly_invited:
-        notify_newly_invited(instance.member, club=instance.team.club, events=newly_invited)
+# --- rosters, groups, club memberships ----------------------------------------------------------------------------
 
 
-@receiver(post_save, sender=GroupMembership)
-@receiver(post_delete, sender=GroupMembership)
-def sync_on_group_membership_change(sender, instance, **kwargs):
-    now = timezone.now()
-    events = list(Event.objects.filter(groups=instance.group_id, start__gte=now).distinct())
-
-    newly_invited = []
-    if kwargs.get("created", False):
-        already_invited_ids = set(Attendance.objects.filter(member=instance.member, event__in=events).values_list("event_id", flat=True))
-        newly_invited = [event for event in events if event.pk not in already_invited_ids]
-
-    for event in events:
-        sync_event_attendances(event)
-
-    if newly_invited:
-        notify_newly_invited(instance.member, club=instance.group.club, events=newly_invited)
+def _sync_member(member, events, *, created: bool, via: str):
+    added = attendance.sync_attendances(events, member_ids=[member.pk])
+    if created and added:
+        added_ids = {event_id for event_id, _member_id in added}
+        attendance.notify_newly_invited(member, sorted((e for e in events if e.pk in added_ids), key=lambda e: e.start), via=via)
 
 
-@receiver(post_save, sender=ClubMembership)
-@receiver(post_delete, sender=ClubMembership)
-def sync_on_club_membership_change(sender, instance, **kwargs):
-    now = timezone.now()
-    for event in Event.objects.filter(club_wide=True, club_id=instance.club_id, start__gte=now).distinct():
-        sync_event_attendances(event)
+@receiver(post_save, sender=TeamMembership, dispatch_uid="events.attendance.roster_saved")
+def sync_on_roster_save(sender, instance, created, **kwargs):
+    if _skip_save(kwargs, {"team", "team_id", "season", "season_id", "member", "member_id"}):
+        return
+    _sync_member(instance.member, attendance.future_events(teams=instance.team_id), created=created, via=instance.team.name)
+    if created:
+        from events.services import stats_refresh
+
+        stats_refresh.queue_for_roster(instance)  # re-link the team's stored game sheets to the new player (background)
 
 
-game_timeline_changed.connect(record_moments, dispatch_uid="events.record_game_moments")
-game_timeline_changed.connect(live_activity.on_timeline_changed, dispatch_uid="events.live_activity")
+@receiver(post_delete, sender=TeamMembership, dispatch_uid="events.attendance.roster_deleted")
+def sync_on_roster_delete(sender, instance, origin=None, **kwargs):
+    if _origin_is(origin, Member, Team):  # the member's rows cascade / the team's own receiver re-syncs
+        return
+    attendance.sync_attendances(attendance.future_events(teams=instance.team_id), member_ids=[instance.member_id])
 
 
-# -- referee/official eligibility changed -------------------------------------------------
-# Invites are created per game (above), but who is eligible can change afterwards: a profile
-# added or edited, a level's teams, someone's excluded teams. Bring the upcoming games'
-# invites up to date (events.services.crew_invites) -- after the commit, so it sees the saved
-# state. A team switching to club-managed, or the officials flag being switched on, have no
-# signal of their own: the hourly sync_crew_invites job covers those.
+@receiver(post_save, sender=GroupMembership, dispatch_uid="events.attendance.group_member_saved")
+def sync_on_group_membership_save(sender, instance, created, **kwargs):
+    if _skip_save(kwargs, {"group", "group_id", "member", "member_id", "must_respond"}):
+        return
+    _sync_member(instance.member, attendance.future_events(groups=instance.group_id), created=created and instance.must_respond, via=instance.group.name)
 
 
-def _resync_after_commit(club):
-    transaction.on_commit(lambda: resync_upcoming_invites(club))
+@receiver(post_delete, sender=GroupMembership, dispatch_uid="events.attendance.group_member_deleted")
+def sync_on_group_membership_delete(sender, instance, origin=None, **kwargs):
+    if _origin_is(origin, Member, Group):
+        return
+    attendance.sync_attendances(attendance.future_events(groups=instance.group_id), member_ids=[instance.member_id])
 
 
-@receiver(post_save, sender=RefereeProfile)
-@receiver(post_save, sender=OfficialProfile)
-@receiver(post_save, sender=RefereeLevel)
-@receiver(post_save, sender=OfficialLevel)
-def resync_invites_on_eligibility_change(sender, instance, **kwargs):
-    _resync_after_commit(instance.club)
+@receiver(post_save, sender=ClubMembership, dispatch_uid="events.attendance.club_membership_saved")
+@receiver(post_delete, sender=ClubMembership, dispatch_uid="events.attendance.club_membership_deleted")
+def sync_on_club_membership_change(sender, instance, origin=None, **kwargs):
+    # Fee bookkeeping saves with update_fields that leave status alone: nothing changes for the audience then.
+    # Club-wide events can be many and large, so they are re-synced in a task, after the commit.
+    if _skip_save(kwargs, {"status", "season", "season_id", "member", "member_id"}) or _origin_is(origin, Member):
+        return
+    _enqueue("sync_club_wide_events")
 
 
-@receiver(m2m_changed, sender=RefereeLevel.teams.through)
-@receiver(m2m_changed, sender=OfficialLevel.teams.through)
-@receiver(m2m_changed, sender=RefereeProfile.excluded_teams.through)
-def resync_invites_on_eligibility_m2m_change(sender, instance, action, **kwargs):
-    if action in ("post_add", "post_remove", "post_clear"):
-        _resync_after_commit(instance.club)
+# --- a team or group deleted ---------------------------------------------------------------------------------------
+# Its m2m rows on events cascade without m2m_changed: remember the upcoming events first, re-sync them afterwards.
 
 
-@receiver(post_delete, sender=EventAttachment)
-def delete_attachment_file(sender, instance, **kwargs):
-    """The file lives in private storage, outside the database -- an event deleted with its
-    attachments (cascade) would otherwise leave them on disk forever."""
-    if instance.file:
-        instance.file.delete(save=False)
+@receiver(pre_delete, sender=Team, dispatch_uid="events.attendance.team_pre_delete")
+@receiver(pre_delete, sender=Group, dispatch_uid="events.attendance.group_pre_delete")
+def remember_events_before_delete(sender, instance, **kwargs):
+    lookup = "teams" if sender is Team else "groups"
+    instance._attendance_event_ids = [e.pk for e in attendance.future_events(**{lookup: instance.pk})]
+
+
+@receiver(post_delete, sender=Team, dispatch_uid="events.attendance.team_deleted")
+@receiver(post_delete, sender=Group, dispatch_uid="events.attendance.group_deleted")
+def sync_after_delete(sender, instance, **kwargs):
+    event_ids = getattr(instance, "_attendance_event_ids", None)
+    if event_ids:
+        attendance.sync_attendances(attendance.future_events(pk__in=event_ids))
