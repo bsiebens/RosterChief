@@ -168,16 +168,16 @@
 			<ShopNumbering rows={s.numbering} placeholders={s.numbering_placeholders} errors={errs} canEditInvoice={s.can_edit_invoice_numbering} bind:changes={numberingChanges} />
 			<section class="card card-body card-hl gap-3">
 				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ReceiptText size={16} class="shrink-0" aria-hidden="true" /> {t('shop.set.card.invoices')}</h2>
-				<div class="grid gap-3 md:grid-cols-2">
+				<div class="grid gap-3 md:grid-cols-2 md:items-start">
 					<Field label={t('shop.set.due_days')} type="number" min="0" max="365" bind:value={dueDays} error={errs.invoice_due_days} help={t('shop.set.due_days_help')} />
-				</div>
-				<div class="form-control w-full md:max-w-md">
-					<label class="label" for="set-vat"><span class="label-text">{t('shop.set.vat')}</span></label>
-					<select id="set-vat" class="select select-bordered w-full {errs.vat_mode ? 'select-error' : ''}" bind:value={vatMode} disabled={!s.can_edit_vat}>
-						<option value="off">{t('shop.set.vat_off')}</option>
-						<option value="included">{t('shop.set.vat_included')}</option>
-					</select>
-					{#if errs.vat_mode}<span class="mt-1 block text-xs text-error">{errs.vat_mode}</span>{:else}<span class="label-text-alt mt-1 block">{s.can_edit_vat ? t('shop.set.vat_help') : t('shop.set.vat_locked')}</span>{/if}
+					<div class="form-control w-full">
+						<label class="label" for="set-vat"><span class="label-text">{t('shop.set.vat')}</span></label>
+						<select id="set-vat" class="select select-bordered w-full {errs.vat_mode ? 'select-error' : ''}" bind:value={vatMode} disabled={!s.can_edit_vat}>
+							<option value="off">{t('shop.set.vat_off')}</option>
+							<option value="included">{t('shop.set.vat_included')}</option>
+						</select>
+						{#if errs.vat_mode}<span class="mt-1 block text-xs text-error">{errs.vat_mode}</span>{:else}<span class="label-text-alt mt-1 block">{s.can_edit_vat ? t('shop.set.vat_help') : t('shop.set.vat_locked')}</span>{/if}
+					</div>
 				</div>
 			</section>
 		</form>

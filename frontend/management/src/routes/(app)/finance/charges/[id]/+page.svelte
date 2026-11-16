@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
-	import { BellRing, Download, Save, Send, Trash2, XCircle } from '@lucide/svelte';
+	import { ArrowLeft, BellRing, ClipboardList, Download, ListOrdered, Save, Send, Trash2, XCircle } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import ChargeForm, { lineTotal, newLine, type LineDraft } from '#lib/components/finance/ChargeForm.svelte';
 	import ChargePayments from '#lib/components/finance/ChargePayments.svelte';
@@ -65,10 +65,8 @@
 {#snippet badge()}<span class="badge badge-sm {statusBadge(c.status)}">{t(`chg.status.${c.status}`)}</span>{/snippet}
 
 {#snippet actions()}
-	{#if c.is_draft}
-		<button class="btn btn-outline btn-error gap-2" type="button" onclick={() => (deleteOpen = true)}><Trash2 size={16} /> {t('chg.d.delete')}</button>
-		<button class="btn btn-primary gap-2" type="button" disabled={!complete} onclick={() => (sendOpen = true)}><Send size={16} /> {t('chg.d.send')}</button>
-	{:else}
+	<a class="btn btn-outline gap-2" href="/finance/charges"><ArrowLeft size={16} /> {t('chg.d.back')}</a>
+	{#if !c.is_draft}
 		{#if c.number && c.status !== 'cancelled'}<a class="btn btn-outline gap-2" href={chargePdfHref(c.id)} download><Download size={16} /> {t('chg.d.pdf')}</a>{/if}
 		{#if c.can_remind}<button class="btn btn-outline gap-2" type="button" onclick={() => (remindOpen = true)}><BellRing size={16} /> {t('chg.d.remind')}</button>{/if}
 		{#if c.status !== 'cancelled' && c.status !== 'paid'}<button class="btn btn-outline btn-error gap-2" type="button" disabled={!c.can_cancel} title={c.can_cancel ? '' : t('chg.d.cancel_blocked')} onclick={() => (cancelOpen = true)}><XCircle size={16} /> {t('chg.d.cancel')}</button>{/if}
@@ -77,7 +75,7 @@
 
 <svelte:head><title>{pageTitle(c.number ?? t('chg.d.draft_title'))}</title></svelte:head>
 
-<div class="mx-auto grid max-w-4xl gap-5">
+<div class="grid gap-5">
 	{#if data.created && done === ''}<Alert kind="success">{t('chg.new.created')}</Alert>{/if}
 	{#if done === 'send'}<Alert kind="success">{t('chg.d.done.sent')}</Alert>{/if}
 	{#if done === 'remind'}<Alert kind="success">{t('chg.d.done.reminded')}</Alert>{/if}
@@ -90,6 +88,7 @@
 			method="POST"
 			action="?/save"
 			class="grid gap-5"
+			novalidate
 			use:enhance={({ cancel }) => {
 				if (!complete) {
 					cancel();
@@ -102,31 +101,54 @@
 				};
 			}}>
 			<input type="hidden" name="payload" value={payload} />
-			<ChargeForm bind:memberId bind:lines bind:dueDate bind:notes memberName={c.member.name} {errors} />
-			<div class="flex justify-end"><button class="btn btn-primary gap-2" type="submit" disabled={busy}><Save size={16} /> {t('chg.form.save')}</button></div>
+			<div class="grid items-start gap-5 xl:grid-cols-3">
+				<div class="xl:col-span-2">
+					<ChargeForm bind:memberId bind:lines bind:dueDate bind:notes memberName={c.member.name} {errors} />
+				</div>
+				<aside class="grid content-start gap-5 xl:sticky xl:top-20">
+					<section class="card card-body card-hl gap-3">
+						<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ClipboardList size={16} aria-hidden="true" /> {t('chg.new.summary')}</h2>
+						<dl class="grid gap-1.5 text-sm">
+							{#each lines.filter((l) => l.description.trim() || Number(l.unit_price) > 0) as l (l.key)}
+								<div class="flex justify-between gap-3"><dt><span class="font-mono text-muted">{Number(l.quantity) || 0} ×</span> {l.description.trim() || '…'}</dt><dd class="shrink-0 font-mono">{money(lineTotal(l))}</dd></div>
+							{/each}
+							<div class="flex justify-between gap-3 border-t border-line pt-1 text-base font-semibold"><dt>{t('chg.form.total')}</dt><dd class="font-mono">{money(lines.reduce((sum, l) => sum + lineTotal(l), 0))}</dd></div>
+						</dl>
+						<p class="text-xs text-muted">{dueDate ? t('chg.new.summary_due', { date: day(dueDate) }) : t('chg.new.summary_due_default')}. {t('chg.form.no_vat')}</p>
+						<div class="grid gap-2">
+							<button class="btn btn-primary w-full gap-2" type="submit" disabled={busy}><Save size={16} /> {t('chg.form.save')}</button>
+							<button class="btn btn-outline w-full gap-2" type="button" disabled={!complete} onclick={() => (sendOpen = true)}><Send size={16} /> {t('chg.d.send')}</button>
+							<button class="btn btn-outline btn-error w-full gap-2" type="button" onclick={() => (deleteOpen = true)}><Trash2 size={16} /> {t('chg.d.delete')}</button>
+						</div>
+					</section>
+				</aside>
+			</div>
 		</form>
 	{:else}
-		<section class="card card-body gap-4">
-			<dl class="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
-				<div><dt class="text-muted">{t('chg.col.member')}</dt><dd class="font-semibold text-ink">{c.member.name}</dd></div>
-				<div><dt class="text-muted">{t('chg.d.issued')}</dt><dd class="font-mono text-ink">{day(c.issued_at)}</dd></div>
-				<div><dt class="text-muted">{t('chg.d.due')}</dt><dd class="font-mono text-ink {c.status === 'overdue' ? 'font-semibold text-danger' : ''}">{day(c.due_date)}</dd></div>
-			</dl>
-			<div class="overflow-x-auto">
-				<table class="table">
-					<thead><tr><th>{t('chg.form.description')}</th><th class="text-right">{t('chg.form.qty')}</th><th class="text-right">{t('chg.form.unit')}</th><th class="text-right">{t('chg.form.line_total')}</th></tr></thead>
-					<tbody>
-						{#each c.lines as l (l.id)}
-							<tr><td>{l.description}</td><td class="text-right font-mono text-sm">{l.quantity}</td><td class="text-right font-mono text-sm">{money(l.unit_price)}</td><td class="text-right font-mono text-sm">{money(l.line_total)}</td></tr>
-						{/each}
-						<tr class="font-semibold"><td colspan="3">{t('chg.form.total')}</td><td class="text-right font-mono">{money(c.total)}</td></tr>
-					</tbody>
-				</table>
-			</div>
-			{#if c.notes}<div><h3 class="text-xs font-semibold tracking-wide text-muted uppercase">{t('chg.d.notes')}</h3><p class="mt-1 text-sm whitespace-pre-line">{c.notes}</p></div>{/if}
-			{#if c.status !== 'cancelled'}<p class="text-sm text-muted">{reminderLine}</p>{/if}
-			<p class="text-xs text-muted">{t('chg.d.fixed')}</p>
-		</section>
+		<div class="grid items-start gap-5 xl:grid-cols-3">
+			<section class="card card-body card-hl gap-4 xl:col-span-3">
+				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ListOrdered size={16} aria-hidden="true" /> {t('chg.d.lines')}</h2>
+				<dl class="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
+					<div><dt class="text-muted">{t('chg.col.member')}</dt><dd class="font-semibold text-ink">{c.member.name}</dd></div>
+					<div><dt class="text-muted">{t('chg.d.issued')}</dt><dd class="font-mono text-ink">{day(c.issued_at)}</dd></div>
+					<div><dt class="text-muted">{t('chg.d.due')}</dt><dd class="font-mono text-ink {c.status === 'overdue' ? 'font-semibold text-danger' : ''}">{day(c.due_date)}</dd></div>
+				</dl>
+				<div class="overflow-x-auto">
+					<table class="table">
+						<thead><tr><th>{t('chg.form.description')}</th><th class="text-right">{t('chg.form.qty')}</th><th class="text-right">{t('chg.form.unit')}</th><th class="text-right">{t('chg.form.line_total')}</th></tr></thead>
+						<tbody>
+							{#each c.lines as l (l.id)}
+								<tr><td>{l.description}</td><td class="text-right font-mono text-sm">{l.quantity}</td><td class="text-right font-mono text-sm">{money(l.unit_price)}</td><td class="text-right font-mono text-sm">{money(l.line_total)}</td></tr>
+							{/each}
+							<tr class="font-semibold"><td colspan="3">{t('chg.form.total')}</td><td class="text-right font-mono">{money(c.total)}</td></tr>
+						</tbody>
+					</table>
+				</div>
+				{#if c.notes}<div><h3 class="text-xs font-semibold tracking-wide text-muted uppercase">{t('chg.d.notes')}</h3><p class="mt-1 text-sm whitespace-pre-line">{c.notes}</p></div>{/if}
+				{#if c.status !== 'cancelled'}<p class="text-sm text-muted">{reminderLine}</p>{/if}
+				<p class="text-xs text-muted">{t('chg.d.fixed')}</p>
+			</section>
+		</div>
 		{#if c.status !== 'cancelled'}<ChargePayments charge={c} {form} />{/if}
 	{/if}
 </div>

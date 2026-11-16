@@ -31,7 +31,7 @@
 	};
 </script>
 
-<section class="card card-body gap-3" aria-labelledby="chg-pay">
+<section class="card card-body card-hl gap-3" aria-labelledby="chg-pay">
 	<div class="flex flex-wrap items-center justify-between gap-2">
 		<h2 id="chg-pay" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Banknote size={16} aria-hidden="true" /> {t('chg.pay.title')}</h2>
 		{#if charge.can_record_payment}

@@ -7,7 +7,7 @@
 </script>
 
 <script lang="ts">
-	import { Plus, Trash2, UserRound } from '@lucide/svelte';
+	import { ListOrdered, NotebookPen, Plus, Trash2, UserRound } from '@lucide/svelte';
 	import EntityPicker from '#lib/components/EntityPicker.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import { money } from '#lib/charges.ts';
@@ -34,8 +34,8 @@
 	const lineError = (i: number) => errors[`lines.${i}`] ?? '';
 </script>
 
-<div class="grid gap-5">
-	<section class="card card-body gap-3" aria-labelledby="chg-member">
+<div class="grid content-start gap-5">
+	<section class="card card-body card-hl gap-3" aria-labelledby="chg-member">
 		<h2 id="chg-member" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><UserRound size={16} aria-hidden="true" /> {t('chg.form.member')}</h2>
 		{#if showName}
 			<div class="flex flex-wrap items-center gap-3">
@@ -47,8 +47,11 @@
 		{/if}
 	</section>
 
-	<section class="card card-body gap-3" aria-labelledby="chg-lines">
-		<h2 id="chg-lines" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('chg.form.lines')}</h2>
+	<section class="card card-body card-hl gap-3" aria-labelledby="chg-lines">
+		<header class="grid gap-0.5">
+			<h2 id="chg-lines" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ListOrdered size={16} aria-hidden="true" /> {t('chg.form.lines')}</h2>
+			<p class="text-xs text-muted">{t('chg.form.lines_help')}</p>
+		</header>
 		{#if errors.lines}<p class="text-xs text-error">{errors.lines}</p>{/if}
 		<div class="grid gap-3">
 			{#each lines as l, i (l.key)}
@@ -81,7 +84,8 @@
 		<p class="text-xs text-muted">{t('chg.form.no_vat')}</p>
 	</section>
 
-	<section class="card card-body gap-3">
+	<section class="card card-body card-hl gap-3" aria-labelledby="chg-details">
+		<h2 id="chg-details" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><NotebookPen size={16} aria-hidden="true" /> {t('chg.form.details')}</h2>
 		<div class="grid gap-3 sm:grid-cols-2">
 			<Field label={t('chg.form.due_date')} name="due_date" type="date" bind:value={dueDate} error={errors.due_date} help={t('chg.form.due_help')} />
 			<label class="form-control w-full sm:col-span-2">
