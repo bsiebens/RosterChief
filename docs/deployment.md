@@ -21,7 +21,15 @@ This is the checklist. The command reference and the details of how a host insta
 
 - Amazon Linux 2023, 64-bit. For one box: 2 vCPU / 4 GB RAM is a sensible start. Attach a persistent EBS volume.
 - Every host gets a 1 GB swap file when `rc provision` runs (Amazon Linux has none), so a memory spike slows the host down instead of freezing it. `--swap-mb` on `bootstrap.sh` changes the size; 0 skips it.
-- A staging box of 1 GB works with `PROFILE=small` in the environment file (then run `rc provision` again, and deploy). It drops the Celery worker and beat (tasks run inside the web request, scheduled jobs do not run), uses one gunicorn worker, caps the web and Node services with `MemoryHigh`/`MemoryMax` so a runaway service restarts instead of starving the host, protects `sshd` from the OOM killer, and trims PostgreSQL and Valkey. Do not use it for production.
+- Sizing profiles, set as `PROFILE=` in the environment file, applied by `rc provision` and a deploy (the unit drop-ins are in `deploy/host/profiles/`):
+
+  | Profile | For | What it does |
+  |---|---|---|
+  | `standard` (default) | 4 GB and up | No limits. |
+  | `medium` | 2 GB, production | `MemoryHigh`/`MemoryMax` on the web (650 MB), worker (450 MB, children recycled past 200 MB), beat and both Node apps (280 MB, 192 MB heap), so a runaway service is restarted instead of starving the host. PostgreSQL sized to 50 connections, Valkey capped at 128 MB without eviction (it holds the Celery queue). `sshd` and PostgreSQL are protected from the OOM killer. |
+  | `small` | 1 GB, staging for one person | The same idea, tighter, and no Celery worker or beat: tasks run inside the web request (scheduled jobs do not run), one gunicorn worker. Do not use it for production. |
+
+  The caps are estimates. If a unit keeps hitting its `MemoryMax` (`systemctl status rosterchief-web` shows it), raise that unit's value in `deploy/host/profiles/<profile>/`.
 - Security group: ports 80 and 443 open (see the Cloudflare note below). Keep PostgreSQL, Valkey, Gunicorn and the SvelteKit ports private. Open SSH only to your own address, or use SSM and open nothing.
 - For a split setup (separate frontend and backend), put both in the same VPC. The backend listens on its **private address, port 8001**, and only the frontend host(s) may reach it.
 - SSH access needs key login and passwordless `sudo` for the operator user (`ec2-user` by default).
