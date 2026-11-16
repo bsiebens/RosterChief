@@ -85,7 +85,9 @@ if [[ -f $RC_CONFIG/site.env ]]; then
 fi
 
 # ---------------------------------------------------------------- packages, accounts, directories
-packages=(git tar gzip openssl jq curl)
+packages=(git tar gzip openssl jq)
+# Amazon Linux 2023 ships curl-minimal, which provides curl and conflicts with the full curl package: only install it when there is no curl.
+command -v curl > /dev/null || packages+=(curl)
 rc_has_backend "$role" && packages+=(postgresql16-server valkey pango fontconfig dejavu-sans-fonts)
 rc_has_frontend "$role" && packages+=(nodejs24)
 dnf install -y "${packages[@]}"
@@ -121,7 +123,11 @@ needs_cloudflare=false
 rc_has_frontend "$role" && needs_cloudflare=true
 caddy_ok() { # does this binary have what the role needs?
     [[ -x $1 ]] || return 1
-    [[ $needs_cloudflare == false ]] || "$1" list-modules | grep -Fxq 'dns.providers.cloudflare'
+    [[ $needs_cloudflare == false ]] && return 0
+    # Capture first: `caddy list-modules | grep -q` makes grep quit at the first match, caddy then dies of SIGPIPE and pipefail reports a failure.
+    local modules
+    modules=$("$1" list-modules 2>&1) || return 1
+    grep -Fxq 'dns.providers.cloudflare' <<< "$modules"
 }
 if [[ -n $caddy_binary ]]; then
     install -m 0755 "$caddy_binary" "$scratch/caddy"
