@@ -4,6 +4,9 @@ Creating a club runs every tenant migration (several seconds), and nearly every 
 ``template`` schema once per test database, then turns on django-tenants' base-schema cloning (``TENANT_CREATION_FAKES_MIGRATIONS`` +
 ``TENANT_BASE_SCHEMA``), so a new club is a fast SQL clone plus the usual ``post_schema_sync`` seeding. Each class still gets its own
 fresh, isolated schema. Production club creation is unchanged. Turn it off with ``ROSTERCHIEF_TEST_TEMPLATE=0`` to compare.
+
+The runner also uses a fast password hasher and empties the in-memory cache before each test. These settings are applied in the main process
+only, so ``--parallel`` falls back to slow club creation and is slower overall: run the suite sequentially.
 """
 
 import os
@@ -22,9 +25,13 @@ TEMPLATE_SCHEMA = "template"
 class TemplateSchemaRunner(DiscoverRunner):
     _template_settings = None
     _original_pre_setup = None
+    _fast_hasher = None
 
     def setup_test_environment(self, **kwargs):
         super().setup_test_environment(**kwargs)
+        # Every test user and every test sign-in would otherwise pay for a full-strength PBKDF2 hash (about 0.1s each, thousands of times).
+        self._fast_hasher = override_settings(PASSWORD_HASHERS=["django.contrib.auth.hashers.MD5PasswordHasher"])
+        self._fast_hasher.enable()
         # A fast suite makes many sign-ins from one address inside a minute and trips rate limits that live in the cache, which the slow
         # suite never reached. Every test gets an empty in-memory cache (never a real Redis, which may be a developer's own).
         if "locmem" in settings.CACHES["default"]["BACKEND"].lower():
@@ -38,6 +45,9 @@ class TemplateSchemaRunner(DiscoverRunner):
             SimpleTestCase._pre_setup = classmethod(pre_setup)
 
     def teardown_test_environment(self, **kwargs):
+        if self._fast_hasher is not None:
+            self._fast_hasher.disable()
+            self._fast_hasher = None
         if self._original_pre_setup is not None:
             SimpleTestCase._pre_setup = self._original_pre_setup
             self._original_pre_setup = None
