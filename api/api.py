@@ -10,6 +10,7 @@ from club.icons import ensure_icons
 from club.models import Domain
 from members.models import Member
 from members.services import access
+from shop.settings_models import ShopSettings
 
 from .auth import AUTHENTICATORS
 from .errors import register_error_handlers
@@ -20,6 +21,7 @@ from .routers import evaluations as evaluations_router
 from .routers import event_subtypes as event_subtypes_router
 from .routers import events as events_router
 from .routers import finance as finance_router
+from .routers import finance_charges as finance_charges_router
 from .routers import fixture_imports as fixture_imports_router
 from .routers import forms as forms_router
 from .routers import member_stats as member_stats_router
@@ -117,6 +119,7 @@ api.add_router("/public/forms", public_forms_router.router, tags=["public"])
 api.add_router("/public/registration", public_registration_router.router, tags=["public"])
 api.add_router("/registrations", registrations_router.router, tags=["registrations"])
 api.add_router("/finance", finance_router.router, tags=["finance"])
+api.add_router("/finance/charges", finance_charges_router.router, tags=["finance"])
 api.add_router("/sponsor-management", sponsors_router.router, tags=["sponsor management"])
 api.add_router("/registration", registrations_router.settings_router, tags=["registrations"])
 api.add_router("/events", analytics_router.events_router, tags=["analytics"])
@@ -160,6 +163,7 @@ def me(request):
         "can_manage_members": access.can_manage_members(user),
         "can_manage_settings": access.can_manage_settings(user),
         "can_manage_finance": access.can_manage_finance(user),
+        "can_manage_charges": access.can_manage_charges(user),
         "can_manage_sponsors": club.schema_name != get_public_schema_name() and access.can_manage_sponsors(user),
         "can_execute_evaluations": evaluations_on and access.can_execute_evaluations(user),
         "can_manage_evaluations": evaluations_on and access.can_manage_evaluations(user),
@@ -173,6 +177,8 @@ def me(request):
         "can_manage_shop_discounts": shop_on and access.can_manage_shop_discounts(user),
         "can_manage_shop_invoices": shop_on and access.can_manage_shop_invoices(user),
         "can_add_news": club.schema_name != get_public_schema_name() and access.can_add_news(user),
+        # The shop's VAT setting, so the product form shows a VAT rate only while VAT is on ("off" when the club has no shop).
+        "shop_vat_mode": ShopSettings.current().vat_mode if shop_on else "off",
         "admin_group_ids": [] if club.schema_name == get_public_schema_name() else sorted(str(i) for i in access.admin_group_ids(user)),
         "managed_team_ids": [] if club.schema_name == get_public_schema_name() else sorted(str(i) for i in access.managed_team_ids(user)),
         "features": sorted(request.features.enabled_codes()),

@@ -12,7 +12,7 @@ CANCELLED = Order.FulfillmentStatus.CANCELLED
 
 
 def shop_stats() -> dict:
-    orders = Order.objects.all()
+    orders = Order.objects.filter(kind=Order.Kind.SHOP)
     live = orders.exclude(fulfillment_status=CANCELLED)
     paid = live.filter(payment_status=PAID)
     outstanding = sum((payments.amount_due(o) for o in live.exclude(payment_status__in=[PAID, Order.PaymentStatus.REFUNDED])), Decimal("0"))

@@ -1,10 +1,13 @@
 """Order invoices: one per order, numbered ``INV-<year>-<seq>`` (per club schema). The PDF is rendered on demand from the
 order's current lines and discounts (WeasyPrint, club branding) and cached in the private invoice cache; the cache is
-dropped whenever the order changes (``invalidate_cache``). No VAT, voiding or credit notes (the old shop had none)."""
+dropped whenever the order changes (``invalidate_cache``). VAT is shown only when the shop's VAT setting was ``included`` when the invoice was
+issued (kept in its billing snapshot) and the club has a VAT number: the price already contains it, the invoice breaks it out per rate. No
+voiding or credit notes."""
 
 import base64
 import datetime
 import io
+from decimal import ROUND_HALF_UP, Decimal
 
 from django.db import transaction
 from django.template.loader import render_to_string
@@ -30,7 +33,7 @@ def _club():
 
 def billing_snapshot(order) -> dict:
     club = _club()
-    snap = {"club": {}, "purchaser": {"name": str(order.purchaser), "email": order.purchaser.contact_email}}
+    snap = {"club": {}, "purchaser": {"name": str(order.purchaser), "email": order.purchaser.contact_email}, "vat_mode": ShopSettings.current().vat_mode}
     if club is not None:
         snap["club"] = {
             "name": club.legal_name or club.name, "address": club.legal_address, "zip_code": club.legal_zip_code, "city": club.legal_city,
@@ -69,9 +72,33 @@ def invalidate_cache(order) -> None:
         drop_cached_invoice_pdf(_cache_name(invoice))
 
 
+def vat_rows(order, snapshot) -> list[dict]:
+    """The VAT contained in the invoice, per rate: ``[{"rate", "net", "vat", "gross"}]``. Empty unless the invoice was issued with VAT
+    ``included`` and the club has a VAT number. Order discounts are spread over the lines in proportion; lines at 0% are not listed."""
+    snapshot = snapshot or {}
+    if snapshot.get("vat_mode") != ShopSettings.VatMode.INCLUDED or not (snapshot.get("club") or {}).get("vat_id"):
+        return []
+    lines = list(order.lines.all())
+    gross_total = sum((ln.line_total for ln in lines), Decimal("0"))
+    if gross_total <= 0:
+        return []
+    factor = Decimal(order.total) / gross_total
+    by_rate: dict[Decimal, Decimal] = {}
+    for ln in lines:
+        if ln.vat_rate > 0:
+            by_rate[ln.vat_rate] = by_rate.get(ln.vat_rate, Decimal("0")) + ln.line_total
+    cent = Decimal("0.01")
+    rows = []
+    for rate in sorted(by_rate):
+        gross = (by_rate[rate] * factor).quantize(cent, rounding=ROUND_HALF_UP)
+        vat = (gross * rate / (Decimal("100") + rate)).quantize(cent, rounding=ROUND_HALF_UP)
+        rows.append({"rate": rate, "net": gross - vat, "vat": vat, "gross": gross})
+    return rows
+
+
 def lines_for(order) -> list[dict]:
     return [
-        {"description": ln.product.name + (f" - {ln.variant.name}" if ln.variant else ""), "quantity": ln.quantity, "unit_price": ln.unit_price, "line_total": ln.line_total}
+        {"description": ln.description or ln.product.name + (f" - {ln.variant.name}" if ln.variant else ""), "quantity": ln.quantity, "unit_price": ln.unit_price, "line_total": ln.line_total}
         for ln in order.lines.select_related("product", "variant")
     ]  # fmt: skip
 
@@ -152,8 +179,9 @@ def render_pdf(invoice) -> bytes:
             "amount_paid": payments.amount_paid(order),
             "amount_due": payments.amount_due(order),
             "snapshot": invoice.billing_snapshot or {},
+            "vat_rows": vat_rows(order, invoice.billing_snapshot),
             "logo_data_uri": _logo_uri(club),
-            "qr_data_uri": _qr_uri(order),
+            "qr_data_uri": None if order.kind == Order.Kind.CHARGE else _qr_uri(order),  # the QR is for scanning an order at pickup
         },
     )
     pdf = HTML(string=html).write_pdf()

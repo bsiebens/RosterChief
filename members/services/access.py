@@ -31,6 +31,7 @@ from members.models import ClubMembership, Member
 MANAGE_MEMBERS = "members.manage_members"
 MANAGE_SETTINGS = "admin.manage_settings"
 MANAGE_FINANCE = "registration.manage_finance"
+MANAGE_CHARGES = "finance.manage_charges"
 MANAGE_SPONSORS = "sponsoring.manage_sponsors"
 EXECUTE_EVALUATIONS = "evaluations.execute_evaluations"
 MANAGE_EVALUATIONS = "evaluations.manage_evaluations"
@@ -50,6 +51,21 @@ def can_manage_finance(user) -> bool:
     if user is None or not user.is_authenticated or not user.is_active:
         return False
     return is_platform_owner(user) or _is_club_owner(user) or user.has_perm(MANAGE_FINANCE)
+
+
+def can_manage_charges(user) -> bool:
+    """Platform owner, the club's Owner role, or a holder of ``finance.manage_charges``: writing, sending and following up the invoices for
+    amounts that are not shop items (a fine, a late fee). A separate permission from the registration finance one."""
+    if user is None or not user.is_authenticated or not user.is_active:
+        return False
+    return is_platform_owner(user) or _is_club_owner(user) or user.has_perm(MANAGE_CHARGES)
+
+
+def require_charges(actor) -> None:
+    from .errors import NotAllowed
+
+    if not can_manage_charges(actor):
+        raise NotAllowed("You are not allowed to manage charge invoices.")
 
 
 def can_manage_sponsors(user) -> bool:

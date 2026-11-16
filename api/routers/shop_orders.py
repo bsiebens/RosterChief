@@ -102,7 +102,7 @@ def order_detail(o: Order) -> dict:
 
 
 def get_order(order_id) -> Order:
-    order = Order.objects.select_related("purchaser").filter(pk=order_id).first()
+    order = Order.objects.select_related("purchaser").filter(pk=order_id, kind=Order.Kind.SHOP).first()
     if order is None:
         raise HttpError(404, "Not found.")
     return order
@@ -142,7 +142,7 @@ def list_orders(
     purchaser_id: uuid.UUID | None = None, closed: bool | None = None, ready_to_confirm: bool | None = None, limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
 ):  # fmt: skip
     _gate(request)
-    qs = Order.objects.select_related("purchaser").order_by("-created")
+    qs = Order.objects.filter(kind=Order.Kind.SHOP).select_related("purchaser").order_by("-created")
     if q:
         qs = qs.filter(Q(number__icontains=q) | Q(purchaser__first_name__icontains=q) | Q(purchaser__last_name__icontains=q))
     for field, value in (("payment_status", payment_status), ("fulfillment_status", fulfillment_status), ("production_status", production_status)):
@@ -192,13 +192,13 @@ def preview(request, payload: PreviewIn):
 @router.post("/bulk/mark-paid", response=CountOut, summary="Mark several orders paid", operation_id="bulk_mark_shop_orders_paid")
 def bulk_paid(request, payload: BulkPaidIn):
     _gate(request)
-    return {"count": svc.bulk_mark_paid(request.user, Order.objects.filter(pk__in=payload.order_ids), payload.method)}
+    return {"count": svc.bulk_mark_paid(request.user, Order.objects.filter(pk__in=payload.order_ids, kind=Order.Kind.SHOP), payload.method)}
 
 
 @router.post("/bulk/ready", response=CountOut, summary="Mark several orders ready for pickup", operation_id="bulk_mark_shop_orders_ready")
 def bulk_ready(request, payload: BulkReadyIn):
     _gate(request)
-    return {"count": svc.bulk_mark_ready(Order.objects.filter(pk__in=payload.order_ids), payload.pickup_instructions)}
+    return {"count": svc.bulk_mark_ready(Order.objects.filter(pk__in=payload.order_ids, kind=Order.Kind.SHOP), payload.pickup_instructions)}
 
 
 @router.get("/{order_id}", response=OrderDetailOut, summary="One order", operation_id="get_shop_order")

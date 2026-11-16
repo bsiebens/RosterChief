@@ -100,6 +100,8 @@ def _settings_out(user) -> dict:
         "credentials_configured": s.credentials_configured,
         "credential_fields": list(provider.credential_fields) if provider else [],
         "invoice_due_days": s.invoice_due_days,
+        "vat_mode": s.vat_mode,
+        "can_edit_vat": access.can_manage_shop(user),
         "providers": [{"key": p.key, "label": p.label, "credential_fields": list(p.credential_fields), "supports_refunds": p.supports_refunds} for p in payment_providers.providers()],
     }
 
@@ -177,6 +179,11 @@ def put_settings(request, payload: SettingsIn):
         s.closed_message = data["closed_message"].strip()
     if "invoice_due_days" in data and data["invoice_due_days"] is not None:
         s.invoice_due_days = data["invoice_due_days"]
+    if data.get("vat_mode") is not None and data["vat_mode"] != s.vat_mode:
+        if data["vat_mode"] not in ShopSettings.VatMode.values:
+            raise Invalid("Unknown VAT setting.", {"vat_mode": ["Choose off or included."]})
+        access.require_manage_shop(request.user)  # VAT is on legal documents: only whoever manages the whole shop
+        s.vat_mode = data["vat_mode"]
     s.save()
     return _settings_out(request.user)
 

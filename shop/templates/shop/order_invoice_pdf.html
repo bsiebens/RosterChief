@@ -45,7 +45,7 @@ td { padding: 2mm 0; border-bottom: 1px solid #eee; }
 </div>
 <div class="header">
   <div><div class="muted">Billed to</div><strong>{{ snapshot.purchaser.name|default:order.purchaser }}</strong></div>
-  <div class="right"><div class="muted">Order</div>{{ order.number }}
+  <div class="right"><div class="muted">{% if order.kind == "charge" %}Invoice{% else %}Order{% endif %}</div>{% if order.kind == "charge" %}{{ invoice.number }}{% else %}{{ order.number }}{% endif %}
     {% if qr_data_uri %}<div><img class="qr" src="{{ qr_data_uri }}" alt=""></div>{% endif %}</div>
 </div>
 <table>
@@ -53,7 +53,7 @@ td { padding: 2mm 0; border-bottom: 1px solid #eee; }
 <tbody>
 {% for line in lines %}
 <tr>
-  <td><strong>{{ line.product.name }}{% if line.variant %} - {{ line.variant.name }}{% endif %}</strong>
+  <td><strong>{% if line.description %}{{ line.description }}{% else %}{{ line.product.name }}{% if line.variant %} - {{ line.variant.name }}{% endif %}{% endif %}</strong>
     {% if line.beneficiary %}<div class="muted">For {{ line.beneficiary }}</div>{% endif %}
     {% if line.personalization_number or line.personalization_name %}<div class="muted">{{ line.personalization_number }} {{ line.personalization_name }}</div>{% endif %}</td>
   <td class="right">{{ line.quantity }}</td><td class="right">EUR {{ line.unit_price }}</td><td class="right">EUR {{ line.line_total }}</td>
@@ -63,6 +63,9 @@ td { padding: 2mm 0; border-bottom: 1px solid #eee; }
 <tr class="discount"><td colspan="3">Discount - {{ d.description }}{% if d.discount_type == "percentage" %} ({{ d.discount_amount|floatformat:"-2" }}%){% endif %}</td><td class="right">-EUR {{ d.amount }}</td></tr>
 {% endfor %}
 <tr class="total"><td colspan="3">Total</td><td class="right">EUR {{ order.total }}</td></tr>
+{% for v in vat_rows %}
+<tr class="muted"><td colspan="3">of which VAT {{ v.rate|floatformat:"-2" }}% (on EUR {{ v.net }})</td><td class="right">EUR {{ v.vat }}</td></tr>
+{% endfor %}
 </tbody>
 </table>
 {% if payments %}

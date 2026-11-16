@@ -25,6 +25,8 @@
 	// svelte-ignore state_referenced_locally
 	let dueDays = $state(String(data.settings.invoice_due_days));
 	// svelte-ignore state_referenced_locally
+	let vatMode = $state<string>(data.settings.vat_mode);
+	// svelte-ignore state_referenced_locally
 	let pickupText = $state(data.settings.pickup_instructions);
 	let numberingChanges = $state<NumberingChanges>({});
 	let creds = $state<Record<string, string>>({});
@@ -37,6 +39,7 @@
 			closedMessage = stored.closed_message;
 			provider = stored.payment_provider;
 			dueDays = String(stored.invoice_due_days);
+			vatMode = stored.vat_mode;
 			pickupText = stored.pickup_instructions;
 			creds = {};
 			clear = false;
@@ -45,13 +48,14 @@
 
 	const info = $derived(s.providers.find((p) => p.key === provider) ?? null);
 	const entered = $derived(Object.fromEntries(Object.entries(creds).filter(([, v]) => v.trim())));
-	const dirty = $derived(Object.keys(numberingChanges).length > 0 || shopOpen !== s.shop_open || closedMessage.trim() !== s.closed_message || provider !== s.payment_provider || Number(dueDays) !== s.invoice_due_days || pickupText.trim() !== s.pickup_instructions || Object.keys(entered).length > 0 || clear);
+	const dirty = $derived(Object.keys(numberingChanges).length > 0 || shopOpen !== s.shop_open || closedMessage.trim() !== s.closed_message || provider !== s.payment_provider || Number(dueDays) !== s.invoice_due_days || vatMode !== s.vat_mode || pickupText.trim() !== s.pickup_instructions || Object.keys(entered).length > 0 || clear);
 	const payload = $derived(
 		JSON.stringify({
 			shop_open: shopOpen,
 			closed_message: closedMessage.trim(),
 			payment_provider: provider,
 			invoice_due_days: Number(dueDays) || 0,
+			vat_mode: vatMode,
 			pickup_instructions: pickupText.trim(),
 			...(Object.keys(numberingChanges).length ? { numbering: numberingChanges } : {}),
 			// omit = keep, {} = clear, otherwise replace with what was typed
@@ -166,6 +170,14 @@
 				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ReceiptText size={16} class="shrink-0" aria-hidden="true" /> {t('shop.set.card.invoices')}</h2>
 				<div class="grid gap-3 md:grid-cols-2">
 					<Field label={t('shop.set.due_days')} type="number" min="0" max="365" bind:value={dueDays} error={errs.invoice_due_days} help={t('shop.set.due_days_help')} />
+				</div>
+				<div class="form-control w-full md:max-w-md">
+					<label class="label" for="set-vat"><span class="label-text">{t('shop.set.vat')}</span></label>
+					<select id="set-vat" class="select select-bordered w-full {errs.vat_mode ? 'select-error' : ''}" bind:value={vatMode} disabled={!s.can_edit_vat}>
+						<option value="off">{t('shop.set.vat_off')}</option>
+						<option value="included">{t('shop.set.vat_included')}</option>
+					</select>
+					{#if errs.vat_mode}<span class="mt-1 block text-xs text-error">{errs.vat_mode}</span>{:else}<span class="label-text-alt mt-1 block">{s.can_edit_vat ? t('shop.set.vat_help') : t('shop.set.vat_locked')}</span>{/if}
 				</div>
 			</section>
 		</form>

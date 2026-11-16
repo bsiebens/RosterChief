@@ -1,10 +1,12 @@
 """Club app endpoints scoped to the signed-in member and their children."""
 
 from datetime import timedelta
+from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from django.db.models import Count, Q
+from django.db.models import Count, DecimalField, Q, Sum, Value
+from django.db.models.functions import Coalesce
 from django.http import FileResponse, HttpResponse
 from django.utils import timezone
 from django_tenants.utils import get_public_schema_name
@@ -16,8 +18,8 @@ from api.routers.public_forms import _field as form_field
 from api.routers.public_news import public_news_item
 from events.models import Attendance, Event, EventAttachment, EventTask, GameTimeline, Lineup, LineupSelection, Season
 from events.services import attachments as attachment_svc
-from events.services import attendance, officiating_invitations, referees
-from events.services import follows, tasks as task_svc
+from events.services import attendance, follows, officiating_invitations, referees
+from events.services import tasks as task_svc
 from events.services.attachments import ALLOWED_EXTENSIONS, MAX_ATTACHMENT_BYTES
 from formbuilder.models import FormSend, Submission
 from formbuilder.services import audience
@@ -26,8 +28,11 @@ from members.models import ClubMembership, Member
 from members.services import access, invoice_access, memberships
 from members.services.errors import Invalid
 from news.services import member_news
-from registration.models import RegistrationBatch, RegistrationSettings
+from registration.models import RegistrationSettings
 from registration.services import installments, notifications
+from shop.models import Order, Payment
+from shop.services import charges as charge_svc
+from shop.services import invoices as invoice_svc
 from shop.services.invoices import PDFUnavailable
 from shop.services.orders import is_shop_open
 from sponsoring.models import Sponsor
@@ -59,6 +64,28 @@ def _viewer(request):
 
 def _people(viewer):
     return {member.pk: member for member in (viewer, *audience.managed_children(viewer))}
+
+
+def _charges(people):
+    """Sent, not cancelled charge invoices (a fine, a late fee) written for the viewer or a child they manage, newest first, with what was paid."""
+    paid = Coalesce(Sum("payments__amount", filter=Q(payments__status=Payment.PaymentStatus.CONFIRMED)), Value(Decimal("0")), output_field=DecimalField())
+    return (
+        Order.objects.filter(kind=Order.Kind.CHARGE, purchaser_id__in=people, invoice__isnull=False)
+        .exclude(fulfillment_status=Order.FulfillmentStatus.CANCELLED)
+        .select_related("invoice").prefetch_related("lines").annotate(paid=paid).order_by("-invoice__issued_at")
+    )  # fmt: skip
+
+
+def _charge(order, today):
+    lines = list(order.lines.all())
+    summary = lines[0].description if lines else ""
+    if len(lines) > 1:
+        summary = f"{summary} +{len(lines) - 1}"
+    invoice = order.invoice
+    return {
+        "id": order.pk, "number": invoice.number, "member_id": order.purchaser_id, "summary": summary, "total": str(order.total), "paid": str(order.paid),
+        "due": str(max(Decimal("0"), order.total - order.paid)), "due_date": invoice.due_date, "status": charge_svc.status_for(order, invoice, today),
+    }  # fmt: skip
 
 
 def _event_display(event):
@@ -205,6 +232,7 @@ def portal_home(request):
             for fee in fees
         ],
         "invoices": [{"id": invoice.pk, "number": invoice.invoice_number, "due": invoice.invoice_due_date} for invoice in invoices],
+        "charges": [_charge(order, timezone.localdate()) for order in _charges(people)[:20]],
         "payment_instructions": request.tenant.payment_instructions or "",
         "payments": sorted(
             ({"id": payment.pk, "member_id": fee.member_id, "season": fee.season.name, "amount": str(payment.amount), "method": payment.method, "paid_at": payment.paid_at} for fee in fees for payment in fee.payments.all()),
@@ -272,6 +300,22 @@ def portal_invoice(request, invoice_id: UUID):
     except PDFUnavailable:
         raise HttpError(503, "PDF rendering is not available on this server.") from None
     response = HttpResponse(pdf, content_type="application/pdf")
+    response["Cache-Control"] = "private, no-store"
+    return response
+
+
+@router.get("/charges/{order_id}.pdf", summary="The PDF of a charge invoice written for this person or a child they manage")
+def portal_charge_invoice(request, order_id: UUID):
+    viewer = _viewer(request)
+    order = _charges(_people(viewer)).filter(pk=order_id).first()
+    if order is None:
+        raise HttpError(404, "Not found.")
+    try:
+        pdf = invoice_svc.render_pdf(order.invoice)
+    except PDFUnavailable:
+        raise HttpError(503, "PDF rendering is not available on this server.") from None
+    response = HttpResponse(pdf, content_type="application/pdf")
+    response["Content-Disposition"] = f'inline; filename="{order.invoice.number}.pdf"'
     response["Cache-Control"] = "private, no-store"
     return response
 

@@ -56,7 +56,7 @@
 		<div class="grid content-start gap-5 xl:col-span-2">
 			<section class="card card-body card-hl gap-3">
 				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ClipboardList size={16} class="shrink-0" aria-hidden="true" /> {t('shop.card.details')}</h2>
-				<ProductFields bind:v categories={data.categories} seasons={data.seasons} teams={data.teams} {fields} {tried} />
+				<ProductFields bind:v vat={data.me?.shop_vat_mode === 'included'} categories={data.categories} seasons={data.seasons} teams={data.teams} {fields} {tried} />
 			</section>
 			<section class="card card-body card-hl gap-3">
 				<header class="grid gap-0.5">

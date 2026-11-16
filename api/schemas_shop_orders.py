@@ -298,6 +298,9 @@ class SettingsOut(Schema):
     credentials_configured: bool
     credential_fields: list[str]
     invoice_due_days: int
+    #: ``off`` (no VAT anywhere) or ``included`` (shop prices contain VAT and invoices show it). Changing it needs the whole-shop permission.
+    vat_mode: str = "off"
+    can_edit_vat: bool = False
     providers: list[ProviderOut]
 
 
@@ -310,6 +313,7 @@ class SettingsIn(Schema):
     payment_provider: str | None = None
     credentials: dict[str, str] | None = None
     invoice_due_days: int | None = Field(None, ge=0, le=365)
+    vat_mode: str | None = None
 
 
 class ShopStatusOut(Schema):

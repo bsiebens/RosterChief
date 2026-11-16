@@ -7,8 +7,8 @@
 	import { t } from '#lib/i18n.svelte.ts';
 	import { MANUAL_METHODS } from '#lib/shop-orders.ts';
 
-	/** The fields of the record / edit payment forms (posted as plain form fields). `locked`: only the note can change. */
-	let { v = $bindable(), errors = {}, edit = false, locked = false }: { v: PaymentDraft; errors?: Record<string, string>; edit?: boolean; locked?: boolean } = $props();
+	/** The fields of the record / edit payment forms (posted as plain form fields). `locked`: only the note can change. `noVoucher`: charge invoices cannot be paid with a voucher. */
+	let { v = $bindable(), errors = {}, edit = false, locked = false, noVoucher = false }: { v: PaymentDraft; errors?: Record<string, string>; edit?: boolean; locked?: boolean; noVoucher?: boolean } = $props();
 	const id = $props.id();
 </script>
 
@@ -17,7 +17,7 @@
 	<div class="form-control w-full">
 		<label class="label" for="{id}-method"><span class="label-text">{t('shop.pay.method')}</span></label>
 		<select id="{id}-method" name="method" class="select select-bordered w-full" bind:value={v.method} disabled={locked || edit}>
-			{#each MANUAL_METHODS as m (m)}<option value={m}>{t(`shop.pay.method.${m}`)}</option>{/each}
+			{#each MANUAL_METHODS.filter((m) => !(noVoucher && m === 'voucher')) as m (m)}<option value={m}>{t(`shop.pay.method.${m}`)}</option>{/each}
 			{#if v.method === 'online'}<option value="online">{t('shop.pay.method.online')}</option>{/if}
 		</select>
 		{#if errors.method}<span class="mt-1 block text-xs text-error">{errors.method}</span>{/if}

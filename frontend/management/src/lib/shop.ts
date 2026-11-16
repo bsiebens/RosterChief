@@ -44,6 +44,8 @@ export type ProductItem = {
 	description: string;
 	image_url: string | null;
 	price: string;
+	/** VAT contained in the price, in percent; only used while the shop's VAT setting is on. */
+	vat_rate?: string;
 	product_type: ProductType;
 	is_active: boolean;
 	is_public: boolean;
@@ -66,6 +68,8 @@ export type ProductIn = {
 	category_id: string | null;
 	description: string;
 	price: string;
+	/** VAT contained in the price, in percent (0 = none). */
+	vat_rate: string;
 	product_type: ProductType;
 	is_active: boolean;
 	is_public: boolean;
@@ -87,6 +91,7 @@ export const emptyProduct = (): ProductIn => ({
 	category_id: null,
 	description: '',
 	price: '',
+	vat_rate: '0',
 	product_type: 'merchandise',
 	is_active: true,
 	is_public: true,
@@ -106,6 +111,7 @@ export const productInOf = (p: ProductDetail): ProductIn => ({
 	category_id: p.category?.id ?? null,
 	description: p.description,
 	price: p.price,
+	vat_rate: String(Number(p.vat_rate ?? 0)),
 	product_type: p.product_type,
 	is_active: p.is_active,
 	is_public: p.is_public,
@@ -122,7 +128,8 @@ export const productInOf = (p: ProductDetail): ProductIn => ({
 });
 
 /** What goes to the API: the registration pricing only for membership products (anything else is sent cleared, so a type change drops it). */
-export const productPayload = (v: ProductIn) => {
+export const productPayload = (input: ProductIn) => {
+	const v = { ...input, vat_rate: input.vat_rate === '' ? '0' : input.vat_rate };
 	if (v.product_type === 'membership') {
 		return {
 			...v,

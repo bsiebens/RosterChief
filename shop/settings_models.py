@@ -33,6 +33,20 @@ class ShopSettings(UUIDModel):
     voucher_number_pattern = models.CharField(_("voucher number pattern"), max_length=40, default="VCH-{YYYY}-{NNNNN}")
     batch_number_pattern = models.CharField(_("production batch number pattern"), max_length=40, default="PB-{YYYY}-{NNNNN}", help_text=_("Placeholders {YYYY} {YY} {MM} and one sequence such as {NNNNN}; see shop.services.numbering."))
     closed_message = models.TextField(_("closed message"), blank=True, help_text=_("Shown to members while the shop is closed."))
+    class VatMode(models.TextChoices):
+        OFF = "off", _("No VAT")
+        #: Shop prices already contain VAT (what the member pays); invoices show how much of the price is VAT, per product rate.
+        INCLUDED = "included", _("Prices include VAT")
+
+    vat_mode = models.CharField(
+        _("VAT"), max_length=20, choices=VatMode.choices, default=VatMode.OFF,
+        help_text=_("Off: no VAT anywhere (product rates are ignored and hidden). Included: shop prices contain VAT and invoices show it, if the club has a VAT number. Charge invoices never carry VAT."),
+    )  # fmt: skip
+    # Reminders for overdue charge invoices (Finance -> Invoices).
+    charge_reminders_enabled = models.BooleanField(_("remind about overdue charges"), default=True)
+    charge_reminder_after_days = models.PositiveSmallIntegerField(_("first reminder after (days past due)"), default=3)
+    charge_reminder_repeat_days = models.PositiveSmallIntegerField(_("repeat every (days)"), default=7)
+    charge_reminder_max = models.PositiveSmallIntegerField(_("maximum reminders"), default=3)
 
     class Meta:
         verbose_name = _("shop settings")

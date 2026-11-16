@@ -323,6 +323,24 @@
 		</div>
 	</section>
 
+	{#if (data.home.charges ?? []).length}
+		<section class="card" aria-labelledby="charges-title">
+			<div class="card-h"><FileText size={17} aria-hidden="true" /><h2 id="charges-title">{t('portal.charges')}</h2></div>
+			<div class="divide-y divide-rule">
+				{#each (data.home.charges ?? []).filter((c) => !selected || c.member_id === selected) as charge (charge.id)}
+					<div class="flex flex-wrap items-center gap-3 px-4 py-3">
+						<div class="min-w-0 flex-1">
+							<p class="font-semibold text-ink">{charge.summary}</p>
+							<p class="text-xs text-muted">{charge.number}{people.length > 1 ? ` · ${memberName(charge.member_id)}` : ''}{charge.due_date ? ` · ${t('portal.due_by', { when: day(charge.due_date) })}` : ''}</p>
+						</div>
+						<span class="badge badge-sm {charge.status === 'paid' ? 'badge-success' : charge.status === 'overdue' ? 'badge-error' : 'badge-warn'}">{charge.status === 'paid' ? t('portal.charge_paid') : charge.status === 'overdue' ? t('portal.charge_overdue') : t('portal.fee_open', { amount: money(charge.due) })}</span>
+						<a class="btn btn-outline btn-sm md:h-8" href="/api/v1/portal/charges/{charge.id}.pdf" target="_blank" rel="noreferrer" aria-label={t('portal.invoice', { number: charge.number })}>PDF</a>
+					</div>
+				{/each}
+			</div>
+		</section>
+	{/if}
+
 	{#if data.home.invoices.length || (data.home.payments ?? []).length}
 		<section class="card" aria-labelledby="invoices-title">
 			<div class="card-h"><FileText size={17} aria-hidden="true" /><h2 id="invoices-title">{t('portal.pay_invoices')}</h2></div>

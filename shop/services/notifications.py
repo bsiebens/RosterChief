@@ -11,12 +11,17 @@ logger = logging.getLogger(__name__)
 
 CATEGORY = "shop"
 DEFAULT_LANGUAGE = "nl"
-EMAIL_KINDS = ("placed", "ready")  # these also get the club-branded email (shop.services.emails)
+EMAIL_KINDS = ("placed", "ready", "charge", "charge_reminder")  # these also get the club-branded email (shop.services.emails)
+#: Charge invoices (Finance -> Invoices): the member app's payments tab is where they are read.
+CHARGE_KINDS = ("charge", "charge_reminder", "charge_cancelled")
 
 TEXTS = {
     "nl": {
         "placed": ("Bestelling {number} geplaatst", "Je bestelling is geregistreerd. Totaal: EUR {total}."),
         "ready": ("Bestelling {number} ligt klaar", "Je bestelling kan worden opgehaald. {instructions}"),
+        "charge": ("Factuur {number}", "Je hebt een factuur ontvangen: {description}. Totaal: EUR {total}. Te betalen voor {due}."),
+        "charge_reminder": ("Herinnering: factuur {number} is vervallen", "Factuur {number} (EUR {total}) moest betaald zijn op {due} en staat nog open."),
+        "charge_cancelled": ("Factuur {number} geannuleerd", "Deze factuur werd geannuleerd. Je hoeft niets te betalen."),
         "cancelled": ("Bestelling {number} geannuleerd", "Je bestelling werd geannuleerd."),
         "payment_received": ("Betaling ontvangen voor {number}", "Bedankt, we hebben je betaling ontvangen."),
         "production": ("Bestelling {number} is in productie", "Je bestelling werd naar de leverancier gestuurd en wordt nu gemaakt: {items}. We verwittigen je zodra hij klaarligt."),
@@ -29,6 +34,9 @@ TEXTS = {
     "en": {
         "placed": ("Order {number} placed", "Your order is registered. Total: EUR {total}."),
         "ready": ("Order {number} is ready for pickup", "Your order is ready to collect. {instructions}"),
+        "charge": ("Invoice {number}", "You received an invoice: {description}. Total: EUR {total}. Please pay by {due}."),
+        "charge_reminder": ("Reminder: invoice {number} is overdue", "Invoice {number} (EUR {total}) was due on {due} and is still open."),
+        "charge_cancelled": ("Invoice {number} cancelled", "This invoice was cancelled. You do not need to pay it."),
         "cancelled": ("Order {number} cancelled", "Your order was cancelled."),
         "payment_received": ("Payment received for {number}", "Thank you, we received your payment."),
         "production": ("Order {number} is in production", "Your order was sent to the supplier and is now being made: {items}. We will let you know when it is ready."),
@@ -37,6 +45,9 @@ TEXTS = {
     "fr": {
         "placed": ("Commande {number} enregistree", "Votre commande est enregistree. Total : EUR {total}."),
         "ready": ("Commande {number} prete", "Votre commande peut etre retiree. {instructions}"),
+        "charge": ("Facture {number}", "Vous avez recu une facture : {description}. Total : EUR {total}. A payer avant le {due}."),
+        "charge_reminder": ("Rappel : la facture {number} est echue", "La facture {number} (EUR {total}) etait a payer le {due} et reste ouverte."),
+        "charge_cancelled": ("Facture {number} annulee", "Cette facture a ete annulee. Vous n'avez rien a payer."),
         "cancelled": ("Commande {number} annulee", "Votre commande a ete annulee."),
         "payment_received": ("Paiement recu pour {number}", "Merci, nous avons recu votre paiement."),
         "production": ("Commande {number} en production", "Votre commande a ete envoyee au fournisseur et est en cours de fabrication : {items}. Nous vous previendrons quand elle sera prete."),
@@ -87,14 +98,17 @@ def send(kind: str, order, extra: dict | None = None) -> int:
         own = Member.objects.filter(user=user).values_list("language", flat=True).first() if child else member.language
         title, body = TEXTS[_lang(own or language)][kind]
         values = {"number": order.number, "total": order.total, "instructions": order.pickup_instructions, "items": (extra or {}).get("items", "")}
+        if kind in CHARGE_KINDS:
+            values.update(_charge_values(order))
         title, body = title.format(**values), body.format(**values).strip()
-        if kind in ("placed", "ready") and order.payment_status != "paid":
+        if kind in ("placed", "ready", "charge", "charge_reminder") and order.payment_status != "paid":
             how_to_pay = _how_to_pay(extra)
             if how_to_pay:
                 body = f"{body}\n\n{PAYMENT_LABEL[_lang(own or language)]}\n{how_to_pay}"
         if child is not None:
             title = recipients.on_behalf_title(title, child)
-        inbox.notify(user, club, title=title, body=body, href=f"/shop/orders/{order.pk}", push=True, category=CATEGORY)
+        href = "/parent?tab=payments" if kind in CHARGE_KINDS else f"/shop/orders/{order.pk}"
+        inbox.notify(user, club, title=title, body=body, href=href, push=True, category=CATEGORY)
         mail_to.append((user, child, _lang(own or language)))
         told += 1
     if kind in EMAIL_KINDS:
@@ -102,6 +116,22 @@ def send(kind: str, order, extra: dict | None = None) -> int:
             mail_to.append((None, None, language))
         _email(kind, order, extra, mail_to)
     return told
+
+
+def _charge_values(order) -> dict:
+    """What the charge texts name: the invoice number (not the internal order number), the first line, the due date."""
+    from shop.models import Invoice
+
+    invoice = Invoice.objects.filter(order=order).first()
+    line = order.lines.order_by("created").first()
+    description = (line.description if line else "") or ""
+    if order.lines.count() > 1:
+        description = f"{description} +{order.lines.count() - 1}"
+    return {
+        "number": invoice.number if invoice else order.number,
+        "description": description,
+        "due": invoice.due_date.strftime("%d/%m/%Y") if invoice and invoice.due_date else "",
+    }
 
 
 def _email(kind: str, order, extra: dict | None, mail_to: list) -> None:

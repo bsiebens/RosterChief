@@ -77,8 +77,10 @@ def _price(spec: LineSpec) -> Decimal:
 
 def _make_line(order, spec: LineSpec) -> OrderLine:
     unit = _price(spec)
+    # The product's VAT rate is kept on the line only while the shop's VAT setting is on; it is fixed from here on.
+    vat_rate = spec.product.vat_rate if ShopSettings.current().vat_mode == ShopSettings.VatMode.INCLUDED else Decimal("0")
     line = OrderLine.objects.create(
-        order=order, product=spec.product, variant=spec.variant, quantity=spec.quantity, unit_price=unit, line_total=unit * spec.quantity,
+        order=order, product=spec.product, variant=spec.variant, quantity=spec.quantity, unit_price=unit, line_total=unit * spec.quantity, vat_rate=vat_rate,
         beneficiary=spec.beneficiary, team=spec.team, personalization_number=spec.personalization_number[:20], personalization_name=spec.personalization_name[:100],
     )  # fmt: skip
     if not production.is_production_line(line) and not spec.product.inventory_managed:

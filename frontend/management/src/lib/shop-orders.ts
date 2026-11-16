@@ -166,7 +166,7 @@ export type NumberingState = { kind: string; pattern: string; default_pattern: s
 export type NumberingPlaceholder = { token: string; meaning: string };
 export type NumberingPreview = { valid: boolean; message: string; number: string; resets: string; scope_label: string };
 export type NumberingChanges = Record<string, { pattern?: string; next?: number }>;
-export type ShopSettings = { can_edit_invoice_numbering: boolean; numbering: NumberingState[]; numbering_placeholders: NumberingPlaceholder[]; shop_open: boolean; closed_message: string; payment_provider: string; credentials_configured: boolean; credential_fields: string[]; invoice_due_days: number; pickup_instructions: string; club_payment_instructions: string; providers: ProviderInfo[] };
+export type ShopSettings = { can_edit_invoice_numbering: boolean; numbering: NumberingState[]; numbering_placeholders: NumberingPlaceholder[]; shop_open: boolean; closed_message: string; payment_provider: string; credentials_configured: boolean; credential_fields: string[]; invoice_due_days: number; pickup_instructions: string; club_payment_instructions: string; vat_mode: 'off' | 'included'; can_edit_vat: boolean; providers: ProviderInfo[] };
 
 export type PickupOrder = {
 	id: string;

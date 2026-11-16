@@ -22,6 +22,7 @@ CATALOG: dict[str, Perm] = {
         Perm("members.manage_members", "Manage members", admin=True),
         Perm("admin.manage_settings", "Manage settings", admin=True),
         Perm("registration.manage_finance", "Manage registration finance", admin=True),
+        Perm("finance.manage_charges", "Manage charge invoices (fines and other costs)", admin=True),
         Perm("sponsoring.manage_sponsors", "Manage sponsors", admin=True),
         Perm("evaluations.manage_evaluations", "Manage evaluations", feature="evaluations"),
         Perm("evaluations.execute_evaluations", "Execute and view evaluations", feature="evaluations"),

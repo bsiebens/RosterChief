@@ -111,6 +111,8 @@ class Product(UUIDModel):
         MEMBERSHIP = "membership", _("Membership")
         EVENT_FEE = "event_fee", _("Event fee")
         MERCHANDISE = "merchandise", _("Merchandise")
+        #: The single hidden product behind the free-text lines of a charge invoice (a fine, a late fee); never offered in the shop.
+        CHARGE = "charge", _("Charge")
 
     class RegistrantDiscountScope(models.TextChoices):
         PER_PERSON = "per_person", _("Per person")
@@ -121,6 +123,8 @@ class Product(UUIDModel):
     category = models.ForeignKey(ProductCategory, on_delete=models.SET_NULL, related_name="products", verbose_name=_("category"), blank=True, null=True)
     description = models.TextField(_("description"), blank=True)
     price = models.DecimalField(_("price"), max_digits=10, decimal_places=2, default=0)
+    #: VAT contained in the price, in percent (the price is what the member pays). 0 means none. Shown on the invoice when the club has a VAT number.
+    vat_rate = models.DecimalField(_("VAT rate (%)"), max_digits=5, decimal_places=2, default=0)
     product_type = models.CharField(_("product type"), max_length=255, choices=ProductType.choices, default=ProductType.MERCHANDISE)
 
     is_active = models.BooleanField(_("is active?"), default=True)
@@ -266,7 +270,15 @@ class Order(UUIDModel):
         DELIVERED = "delivered", _("Delivered")
         CANCELLED = "cancelled", _("Cancelled")
 
+    class Kind(models.TextChoices):
+        SHOP = "shop", _("Shop order")
+        #: An invoice staff write for an amount that is not a shop item (a fine, a late fee). A draft until it is sent: no invoice yet.
+        CHARGE = "charge", _("Charge")
+
     number = models.CharField(_("number"), max_length=255, blank=True)
+    kind = models.CharField(_("kind"), max_length=20, choices=Kind.choices, default=Kind.SHOP, db_index=True)
+    #: Charges only: the due date the invoice will get when it is sent.
+    due_date = models.DateField(_("due date"), blank=True, null=True)
     purchaser = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="shop_orders", verbose_name=_("purchaser"))
     payment_status = models.CharField(_("payment status"), max_length=255, choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
     fulfillment_status = models.CharField(_("fulfillment status"), max_length=255, choices=FulfillmentStatus.choices, default=FulfillmentStatus.NOT_READY)
@@ -341,9 +353,13 @@ class OrderLine(UUIDModel):
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="order_lines", verbose_name=_("product"))
     variant = models.ForeignKey(ProductVariant, on_delete=models.PROTECT, related_name="order_lines", verbose_name=_("variant"), blank=True, null=True)
 
+    #: Charges: what the line is for. Replaces the product's name on the invoice.
+    description = models.CharField(_("description"), max_length=255, blank=True)
     quantity = models.PositiveSmallIntegerField(_("quantity"), default=1)
     unit_price = models.DecimalField(_("unit price"), max_digits=10, decimal_places=2)
     line_total = models.DecimalField(_("line total"), max_digits=10, decimal_places=2)
+    #: The product's VAT rate when the line was made (percent, contained in the price); fixed so later changes never touch issued invoices.
+    vat_rate = models.DecimalField(_("VAT rate (%)"), max_digits=5, decimal_places=2, default=0)
 
     beneficiary = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="shop_order_lines", verbose_name=_("beneficiary"), blank=True, null=True)
     team = models.ForeignKey(Team, on_delete=models.PROTECT, related_name="shop_order_lines", verbose_name=_("team"), blank=True, null=True)
@@ -568,6 +584,9 @@ class Invoice(UUIDModel):
     issued_at = models.DateTimeField(_("issued at"), auto_now_add=True)
     due_date = models.DateField(_("due date"), blank=True, null=True)
     billing_snapshot = models.JSONField(_("billing snapshot"), blank=True, null=True)
+    #: Overdue reminders sent for a charge invoice, and when the last one went out.
+    reminders_sent = models.PositiveSmallIntegerField(_("reminders sent"), default=0)
+    last_reminder_at = models.DateTimeField(_("last reminder at"), blank=True, null=True)
 
     class Meta:
         verbose_name = _("invoice")

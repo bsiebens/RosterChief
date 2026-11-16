@@ -16,7 +16,7 @@ from shop.settings_models import ShopSettings
 def waiting_orders():
     production = OrderLine.objects.filter(order=OuterRef("pk"), product__product_type=Product.ProductType.MERCHANDISE, product__inventory_managed=False)
     return (
-        Order.objects.filter(fulfillment_status=Order.FulfillmentStatus.NOT_READY)
+        Order.objects.filter(kind=Order.Kind.SHOP, fulfillment_status=Order.FulfillmentStatus.NOT_READY)
         .annotate(has_production=Exists(production))
         .filter(Q(has_production=False) | Q(production_status=ProductionStatus.RECEIVED))
         .select_related("purchaser")

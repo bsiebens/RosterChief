@@ -59,6 +59,8 @@ export type ParentHome = {
 	sponsors: { id: string; name: string; url: string | null; logo_url: string | null }[];
 	fees: { member_id: string; season: string; paid: string; balance: string; next_installment: { due_date: string; remaining: string; late: boolean } | null }[];
 	invoices: { id: string; number: string; due: string | null }[];
+	/** Invoices the club wrote for an amount that is not a membership fee or a shop item (a fine, a late fee): sent, not cancelled. */
+	charges?: { id: string; number: string; member_id: string; summary: string; total: string; paid: string; due: string; due_date: string | null; status: 'sent' | 'partially_paid' | 'overdue' | 'paid' }[];
 	/** How the club wants fees paid (its own text), the latest payments received and the forms already sent in. */
 	payment_instructions?: string;
 	payments?: { id: string; member_id: string; season: string; amount: string; method: string; paid_at: string }[];

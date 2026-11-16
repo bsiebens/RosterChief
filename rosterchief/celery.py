@@ -43,5 +43,6 @@ app.conf.beat_schedule = {
     "events-refresh-fixtures": {"task": "events.refresh_fixtures", "schedule": crontab(hour=6, minute=15, day_of_week=1)},  # Mondays
     "events-refresh-standings": {"task": "events.refresh_standings", "schedule": crontab(hour=4, minute=30)},
     "members-send-requirement-reminders": {"task": "members.send_requirement_reminders", "schedule": crontab(hour=7, minute=30)},  # daily: documents expiring / expired / missing
+    "shop-send-charge-reminders": {"task": "shop.send_charge_reminders", "schedule": crontab(hour=8, minute=0)},  # daily: overdue charge invoices
     "billing-archive-overdue": {"task": "billing.archive_overdue_clubs", "schedule": crontab(hour=6, minute=0)},
 }

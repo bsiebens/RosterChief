@@ -23,7 +23,9 @@ from rosterchief.mail import send_message
 
 logger = logging.getLogger(__name__)
 
-KINDS = ("placed", "ready")
+KINDS = ("placed", "ready", "charge", "charge_reminder")
+#: The kinds that carry the invoice PDF and the payment instructions.
+INVOICE_KINDS = ("ready", "charge", "charge_reminder")
 CATEGORY = "shop"
 DEFAULT_PRIMARY, DEFAULT_SECONDARY = "#0f172a", "#e4002b"
 
@@ -43,6 +45,24 @@ TEXTS = {
             "next_title": "Pickup",
             "next": "",
             "invoice": "The invoice is attached to this email.",
+        },
+        "charge": {
+            "subject": "{club}: invoice {number}",
+            "heading": "You have a new invoice",
+            "intro": "{club} sent you invoice {number}. Please pay by {due_date}.",
+            "next_title": "",
+            "next": "",
+            "invoice": "The invoice is attached to this email.",
+            "on_behalf": "This message is for {child}'s invoice.",
+        },
+        "charge_reminder": {
+            "subject": "{club}: reminder, invoice {number} is overdue",
+            "heading": "Invoice overdue",
+            "intro": "Invoice {number} was due on {due_date} and is still open. Please pay as soon as you can. If you have already paid, thank you, and please ignore this message.",
+            "next_title": "",
+            "next": "",
+            "invoice": "The invoice is attached to this email.",
+            "on_behalf": "This message is for {child}'s invoice.",
         },
         "hello": "Hi {name},",
         "on_behalf": "This message is for {child}'s order.",
@@ -75,6 +95,24 @@ TEXTS = {
             "next": "",
             "invoice": "De factuur zit als bijlage bij deze e-mail.",
         },
+        "charge": {
+            "subject": "{club}: factuur {number}",
+            "heading": "Je hebt een nieuwe factuur",
+            "intro": "{club} stuurde je factuur {number}. Betaal graag voor {due_date}.",
+            "next_title": "",
+            "next": "",
+            "invoice": "De factuur zit als bijlage bij deze e-mail.",
+            "on_behalf": "Dit bericht gaat over de factuur van {child}.",
+        },
+        "charge_reminder": {
+            "subject": "{club}: herinnering, factuur {number} is vervallen",
+            "heading": "Factuur vervallen",
+            "intro": "Factuur {number} moest betaald zijn op {due_date} en staat nog open. Betaal graag zo snel mogelijk. Heb je al betaald, dan mag je dit bericht negeren.",
+            "next_title": "",
+            "next": "",
+            "invoice": "De factuur zit als bijlage bij deze e-mail.",
+            "on_behalf": "Dit bericht gaat over de factuur van {child}.",
+        },
         "hello": "Hallo {name},",
         "on_behalf": "Dit bericht gaat over de bestelling van {child}.",
         "order": "Bestelling",
@@ -105,6 +143,24 @@ TEXTS = {
             "next_title": "Retrait",
             "next": "",
             "invoice": "La facture est jointe à cet e-mail.",
+        },
+        "charge": {
+            "subject": "{club} : facture {number}",
+            "heading": "Vous avez une nouvelle facture",
+            "intro": "{club} vous a envoyé la facture {number}. Merci de payer avant le {due_date}.",
+            "next_title": "",
+            "next": "",
+            "invoice": "La facture est jointe à cet e-mail.",
+            "on_behalf": "Ce message concerne la facture de {child}.",
+        },
+        "charge_reminder": {
+            "subject": "{club} : rappel, la facture {number} est échue",
+            "heading": "Facture échue",
+            "intro": "La facture {number} était à payer le {due_date} et reste ouverte. Merci de payer dès que possible. Si vous avez déjà payé, veuillez ignorer ce message.",
+            "next_title": "",
+            "next": "",
+            "invoice": "La facture est jointe à cet e-mail.",
+            "on_behalf": "Ce message concerne la facture de {child}.",
         },
         "hello": "Bonjour {name},",
         "on_behalf": "Ce message concerne la commande de {child}.",
@@ -172,11 +228,12 @@ def build_context(
     name: str = "",
     on_behalf_of: str = "",
     has_invoice: bool = False,
+    due_date: str = "",
     logo_url: str | None = None,
 ) -> dict:
     lang = lang if lang in TEXTS else "en"
     texts = TEXTS[lang]
-    values = {"club": club.name, "number": number, "name": name, "child": on_behalf_of}
+    values = {"club": club.name, "number": number, "name": name, "child": on_behalf_of, "due_date": due_date}
     t = {k: v.format(**values) for k, v in texts.items() if isinstance(v, str)}
     t.update({k: v.format(**values) for k, v in texts[kind].items()})
     return {
@@ -214,7 +271,7 @@ def _order_data(order) -> dict:
         personal = " ".join(x for x in (ln.personalization_number, ln.personalization_name) if x)
         lines.append(
             {
-                "description": ln.product.name + (f" - {ln.variant.name}" if ln.variant else ""),
+                "description": ln.description or ln.product.name + (f" - {ln.variant.name}" if ln.variant else ""),
                 "quantity": ln.quantity,
                 "line_total": ln.line_total,
                 "personalization": personal,
@@ -224,7 +281,7 @@ def _order_data(order) -> dict:
     discounts = [{"description": d.description or str(d.discount), "amount": d.amount} for d in order.applied_discounts.select_related("discount")]
     paid = payments.amount_paid(order)
     return {
-        "number": order.number,
+        "number": _display_number(order),
         "lines": lines,
         "discounts": discounts,
         "total": order.total,
@@ -232,6 +289,23 @@ def _order_data(order) -> dict:
         "due": payments.amount_due(order),
         "is_paid": order.payment_status == "paid",
     }
+
+
+def _display_number(order) -> str:
+    """A charge is known by its invoice number; the internal order number is for shop orders."""
+    from shop.models import Invoice
+
+    if order.kind == "charge":
+        return Invoice.objects.filter(order=order).values_list("number", flat=True).first() or order.number
+    return order.number
+
+
+def _due_date(order) -> str:
+    """The invoice's due date as dd/mm/yyyy, or empty when it has none."""
+    from shop.models import Invoice
+
+    due = Invoice.objects.filter(order=order).values_list("due_date", flat=True).first()
+    return due.strftime("%d/%m/%Y") if due else ""
 
 
 def _invoice_attachment(order):
@@ -264,7 +338,8 @@ def send_order_emails(kind: str, order, extra: dict | None, entries: list[tuple[
     member = order.purchaser
     data = _order_data(order)
     how_to_pay = notifications._how_to_pay(extra) if not data["is_paid"] else ""
-    attachment = _invoice_attachment(order) if kind == "ready" else None
+    attachment = _invoice_attachment(order) if kind in INVOICE_KINDS else None
+    due_date = _due_date(order)
     seen, sent = set(), 0
     for user, child, lang in entries:
         address = (user.email if user is not None else "") or (member.contact_email if child is None else "")
@@ -285,7 +360,7 @@ def send_order_emails(kind: str, order, extra: dict | None, entries: list[tuple[
         try:
             ctx = build_context(
                 club, kind, lang, **data, how_to_pay=how_to_pay, pickup_instructions=(order.pickup_instructions or "").strip(), name=name,
-                on_behalf_of=recipient.first_name if child is not None else "", has_invoice=attachment is not None,
+                on_behalf_of=recipient.first_name if child is not None else "", has_invoice=attachment is not None, due_date=due_date,
             )  # fmt: skip
             subject, text, html = render(ctx)
             message = EmailMultiAlternatives(subject, text, to=[address])

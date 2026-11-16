@@ -16,7 +16,7 @@ from shop.models import Discount, DiscountType, InventoryMovement, Product, Prod
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 IMAGE_FORMATS = {"JPEG": "jpg", "PNG": "png", "WEBP": "webp"}
 PRODUCT_FIELDS = (
-    "name", "category", "description", "price", "product_type", "is_active", "is_public", "personalization_enabled", "inventory_managed",
+    "name", "category", "description", "price", "vat_rate", "product_type", "is_active", "is_public", "personalization_enabled", "inventory_managed",
     "season", "early_bird_discount_type", "early_bird_discount_amount", "early_bird_deadline", "registrant_discount_scope", "team",
 )  # fmt: skip
 
@@ -79,7 +79,8 @@ def delete_category(actor, category) -> None:
 
 
 def products_queryset():
-    return Product.objects.select_related("category", "season", "team").prefetch_related("variants__team", "images", "attachments", "registrant_tiers")
+    # The hidden product behind charge invoices (shop.services.charges) is not part of the catalogue.
+    return Product.objects.exclude(product_type=Product.ProductType.CHARGE).select_related("category", "season", "team").prefetch_related("variants__team", "images", "attachments", "registrant_tiers")
 
 
 def next_ordering_window(product, today=None):
@@ -109,6 +110,10 @@ def _ordering_windows(windows):
 
 def _validate_product(product):
     membership = product.product_type == Product.ProductType.MEMBERSHIP
+    if product.product_type == Product.ProductType.CHARGE:
+        raise Invalid("Choose a product type.", {"product_type": ["Not a valid product type."]})
+    if product.vat_rate is not None and not (0 <= product.vat_rate <= 100):
+        raise Invalid("Invalid VAT rate.", {"vat_rate": ["Enter a percentage between 0 and 100."]})
     if product.team_id and not team_allowed(product):
         raise Invalid(TEAM_ERROR, {"team_id": [TEAM_ERROR]})
     _check_price(product.price, allow_negative=membership)

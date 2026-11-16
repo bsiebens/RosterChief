@@ -85,6 +85,7 @@ class ProductItem(Schema):
     description: str
     image_url: str | None
     price: Money
+    vat_rate: Decimal = Decimal("0")
     product_type: str
     is_active: bool
     is_public: bool
@@ -164,6 +165,8 @@ class ProductIn(Schema):
     category_id: uuid.UUID | None = None
     description: str = ""
     price: Decimal = Field(max_digits=10, decimal_places=2)
+    #: VAT contained in the price, in percent. Only used while the shop's VAT setting is on.
+    vat_rate: Decimal = Field(Decimal("0"), ge=0, le=100, max_digits=5, decimal_places=2)
     product_type: str = "merchandise"
     is_active: bool = True
     is_public: bool = True
@@ -185,6 +188,7 @@ class ProductPatch(Schema):
     category_id: uuid.UUID | None = None
     description: str | None = None
     price: Decimal | None = Field(None, max_digits=10, decimal_places=2)
+    vat_rate: Decimal | None = Field(None, ge=0, le=100, max_digits=5, decimal_places=2)
     product_type: str | None = None
     is_active: bool | None = None
     ordering_windows: list[OrderingWindow] | None = Field(None, max_length=100)

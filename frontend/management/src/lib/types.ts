@@ -31,6 +31,7 @@ export type Me = {
 	can_manage_members: boolean;
 	/** registration.manage_finance (or the Owner role): the billing review of registrations, their invoices and the payments against them. */
 	can_manage_finance: boolean;
+	can_manage_charges: boolean;
 	can_manage_sponsors: boolean;
 	/** admin.manage_settings (or the Owner role): club settings, levels, positions, pools, creating and ordering teams. */
 	can_manage_settings: boolean;
@@ -53,6 +54,8 @@ export type Me = {
 	can_manage_shop_orders: boolean;
 	can_manage_shop_discounts: boolean;
 	can_manage_shop_invoices: boolean;
+	/** The shop's VAT setting: 'included' while shop prices contain VAT, otherwise 'off'. */
+	shop_vat_mode: string;
 	/** Teams where the user holds a management position this season: they may edit those teams. */
 	managed_team_ids: string[];
 	/** Groups the user administers: they may schedule events for them and manage their people. */

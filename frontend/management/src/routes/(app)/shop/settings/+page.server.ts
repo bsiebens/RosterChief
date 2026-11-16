@@ -11,7 +11,7 @@ export const load: PageServerLoad = async ({ fetch, parent }) => {
 	return { settings: res.data! };
 };
 
-type Payload = { numbering?: Record<string, { pattern?: string; next?: number }>; shop_open: boolean; closed_message: string; payment_provider: string; invoice_due_days: number; pickup_instructions: string; credentials?: Record<string, string> };
+type Payload = { numbering?: Record<string, { pattern?: string; next?: number }>; shop_open: boolean; closed_message: string; payment_provider: string; invoice_due_days: number; vat_mode?: string; pickup_instructions: string; credentials?: Record<string, string> };
 
 export const actions: Actions = {
 	save: async ({ request, fetch }) => {

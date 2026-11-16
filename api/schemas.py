@@ -45,6 +45,7 @@ class MeOut(Schema):
     can_manage_members: bool = False
     can_manage_settings: bool = False
     can_manage_finance: bool = False
+    can_manage_charges: bool = False
     can_manage_sponsors: bool = False
     can_execute_evaluations: bool = False
     can_manage_evaluations: bool = False
@@ -58,6 +59,7 @@ class MeOut(Schema):
     can_manage_shop_orders: bool = False
     can_manage_shop_discounts: bool = False
     can_manage_shop_invoices: bool = False
+    shop_vat_mode: str = "off"
     managed_team_ids: list[str] = []
     admin_group_ids: list[str] = []
     features: list[str]

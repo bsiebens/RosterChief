@@ -6,7 +6,7 @@
 	import { PRODUCT_TYPES, type Category, type ProductIn } from '#lib/shop.ts';
 
 	/** Name, category, price, type, description and the switches of a product (add page and editor). */
-	let { v = $bindable(), categories, seasons = [], teams = [], fields = {}, tried = false }: { v: ProductIn; categories: Category[]; seasons?: { id: string; name: string }[]; teams?: { id: string; name: string }[]; fields?: Record<string, string>; tried?: boolean } = $props();
+	let { v = $bindable(), categories, seasons = [], teams = [], fields = {}, tried = false, vat = false }: { v: ProductIn; vat?: boolean; categories: Category[]; seasons?: { id: string; name: string }[]; teams?: { id: string; name: string }[]; fields?: Record<string, string>; tried?: boolean } = $props();
 	const uid = $props.id();
 	const nameErr = $derived(fields.name || (tried && !v.name.trim() ? t('shop.product.err.name') : ''));
 	// Only membership products may be negative: that is a credit on a registration (e.g. for volunteers).
@@ -26,6 +26,7 @@
 	<div class="grid gap-4 md:grid-cols-2">
 		<Field label={t('shop.product.f.name')} bind:value={v.name} error={nameErr} required maxlength={255} />
 		<Field label={t('shop.product.f.price')} type="number" step="0.01" min={membership ? undefined : '0'} inputmode="decimal" bind:value={v.price} error={priceErr} help={membership ? t('shop.product.price_credit_hint') : undefined} required />
+		{#if vat}<Field label={t('shop.product.f.vat')} type="number" step="0.01" min="0" max="100" inputmode="decimal" bind:value={v.vat_rate} error={fields.vat_rate} help={t('shop.product.f.vat_help')} />{/if}
 		<div class="form-control w-full">
 			<label class="label" for="{uid}-cat"><span class="label-text">{t('shop.product.f.category')}</span></label>
 			<select id="{uid}-cat" class="select select-bordered w-full" value={v.category_id ?? ''} onchange={(e) => (v.category_id = e.currentTarget.value || null)}>

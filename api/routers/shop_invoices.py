@@ -42,7 +42,7 @@ def _detail(inv: Invoice) -> dict:
 
 
 def _get(invoice_id) -> Invoice:
-    inv = Invoice.objects.select_related("order__purchaser").filter(pk=invoice_id).first()
+    inv = Invoice.objects.select_related("order__purchaser").filter(pk=invoice_id, order__kind=Order.Kind.SHOP).first()
     if inv is None:
         raise HttpError(404, "Not found.")
     return inv
@@ -54,7 +54,7 @@ def list_invoices(
     purchaser_id: uuid.UUID | None = None, limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
 ):  # fmt: skip
     _gate(request)
-    qs = Invoice.objects.select_related("order__purchaser").order_by("-issued_at")
+    qs = Invoice.objects.filter(order__kind=Order.Kind.SHOP).select_related("order__purchaser").order_by("-issued_at")
     if q:
         qs = qs.filter(Q(number__icontains=q) | Q(order__number__icontains=q) | Q(order__purchaser__first_name__icontains=q) | Q(order__purchaser__last_name__icontains=q))
     if issued_from:
@@ -108,7 +108,7 @@ def recreate_pdf(request, invoice_id: uuid.UUID):
 @router.post("/orders/{order_id}/invoice", response={201: InvoiceItemOut}, summary="Issue the invoice for an order", operation_id="create_shop_invoice")
 def create(request, order_id: uuid.UUID, payload: InvoiceCreateIn):
     _gate(request)
-    order = Order.objects.filter(pk=order_id).first()
+    order = Order.objects.filter(pk=order_id, kind=Order.Kind.SHOP).first()
     if order is None:
         raise HttpError(404, "Not found.")
     inv = svc.create_invoice(order, due_date=payload.due_date)
@@ -118,7 +118,7 @@ def create(request, order_id: uuid.UUID, payload: InvoiceCreateIn):
 @router.get("/orders/{order_id}/invoice", response=InvoiceItemOut, summary="The invoice of an order", operation_id="get_shop_order_invoice")
 def for_order(request, order_id: uuid.UUID):
     _gate(request)
-    inv = Invoice.objects.select_related("order__purchaser").filter(order_id=order_id).first()
+    inv = Invoice.objects.select_related("order__purchaser").filter(order_id=order_id, order__kind=Order.Kind.SHOP).first()
     if inv is None:
         raise HttpError(404, "Not found.")
     return _item(inv)

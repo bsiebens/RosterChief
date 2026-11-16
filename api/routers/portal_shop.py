@@ -158,7 +158,7 @@ def shop_catalog(request):
 
 
 def _orders(buyer):
-    return Order.objects.filter(purchaser=buyer).select_related("invoice").prefetch_related(
+    return Order.objects.filter(purchaser=buyer, kind=Order.Kind.SHOP).select_related("invoice").prefetch_related(
         Prefetch("lines", queryset=OrderLine.objects.select_related("product", "variant")), "applied_discounts"
     ).order_by("-created", "-id")
 
