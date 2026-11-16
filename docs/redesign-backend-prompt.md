@@ -14,17 +14,6 @@ Finance totals (`GET /finance/summary`) read live data. `SampleBadge.svelte` sta
 
 ## 2. Mockup features the API cannot supply yet
 
-### 2.1 Members list: Team and Docs columns
-The mockup's members list shows the member's team(s) and an onboarding/documents state. `GET /members` returns neither. Add to each
-row: `teams` (current season, short names), and `requirements` summary: counts of `missing`, `pending` (handed in, waiting for review),
-`expiring_soon`, `expired` (see `members.services.onboarding.item_for` / `ChecklistItem.display`). Keep the list fast (prefetch, no N+1).
-
-### 2.2 Sign-ups: per-requirement decision column
-The mockup's sign-ups page has a checks column (Approve / Decline / Request / Compare). The live flow has Place, Link, Approve,
-Cancel and a requirements dialog; that stays. If the product wants per-requirement decisions on a registration (approve a document,
-decline it with a reason, request a new one), the registration model needs per-requirement review state and a reason; reuse
-`MemberRequirementStatus.is_pending_review` and the approve/reopen services in `members/services/onboarding.py`.
-
 ### 2.3 Line-up lines in notifications and the member app
 Line-up lines (sport-level feature, `Sport.lineup_slots_enabled` + `lineup_template`, `LineupSlotAssignment`) are informational only.
 A slot holds one player but a player can be in several slots (regular lines plus power play, penalty kill, extra attacker); un-picking
@@ -40,9 +29,8 @@ read-only phone list (answer pills, counts) would be nicer; no backend work need
 
 ## 3. Behaviour gaps and decisions to review
 
-- **Early renewal of expiring requirements.** A requirement that is `expiring_soon` is locked for the member (only expired/missing ones
-  can be handed in again). Decide whether members may hand in a renewal early; `submit_as` in `members/services/onboarding.py` is the
-  place.
+- **Early renewal keeps one file.** A member's early renewal keeps the old completion valid until approval, but the stored document is
+  replaced when the new file is handed in (no per-version file history); `RequirementEvent` records who did what, not the files.
 - **Invoice link in the profile overview.** The download itself (`/portal/invoices/{id}.pdf`) follows `members.services.invoice_access`
   (registration contact, or a parent/guardian of the family of the invoiced people). `membership` rows in `api/routers/portal_profile.py`
   (`_membership_rows`) still show `invoice_id` only when the contact is among the viewer's people: make it use
@@ -66,6 +54,7 @@ read-only phone list (answer pills, counts) would be nicer; no backend work need
 | App | Migration | What |
 |---|---|---|
 | members | `0016_requirement_pending_review` | member hand-ins wait for staff review (`is_pending_review`, `submitted_at`) |
+| members | `0017_requirement_review_history` | `review_state` / `review_note`, `RequirementEvent` history, a file sent by the club (`sent_file`, `sent_at`, `sent_note`), `submitted_valid_until` for early renewals |
 | evaluations | `0003_evaluation_release` | public note, release level, released at/by |
 | formbuilder | `0004_field_visible_to_family` | per-criterion visibility to the family (data step keeps scores visible) |
 | news | `0002_review_note` | reviewer note and sent-back time |
