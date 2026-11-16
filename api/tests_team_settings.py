@@ -127,7 +127,7 @@ class TeamSettingsApiTests(TestCase):
         self.assertEqual(self.admin("delete", f"/team-positions/{p['id']}").status_code, 404)
 
     def test_position_reorder(self):
-        a, b, c = (self.mkpos(n, ordering=i) for i, n in enumerate(["A", "B", "C"]))
+        a, _b, c = (self.mkpos(n, ordering=i) for i, n in enumerate(["A", "B", "C"]))
         r = self.admin("post", "/team-positions/reorder", {"ids": [c["id"], a["id"]]})
         self.assertEqual(r.status_code, 200, r.content)
         self.assertEqual([(x["name"], x["ordering"]) for x in r.json()], [("C", 1), ("A", 2), ("B", 3)])
@@ -302,7 +302,7 @@ class TeamSettingsApiTests(TestCase):
         self.assertIsNone(zed["photo_url"])
 
     def test_people_filters(self):
-        base, top, ol = self._officials()
+        base, _top, _ol = self._officials()
         self.assertEqual(len(self.get_people("?kind=referee")), 2)
         self.assertEqual(len(self.get_people("?kind=official")), 1)
         self.assertEqual([x["last_name"] for x in self.get_people("?q=zed")], ["Zed"])

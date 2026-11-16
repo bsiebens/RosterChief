@@ -189,7 +189,8 @@ class ClubBackupRestoreTests(TestCase):
         sponsor_id = str(uuid4())
         asset = "media/legacy-sponsor.svg"
         svg = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 4"><rect width="4" height="4" fill="#123456" onload="alert(1)"/></svg>'
-        manifest["records"]["club.sponsor"] = [{"fields": {"id": sponsor_id, "created": now, "modified": now, "name": "Svg sponsor", "logo": asset, "url": "", "start_date": date(2026, 8, 1), "end_date": None, "logo_width": None, "logo_height": None}, "many": {}}]
+        manifest["records"]["club.sponsor"] = [{"fields": {"id": sponsor_id, "created": now, "modified": now, "name": "Svg sponsor", "logo": asset, "url": "", "start_date": date(2026, 8, 1),
+                                                   "end_date": None, "logo_width": None, "logo_height": None}, "many": {}}]
         media_root = self.enterContext(TemporaryDirectory())
         self.enterContext(self.settings(MEDIA_ROOT=media_root))
         manifest["club"]["fields"]["logo"] = "media/legacy-crest.svg"

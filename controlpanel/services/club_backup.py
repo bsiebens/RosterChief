@@ -488,7 +488,7 @@ def analyse(manifest, names, exclude=()):
             else:
                 entry(label, pk, _describe(values, pk), reasons)
 
-    for (label, pk), item in entries.items():
+    for (label, _pk), item in entries.items():
         if label in exclude and label not in ("accounts", "roles"):
             item["reasons"].append("Left out by your choice.")
     # Cascade: whatever points at a blocked record is blocked too.
@@ -892,5 +892,9 @@ def restore_club(upload, *, name="", slug="", on_restore=None, partial=False, ex
             raise
         warnings = [*warnings, *restore.warnings]
         if club.logo and club.logo.name.lower().endswith(".svg"):
-            warnings = [*warnings, "The club logo is an SVG. It is shown as the club crest, but browser and home-screen icons (favicon, app icon) cannot be made from an SVG, so browsers use the default icon. Upload a PNG, JPEG or WebP logo in the club settings to get them."]
+            warnings = [
+                *warnings,
+                "The club logo is an SVG. It is shown as the club crest, but browser and home-screen icons (favicon, app icon) cannot be made from an SVG, "
+                "so browsers use the default icon. Upload a PNG, JPEG or WebP logo in the club settings to get them.",
+            ]
         return club, new_accounts, warnings

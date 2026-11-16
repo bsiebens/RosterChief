@@ -5,8 +5,8 @@ It is an *automated* email: ``rosterchief.mail.send_message`` drops it while the
 away (the same link and page as "forgot password"); someone who already had an account just gets the sign-in link.
 """
 
-import logging
 import email.policy
+import logging
 from pathlib import Path
 
 from allauth.account import app_settings as allauth_settings
@@ -200,7 +200,10 @@ AUTH_TEXTS = {
         "unknown_account": {
             "subject": "We kennen dit e-mailadres niet bij {club}",
             "heading": "Geen account gevonden",
-            "intro": "Iemand, mogelijk jijzelf, probeerde toegang te krijgen tot een account met dit e-mailadres, maar we hebben er geen gegevens van. Was jij het niet, dan mag je deze e-mail negeren. Was jij het wel, dan kun je je inschrijven via de knop hieronder.",
+            "intro": (
+                "Iemand, mogelijk jijzelf, probeerde toegang te krijgen tot een account met dit e-mailadres, maar we hebben er geen gegevens van. "
+                "Was jij het niet, dan mag je deze e-mail negeren. Was jij het wel, dan kun je je inschrijven via de knop hieronder."
+            ),
             "button": "Account aanmaken",
             "link_note": "Of kopieer deze link naar je browser:",
         },
@@ -282,7 +285,10 @@ AUTH_TEXTS = {
         "unknown_account": {
             "subject": "Nous ne connaissons pas cette adresse e-mail chez {club}",
             "heading": "Aucun compte trouvé",
-            "intro": "Quelqu’un, peut-être vous, a essayé d’accéder à un compte avec cette adresse e-mail, mais nous n’en avons aucune trace. Vous pouvez ignorer cet e-mail si ce n’était pas vous. Sinon, vous pouvez vous inscrire avec le bouton ci-dessous.",
+            "intro": (
+                "Quelqu’un, peut-être vous, a essayé d’accéder à un compte avec cette adresse e-mail, mais nous n’en avons aucune trace. "
+                "Vous pouvez ignorer cet e-mail si ce n’était pas vous. Sinon, vous pouvez vous inscrire avec le bouton ci-dessous."
+            ),
             "button": "Créer un compte",
             "link_note": "Ou copiez ce lien dans votre navigateur :",
         },

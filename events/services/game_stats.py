@@ -120,7 +120,8 @@ def _rows_for(event, team, document, roster, overrides=None) -> list[GameStat]:
     # Who dressed (the source's line-up tables): one row per matched player, so a game played without a goal, penalty or
     # save still counts as a game played.
     for entry in (document.get("lineups") or {}).get(our_side) or []:
-        add({"id": f"lineup:{our_side}:{entry.get('license') or entry.get('number') or entry.get('name')}", "side": our_side}, APPEARANCE, {"name": entry.get("name"), "number": entry.get("number")}, meta={"pos": entry.get("pos") or "", "license": entry.get("license") or ""}, ours=True)
+        add({"id": f"lineup:{our_side}:{entry.get('license') or entry.get('number') or entry.get('name')}", "side": our_side}, APPEARANCE, {"name": entry.get("name"), "number": entry.get("number")},
+            meta={"pos": entry.get("pos") or "", "license": entry.get("license") or ""}, ours=True)
 
     goalie = None  # who is in our net right now, as far as the timeline says
     goalie_since = 0

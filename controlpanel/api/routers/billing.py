@@ -31,8 +31,8 @@ from ..auth import superuser_auth
 from ..errors import ApiError
 from ..idempotency import idempotent
 from ..schemas import (
-    BillingPlanOut,
     AutoInvoicingIn,
+    BillingPlanOut,
     BillingSettingsIn,
     ClubBillingOut,
     ClubRef,
@@ -603,7 +603,15 @@ def numbering_preview(request, payload: NumberingPreviewIn):
     )
 
 
-@router.put("/billing/settings/auto-invoicing", response=IssuerSettingsIO, auth=superuser_auth, summary="Switch automatic invoicing on or off (superuser). Off: the daily job opens and invoices nothing and platform admins are warned; periods and invoices are made by hand")
+@router.put(
+    "/billing/settings/auto-invoicing",
+    response=IssuerSettingsIO,
+    auth=superuser_auth,
+    summary=(
+        "Switch automatic invoicing on or off (superuser). Off: the daily job opens and invoices nothing and platform admins are warned; "
+        "periods and invoices are made by hand"
+    ),
+)
 def put_auto_invoicing(request, payload: AutoInvoicingIn):
     row = BillingSettings.current()
     if row.auto_invoicing != payload.enabled:

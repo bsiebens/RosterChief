@@ -2,7 +2,7 @@
 
 from club.models import Sport
 from controlpanel.models import PlatformAuditLog
-from controlpanel.tests import PUBLIC, META, UserApiBase
+from controlpanel.tests import META, PUBLIC, UserApiBase
 
 TEMPLATE = [
     {"key": "goalies", "label": "Goalies", "slots": [{"key": "g1", "label": "G1"}, {"key": "g2", "label": "G2"}]},

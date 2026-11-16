@@ -5,5 +5,7 @@ class EventsConfig(AppConfig):
     name = "events"
 
     def ready(self):
-        from . import signals  # noqa: F401
-        from . import signals_games  # noqa: F401
+        from . import (
+            signals,  # noqa: F401
+            signals_games,  # noqa: F401
+        )

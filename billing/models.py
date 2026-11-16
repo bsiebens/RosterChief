@@ -53,7 +53,11 @@ class BillingSettings(UUIDModel):
     auto_invoicing = models.BooleanField(
         _("automatic invoicing"),
         default=True,
-        help_text=_("On: the daily job opens each club's next period and issues its invoice with the next automatic number. Off: nothing is opened or invoiced automatically; platform admins are warned (weekly digest and a first alert per club and period) and open the period and create the invoice, with a typed number, by hand."),
+        help_text=_(
+            "On: the daily job opens each club's next period and issues its invoice with the next automatic number. "
+            "Off: nothing is opened or invoiced automatically; platform admins are warned (weekly digest and a first alert per club and period) "
+            "and open the period and create the invoice, with a typed number, by hand."
+        ),
     )
 
     class Meta:

@@ -59,9 +59,14 @@ select = [
     "RUF", # ruff-specific rules
 ]
 ignore = [
+    "RUF001", # Intentional typography (curly apostrophes, en dashes) in French/Dutch copy and score strings.
     "RUF012", # Django/Wagtail model attrs (panels, Meta.ordering, ...) are framework conventions, not mutable defaults to guard.
     "RUF005", # Wagtail's `Page.content_panels + [...]` concatenation is the documented idiom.
 ]
+
+[tool.ruff.lint.flake8-bugbear]
+# django-ninja's parameter markers are meant to be used as argument defaults.
+extend-immutable-calls = ["ninja.Query", "ninja.Form", "ninja.File"]
 
 [tool.ruff.lint.per-file-ignores]
 # Settings legitimately use star imports and long generated values.

@@ -8,6 +8,7 @@ member: ``team.roster_added`` / ``team.roster_updated`` / ``team.roster_removed`
 Captains: at most one captain per team and season; making someone captain clears the previous one, and a member
 is never captain and alternate captain at once (the one just set wins). Several alternates are allowed."""
 
+import itertools
 import uuid
 
 from django.db import transaction
@@ -341,7 +342,8 @@ def _kind_turnout(team, season, member_ids) -> dict:
     groups = {"games": [Event.EventKind.GAME, Event.EventKind.TOURNAMENT], "practices": [Event.EventKind.TRAINING]}
     for key, kinds in groups.items():
         rows = (
-            Attendance.objects.filter(att._in_season(season), member_id__in=list(result), event__teams=team, event__kind__in=kinds, event__cancelled=False, event__start__lt=timezone.now(), status__in=[Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.ABSENT])
+            Attendance.objects.filter(att._in_season(season), member_id__in=list(result), event__teams=team, event__kind__in=kinds, event__cancelled=False, event__start__lt=timezone.now(),
+                status__in=[Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.ABSENT])
             .values("member_id")
             .annotate(present=Count("id", filter=Q(status=Attendance.AttendanceStatus.PRESENT)), responses=Count("id"))
             .order_by()
@@ -571,7 +573,7 @@ def add_people(actor, team, *, season_id, rows: list[dict]) -> dict:
             result["ok"] = True
             added += 1
         except Invalid as e:
-            result["error"] = next(iter(sum((e.errors or {}).values(), [])), None) or str(e)
+            result["error"] = next(itertools.chain.from_iterable((e.errors or {}).values()), None) or str(e)
         results.append(result)
     return {"added": added, "rows": results}
 

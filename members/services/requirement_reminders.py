@@ -1,4 +1,3 @@
-# ruff: noqa: RUF001
 """Reminders about onboarding documents (inbox + push, category "reminder").
 
 ``send_due`` is the daily sweep for the current club schema. For every ACTIVE membership of the current season and every
