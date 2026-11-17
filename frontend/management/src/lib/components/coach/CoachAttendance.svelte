@@ -127,15 +127,15 @@
 <div class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
 	<section class="card overflow-hidden">
 		<div class="grid gap-3 border-b border-line px-3.5 py-3">
-			<div class="grid grid-cols-2 gap-1 rounded-box bg-subhead p-1" role="group" aria-label={t('events.tab.attendance')}>
+			<div class="grid grid-cols-2 gap-2" role="group" aria-label={t('events.tab.attendance')}>
 				{#each [['answers', t('coach.mode_replies')], ['checkin', `${t('coach.check_in_mode')} ${list.checked_in}/${counts.in}`]] as [key, label] (key)}
-					<button type="button" class="min-h-10 rounded-md px-3 font-display text-sm font-bold tracking-wide uppercase {mode === key ? 'bg-(--portal-panel) text-ink shadow-sm' : 'text-muted'}" aria-pressed={mode === key} onclick={() => (mode = key as typeof mode)}>{label}</button>
+					<button type="button" class="min-h-11 rounded-full border px-3 font-display text-sm font-bold tracking-wide uppercase {mode === key ? 'border-ink bg-ink text-paper' : 'border-line bg-(--portal-panel) text-ink'}" aria-pressed={mode === key} onclick={() => (mode = key as typeof mode)}>{label}</button>
 				{/each}
 			</div>
 			<div class="flex items-center gap-2">
-				<div class="flex min-w-0 flex-1 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="group" aria-label={t('portal.all')}>
+				<div class="flex min-w-0 flex-1 gap-1.5" role="group" aria-label={t('portal.all')}>
 					{#each SEGMENTS as [key, label] (key)}
-						<button type="button" class="inline-flex h-[38px] shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[15px] font-semibold {filter === key ? 'border-ink bg-ink text-paper' : 'border-line bg-(--portal-panel) text-ink'}" aria-pressed={filter === key} onclick={() => (filter = key)}>{key === 'unknown' ? t('coach.waiting') : t(label)} <span class="tabular-nums {filter === key ? '' : 'text-muted'}">{counts[key]}</span></button>
+						<button type="button" class="inline-flex h-[38px] min-w-0 flex-1 items-center justify-center gap-1 rounded-full border px-1.5 text-[14px] font-semibold {filter === key ? 'border-ink bg-ink text-paper' : 'border-line bg-(--portal-panel) text-ink'}" aria-pressed={filter === key} onclick={() => (filter = key)}>{key === 'unknown' ? t('coach.waiting') : t(label)} <span class="tabular-nums {filter === key ? '' : 'text-muted'}">{counts[key]}</span></button>
 					{/each}
 				</div>
 			</div>
