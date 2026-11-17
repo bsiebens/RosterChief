@@ -52,13 +52,14 @@
 	{#each fees as fee (`${fee.member_id}-${fee.season}`)}
 		{@const paid = Number(fee.paid)}
 		{@const total = paid + Number(fee.balance)}
+		{@const rows = received(fee.member_id, fee.season)}
 		<section class="grid gap-2">
 			<h2 class="flex items-baseline gap-2 font-display text-lg font-extrabold tracking-[.02em] text-ink uppercase">{people.length > 1 ? `${memberName(fee.member_id)} · ` : ''}{fee.season}</h2>
 			<div class="card grid gap-3 p-4">
 				<div class="h-2 overflow-hidden rounded-full bg-subhead" role="progressbar" aria-valuenow={total > 0 ? Math.round((paid / total) * 100) : 100} aria-valuemin="0" aria-valuemax="100"><div class="h-full rounded-full bg-ok" style="width: {total > 0 ? Math.min(100, (paid / total) * 100) : 100}%"></div></div>
-				<p class="-mt-1 text-right font-mono text-xs text-muted">{t('portal.pay_of', { paid: money(fee.paid), total: money(String(total)) })}</p>
-				<ul class="grid gap-2.5">
-					{#each received(fee.member_id, fee.season) as payment (payment.id)}
+				<p class="-mt-1.5 text-right font-mono text-xs leading-none text-muted">{t('portal.pay_of', { paid: money(fee.paid), total: money(String(total)) })}</p>
+				{#if rows.length || fee.next_installment || Number(fee.balance) > 0}<ul class="grid gap-2.5">
+					{#each rows as payment (payment.id)}
 						<li class="flex items-center gap-3"><span class="grid size-7 shrink-0 place-items-center rounded-full bg-ok text-white"><Check size={15} aria-hidden="true" /></span><span class="min-w-0 flex-1"><b class="text-ink">{money(payment.amount)}</b> <span class="text-sm text-muted">· {formatDateTime(payment.paid_at)}</span></span><span class="badge badge-sm badge-success">{t('portal.charge_paid')}</span></li>
 					{/each}
 					{#if fee.next_installment}
@@ -66,7 +67,7 @@
 					{:else if Number(fee.balance) > 0}
 						<li class="flex items-center gap-3"><span class="size-7 shrink-0 rounded-full border-2 border-warn-text"></span><span class="min-w-0 flex-1"><b class="text-ink">{money(fee.balance)}</b> <span class="text-sm text-muted">· {t('portal.pay_open')}</span></span></li>
 					{/if}
-				</ul>
+				</ul>{/if}
 			</div>
 			{#if fee.next_installment?.late}<p class="px-0.5 text-sm text-muted">{t('portal.pay_late_blocks')}</p>{/if}
 		</section>
