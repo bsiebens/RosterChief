@@ -106,11 +106,11 @@
 		<div class="card divide-y divide-rule overflow-hidden">
 			{#each settings as row (row.key)}
 				<a class="flex min-h-14 items-center gap-3 px-4" href={row.href}><span class="grid size-10 shrink-0 place-items-center rounded-box bg-subhead text-ink"><row.icon size={18} aria-hidden="true" /></span><b class="min-w-0 flex-1 text-ink">{t(row.label)}</b><ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" /></a>
+				{#if row.key === 'notifications'}<CalendarSync row />{/if}
 			{/each}
 			<div class="p-4"><ThemeSwitch /></div>
 		</div>
 	</section>
 
-	<CalendarSync />
 	<InstallPush />
 </div>

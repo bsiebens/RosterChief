@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { CalendarDays, Check, Copy, RefreshCw } from '@lucide/svelte';
+	import { CalendarDays, Check, ChevronRight, Copy, RefreshCw } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Sheet from '#lib/components/portal/Sheet.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -10,7 +10,7 @@
 	 * "Sync to my calendar": one secret calendar link per account (own events plus the children's). The button opens a small sheet with the
 	 * link (https and webcal://), a hint per calendar app, and the switches to replace the link (the old one stops working) or switch it off.
 	 */
-	let { class: klass = 'btn btn-outline gap-1.5' }: { class?: string } = $props();
+	let { class: klass = 'btn btn-outline gap-1.5', row = false }: { class?: string; /** A menu row (icon, label, chevron) as in the Me menu, instead of a button. */ row?: boolean } = $props();
 	let open = $state(false);
 	let token = $state<string | null>(null);
 	let loaded = $state(false);
@@ -47,7 +47,15 @@
 	}
 </script>
 
-<button class={klass} type="button" onclick={show}><CalendarDays size={14} aria-hidden="true" />{t('portal.sync_calendar')}</button>
+{#if row}
+	<button class="flex min-h-14 w-full items-center gap-3 px-4 text-left" type="button" onclick={show}>
+		<span class="grid size-10 shrink-0 place-items-center rounded-box bg-subhead text-ink"><CalendarDays size={18} aria-hidden="true" /></span>
+		<b class="min-w-0 flex-1 text-ink">{t('portal.sync_calendar')}</b>
+		<ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" />
+	</button>
+{:else}
+	<button class={klass} type="button" onclick={show}><CalendarDays size={14} aria-hidden="true" />{t('portal.sync_calendar')}</button>
+{/if}
 
 <Sheet {open} title={t('portal.cal_title')} onclose={() => (open = false)}>
 	<div class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 px-5 pb-6">
