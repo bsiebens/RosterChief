@@ -36,7 +36,7 @@
 
 	// One row per event: everyone in the family who is part of it answers on the same row, each with their own first name in full and status.
 	type Who = { name: string; pill: { cls: string; text: string } };
-	type Row = { id: string; start: string; title: string; kind: string; line: string; going: number | null | undefined; who: Who[]; eventId: string; cancelled: boolean };
+	type Row = { id: string; start: string; title: string; kind: string; official: boolean; line: string; going: number | null | undefined; who: Who[]; eventId: string; cancelled: boolean };
 	const rows = $derived.by(() => {
 		const byKey = new Map<string, Row>();
 		const add = (rowKey: string, base: Omit<Row, 'id' | 'who'>, who: Who) => {
@@ -47,11 +47,11 @@
 		for (const { event, attendance, officiating } of entries) {
 			if (!past && key(new Date(event.start)) < todayKey) continue;
 			const meet = event.gathering ? t('portal.meet_time', { time: formatTime(event.gathering) }) : '';
-			const base = { start: event.start, title: event.title, kind: event.kind, line: [meet, event.location].filter(Boolean).join(' · '), going: undefined as number | null | undefined, eventId: event.event_id, cancelled: event.cancelled };
+			const base = { start: event.start, title: event.title, kind: event.kind, official: false, line: [meet, event.location].filter(Boolean).join(' · '), going: undefined as number | null | undefined, eventId: event.event_id, cancelled: event.cancelled };
 			for (const row of attendance) add(event.event_id, { ...base, going: row.going_count }, { name: firstName(row.member_id), pill: statusPill(row.status) });
-			for (const offer of officiating) add(`${event.event_id}-official`, { ...base, kind: 'crew', title: `${event.title} · ${t(`portal.crew_${offer.role}`)}` }, { name: firstName(offer.member_id), pill: statusPill(offer.status === 'invited' ? 'no_response' : 'duty') });
+			for (const offer of officiating) add(`${event.event_id}-official`, { ...base, official: true, title: `${event.title} · ${t(`portal.crew_${offer.role}`)}` }, { name: firstName(offer.member_id), pill: statusPill(offer.status === 'invited' ? 'no_response' : 'duty') });
 		}
-		return [...byKey.values()].filter((row) => kind === 'all' || row.kind === kind).sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+		return [...byKey.values()].filter((row) => kind === 'all' || (kind === 'crew' ? row.official : row.kind === kind)).sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
 	});
 	const groups = $derived.by(() => {
 		const map = new Map<string, Row[]>();

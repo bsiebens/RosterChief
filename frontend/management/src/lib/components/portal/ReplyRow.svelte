@@ -61,7 +61,9 @@
 	const current = $derived<'' | 'present' | 'maybe' | 'absent'>(going ? 'present' : shown === 'maybe' ? 'maybe' : ['absent', 'excused', 'dropout'].includes(shown) ? 'absent' : '');
 	let choice = $state<'' | 'present' | 'maybe' | 'absent' | null>(null);
 	const picked = $derived(choice ?? current);
-	const switchable = $derived(seg && canReply && !noInvite && !lateInstalment && !event.cancelled);
+	// Once the reply deadline has passed the choice is closed: someone who is going can still say they can't make it after all, nothing else.
+	const afterDeadline = $derived(!!event.deadline && Date.parse(event.deadline) < Date.now());
+	const switchable = $derived(seg && canReply && !noInvite && !lateInstalment && !event.cancelled && !afterDeadline);
 	const changed = $derived(picked !== '' && (picked !== current || (picked === 'absent' && note.trim() !== '' && note.trim() !== event.note)));
 	const SWITCH = [
 		{ key: 'present', label: 'portal.going', on: 'bg-ok text-white' },
@@ -136,7 +138,7 @@
 					{/if}
 				{/if}
 				{#if canReply}
-					<button type="button" class="btn btn-sm min-h-11 md:h-8 md:min-h-0 {['absent', 'excused', 'dropout'].includes(shown) ? '' : 'btn-outline'} {dark ? 'border-sidebar-chip bg-transparent! text-sidebar-fg hover:bg-sidebar-hairline' : ''}" disabled={busy} aria-expanded={open} onclick={() => (open = !open)}>{t(going ? 'portal.cant_make_it' : 'portal.cant_go')}</button>
+					<button type="button" class="btn btn-sm min-h-11 md:h-8 md:min-h-0 {['absent', 'excused', 'dropout'].includes(shown) ? '' : 'btn-outline'} {dark ? 'border-sidebar-chip bg-transparent! text-sidebar-fg hover:bg-sidebar-hairline' : ''}" disabled={busy} aria-expanded={open} onclick={() => (open = !open)}>{t(going ? (afterDeadline ? 'portal.cant_make_it_after_all' : 'portal.cant_make_it') : 'portal.cant_go')}</button>
 				{/if}
 			{/if}
 		</div>
@@ -157,7 +159,7 @@
 			{#if reasonError}<p id="reason-err-{event.id}" class="flex items-start gap-2 rounded-box border border-danger-border bg-danger-bg px-3 py-2 text-sm font-semibold text-danger" role="alert"><CircleAlert size={16} class="mt-0.5 shrink-0" aria-hidden="true" />{reasonError}</p>{/if}
 			<div class="flex flex-wrap justify-end gap-2">
 				<button class="btn btn-sm btn-outline min-h-11 md:h-8 md:min-h-0 {dark ? 'border-sidebar-chip bg-transparent! text-sidebar-fg' : ''}" type="button" onclick={() => (open = false)}>{t('common.cancel')}</button>
-				<button class="btn btn-sm btn-primary min-h-11 flex-1 sm:flex-none md:h-8 md:min-h-0" type="submit" disabled={busy}>{t(going ? 'portal.cant_make_it' : 'portal.cant_go')}</button>
+				<button class="btn btn-sm btn-primary min-h-11 flex-1 sm:flex-none md:h-8 md:min-h-0" type="submit" disabled={busy}>{t(going ? (afterDeadline ? 'portal.cant_make_it_after_all' : 'portal.cant_make_it') : 'portal.cant_go')}</button>
 			</div>
 		</form>
 	{/if}

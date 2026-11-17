@@ -72,7 +72,7 @@
 	const memberName = (id: string) => people.find((person) => person.id === id)?.name ?? '';
 	const crest = $derived(data.branding?.logo_url);
 	const background = $derived(data.home.event_background);
-	const canReply = (event: PortalEvent) => !event.cancelled && event.blocked !== 'not_invited' && Date.parse(event.start) > Date.now() && (event.status === 'selected' || !event.deadline || Date.parse(event.deadline) >= Date.now());
+	const canReply = (event: PortalEvent) => !event.cancelled && event.blocked !== 'not_invited' && Date.parse(event.start) > Date.now() && (event.status === 'selected' || event.status === 'present' || !event.deadline || Date.parse(event.deadline) >= Date.now());
 	const going = (event: PortalEvent) => event.status === 'present' || event.status === 'selected';
 	/**
 	 * The cards on top of Home: one per coming event that someone still has to answer for (or is going to), soonest first. A card lists everyone

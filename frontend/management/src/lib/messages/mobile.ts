@@ -2,6 +2,7 @@
 export default {
 	en: {
 		'portal.theme': 'Appearance',
+		"portal.cant_make_it_after_all": "Can't make it after all",
 		"portal.pill_going": "Going",
 		"portal.pill_selected": "Selected",
 		"portal.pill_reply": "Reply",
@@ -29,7 +30,7 @@ export default {
 		"portal.is_coming": "Is {name} coming?",
 		"portal.cant_short": "Can't",
 		"portal.send_reply": "Send reply",
-		"portal.reply_change_help": "You can change your answer until the line-up is published.",
+		"portal.reply_change_help": "You can change your answer until the reply deadline. After that you can only say you can't make it after all.",
 		'portal.shop.view_basket': "View basket",
 		"coach.remind_n": "Remind {n} players",
 		"portal.filter_kind": "Filter events",
@@ -85,6 +86,7 @@ export default {
 	},
 	nl: {
 		'portal.theme': 'Weergave',
+		"portal.cant_make_it_after_all": "Toch niet kunnen komen",
 		"portal.pill_going": "Komt",
 		"portal.pill_selected": "Geselecteerd",
 		"portal.pill_reply": "Antwoord",
@@ -112,7 +114,7 @@ export default {
 		"portal.is_coming": "Komt {name}?",
 		"portal.cant_short": "Kan niet",
 		"portal.send_reply": "Antwoord versturen",
-		"portal.reply_change_help": "Je kan je antwoord wijzigen tot de opstelling is gepubliceerd.",
+		"portal.reply_change_help": "Je kan je antwoord wijzigen tot de antwoorddeadline. Daarna kan je enkel nog melden dat je toch niet kan komen.",
 		'portal.shop.view_basket': "Winkelmandje bekijken",
 		"coach.remind_n": "{n} spelers herinneren",
 		"portal.filter_kind": "Evenementen filteren",
@@ -168,6 +170,7 @@ export default {
 	},
 	fr: {
 		'portal.theme': 'Apparence',
+		"portal.cant_make_it_after_all": "Finalement empêché",
 		"portal.pill_going": "Vient",
 		"portal.pill_selected": "Sélectionné",
 		"portal.pill_reply": "Répondre",
@@ -195,7 +198,7 @@ export default {
 		"portal.is_coming": "{name} vient-il ?",
 		"portal.cant_short": "Impossible",
 		"portal.send_reply": "Envoyer la réponse",
-		"portal.reply_change_help": "Vous pouvez modifier votre réponse jusqu’à la publication de la composition.",
+		"portal.reply_change_help": "Vous pouvez modifier votre réponse jusqu’à la date limite. Ensuite, vous pouvez seulement signaler un empêchement.",
 		'portal.shop.view_basket': "Voir le panier",
 		"coach.remind_n": "Rappeler {n} joueurs",
 		"portal.filter_kind": "Filtrer les événements",

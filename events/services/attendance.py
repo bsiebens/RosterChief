@@ -346,9 +346,13 @@ def set_answer_as_member(actor, attendance: Attendance, status: str, note: str =
         raise Invalid("This event has already started.", code="event_started")
     was = attendance.status
     dropping_out = status == "dropout" or (was == Status.SELECTED and status == "absent")
-    if dropping_out and was != Status.SELECTED:
+    past_deadline = bool(event.deadline and event.deadline < now)
+    # Answers change until the deadline, whatever the line-up says. Afterwards the one thing still possible is to withdraw ("can't make it after all")
+    # when you were going or picked.
+    withdrawing = past_deadline and was == Status.PRESENT and status in ("absent", "dropout")
+    if dropping_out and was != Status.SELECTED and not withdrawing:
         raise Invalid("This member is not in the published line-up.", code="not_in_lineup")
-    if not dropping_out and event.deadline and event.deadline < now:
+    if not dropping_out and not withdrawing and past_deadline:
         raise Invalid("Replies are closed for this event.", code="rsvp_closed")
     if status in ("present", "maybe") and registration_payment_blocked(event, member, today=timezone.localdate(now)):
         raise Invalid("An overdue registration instalment must be paid before signing up for this event.", code="late_installment")
@@ -370,7 +374,7 @@ def set_answer_as_member(actor, attendance: Attendance, status: str, note: str =
     attendance.answered_by_coach = False
     attendance.save(update_fields=["status", "note", "answered_by_coach", "modified"])
     record_status_change(actor, attendance, was, attendance.status, note_changed=before_note != note)
-    if dropping_out:
+    if dropping_out and was == Status.SELECTED:
         from events.services.lineup import notify_coach_dropout
 
         notify_coach_dropout(event, member, actor)

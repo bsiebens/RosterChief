@@ -695,3 +695,45 @@ class RemindTests(AttendanceTestBase):
         past = self.event("Old", teams=[self.u12], start=later(-1))
         with self.assertRaises(Invalid):
             svc.remind_unanswered(self.coach_user, past)
+
+
+class ReplyDeadlineTests(AttendanceTestBase):
+    """Answers change until the event's deadline, whatever the line-up says; afterwards a going player can still withdraw."""
+
+    def setUp(self):
+        super().setUp()
+        self.roster(self.alice)
+        self.event_ = self.event("Match", teams=[self.u12], deadline=later(1), start=later(3), kind=Event.EventKind.GAME)
+        self.attendance = Attendance.objects.get(event=self.event_, member=self.alice)
+
+    def reply(self, status, note=""):
+        return svc.set_answer_as_member(self.alice_user, self.attendance, status, note)
+
+    def close_deadline(self):
+        Event.objects.filter(pk=self.event_.pk).update(deadline=timezone.now() - datetime.timedelta(hours=1))
+        self.attendance.refresh_from_db()
+
+    def test_answers_change_freely_before_the_deadline(self):
+        self.assertEqual(self.reply("present").status, S.PRESENT)
+        self.assertEqual(self.reply("maybe").status, S.MAYBE)
+        self.assertEqual(self.reply("absent", "Sick").status, S.ABSENT)
+
+    def test_after_the_deadline_only_a_withdrawal_of_a_going_player_is_accepted(self):
+        self.reply("present")
+        self.close_deadline()
+        with self.assertRaises(Invalid) as refused:
+            self.reply("maybe")
+        self.assertEqual(refused.exception.code, "rsvp_closed")
+        with self.assertRaises(Invalid) as no_reason:
+            self.reply("absent")
+        self.assertEqual(no_reason.exception.code, "note_required")
+        self.assertEqual(self.reply("absent", "Injured").status, S.ABSENT)
+        with self.assertRaises(Invalid) as closed:
+            self.reply("present")
+        self.assertEqual(closed.exception.code, "rsvp_closed")
+
+    def test_after_the_deadline_someone_who_never_answered_cannot_reply(self):
+        self.close_deadline()
+        with self.assertRaises(Invalid) as refused:
+            self.reply("absent", "Sick")
+        self.assertEqual(refused.exception.code, "rsvp_closed")
