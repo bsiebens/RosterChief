@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { ChevronLeft, ChevronRight } from '@lucide/svelte';
-	import { formatDateTime, formatTime } from '#lib/events/types.ts';
+	import { formatDateTime, formatTime, kindStyle } from '#lib/events/types.ts';
 	import { dateKey, goingShare, isGame, lineupChip, startOfToday } from '#lib/coach.ts';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import type { CoachEvent } from '#lib/portal.ts';
@@ -71,7 +71,7 @@
 		{#if picked}<div class="flex justify-end border-b border-rule px-3 py-1"><button type="button" class="link-more" onclick={() => (picked = '')}>{t('coach.day_clear')}</button></div>{/if}
 		<div class="divide-y divide-rule">
 			{#each list as event (event.id)}
-				<a class="flex min-h-15 items-center gap-3 px-3.5 py-2.5 hover:bg-subhead {isGame(event) ? 'shadow-[inset_3px_0_0_var(--color-club)]' : ''}" href={href(event)}>
+				<a class="flex min-h-15 items-center gap-3 border-l-[3px] px-3.5 py-2.5 hover:bg-subhead {kindStyle(event.kind).bar}" href={href(event)}>
 					<PortalEventDate start={event.start} compact />
 					<span class="min-w-0 flex-1">
 						<b class="block truncate text-sm text-ink">{event.title}</b>
