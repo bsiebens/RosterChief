@@ -768,7 +768,7 @@
 							</div>
 						{/each}
 					</div>
-					<p class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+					<p class="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs text-muted">
 						{#each Object.values(rosterStatus) as status (status.code)}
 							<span class="inline-flex items-center gap-1.5"><span class="grid size-5 place-items-center rounded-full border {statusStyle(status.code)}"><status.icon size={11} aria-hidden="true" /></span>{t(statusLabelKey(status.code))}</span>
 						{/each}
