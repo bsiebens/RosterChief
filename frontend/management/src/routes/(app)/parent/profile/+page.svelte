@@ -19,8 +19,10 @@
 
 	let { data } = $props();
 	// Me > Follow teams opens this page on that one block (`?view=follow`); the phone profile itself no longer carries it.
-	const followOnly = $derived(page.url.searchParams.get('view') === 'follow');
-	usePageHeader(() => ({ title: t(followOnly ? 'portal.follow_title' : 'portal.profile') }));
+	// On a phone each of these is its own menu on Me and opens the profile page on just that block: `?view=follow|memberships|vouchers|clubs`.
+	const view = $derived(page.url.searchParams.get('view') ?? '');
+	const VIEW_TITLE: Record<string, string> = { follow: 'portal.follow_title', memberships: 'portal.mem_title', vouchers: 'portal.vouchers', clubs: 'portal.switch_club' };
+	usePageHeader(() => ({ title: t(VIEW_TITLE[view] ?? 'portal.profile') }));
 
 	// svelte-ignore state_referenced_locally
 	let who = $state(data.people.find((person) => person.is_self)?.id ?? data.people[0]?.id ?? '');
@@ -134,8 +136,10 @@
 {/snippet}
 
 <div class="grid min-w-0 gap-5 md:hidden">
-	{#if followOnly}
+	{#if view === 'follow'}
 		{#if data.follows}<FollowTeams initial={data.follows} />{/if}
+	{:else if view === 'memberships' || view === 'vouchers' || view === 'clubs'}
+		{#if data.overview}<ProfileOverview overview={data.overview} people={data.people} show={[view]} />{/if}
 	{:else}
 	<section class="grid gap-2" aria-label={t('portal.family')}>
 		<h2 class="font-display text-lg font-extrabold tracking-[.02em] text-ink uppercase">{t('portal.family_people')}</h2>
@@ -171,10 +175,8 @@
 				<label class="flex min-h-16 items-center gap-3 px-4 py-2"><span class="min-w-0 flex-1"><b class="block text-ink">{t('portal.photo_consent_short')}</b><span class="block text-sm text-muted">{draft(person).photo_consent ? t('portal.allowed') : t('portal.not_allowed')}</span></span><input type="checkbox" class="toggle" checked={draft(person).photo_consent} disabled={busy === person.id} onchange={(e) => { drafts[person.id].photo_consent = e.currentTarget.checked; void save(person); }} /></label>
 			</div>
 		</section>
-		{#if data.stats?.available}{@const mine = data.stats.people.find((candidate) => candidate.id === person.id)}{#if mine}<StatsShare person={mine} />{/if}{/if}
 	{/each}
 
-	{#if data.overview}<ProfileOverview overview={data.overview} people={data.people} />{/if}
 	{/if}
 </div>
 

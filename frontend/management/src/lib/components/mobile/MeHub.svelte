@@ -1,5 +1,7 @@
 <script lang="ts">
-	import { Bell, ChartColumn, ChevronRight, ClipboardList, FileText, KeyRound, Shirt, UserRound, UsersRound, Wallet, Whistle, ReceiptText } from '@lucide/svelte';
+	import { onMount } from 'svelte';
+	import { api } from '#lib/management-api.ts';
+	import { ArrowRightLeft, Bell, ChartColumn, ChevronRight, IdCard, Ticket, ClipboardList, FileText, KeyRound, Shirt, UserRound, UsersRound, Wallet, Whistle, ReceiptText } from '@lucide/svelte';
 	import AccountMenu from '#lib/components/AccountMenu.svelte';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import InstallPush from '#lib/components/InstallPush.svelte';
@@ -29,6 +31,13 @@
 		coach: boolean;
 	} = $props();
 
+	// "Switch club" is only offered to someone who belongs to more than one club.
+	let manyClubs = $state(false);
+	onMount(async () => {
+		const result = await api<unknown[]>('GET', '/my-clubs');
+		manyClubs = !!(result.ok && result.data && result.data.length > 1);
+	});
+
 	const children = $derived(people.slice(1).map((person) => person.first_name || person.name));
 	const todo = $derived([
 		{ key: 'documents', href: '/parent?tab=documents', icon: FileText, label: t('portal.tile_documents'), n: counts.documents, tone: 'bg-warn-bg text-warn-text', hint: counts.documents ? t('portal.me_docs_open', { n: counts.documents }) : t('portal.me_all_good') },
@@ -37,14 +46,17 @@
 	]);
 	const club = $derived([
 		...(shop ? [{ key: 'orders', href: '/parent/shop?view=orders', icon: ReceiptText, label: t('portal.shop.orders'), hint: '' }] : []),
-		{ key: 'follow', href: '/parent/stats', icon: ChartColumn, label: t('portal.follow_stats'), hint: '' },
+		{ key: 'memberships', href: '/parent/profile?view=memberships', icon: IdCard, label: t('portal.mem_title'), hint: '' },
+		{ key: 'vouchers', href: '/parent/profile?view=vouchers', icon: Ticket, label: t('portal.vouchers'), hint: '' },
+		{ key: 'stats', href: '/parent/stats', icon: ChartColumn, label: t('portal.stats_page'), hint: '' },
 		{ key: 'teams', href: '/parent/profile?view=follow', icon: Shirt, label: t('portal.follow_title'), hint: '' }
 	]);
-	const settings = [
+	const settings = $derived([
 		{ key: 'profile', href: '/parent/profile', icon: UserRound, label: 'portal.profile_details' },
 		{ key: 'notifications', href: '/parent/notifications?view=settings', icon: Bell, label: 'portal.notifications' },
-		{ key: 'security', href: '/account/security', icon: KeyRound, label: 'shell.menu.security' }
-	];
+		{ key: 'security', href: '/account/security', icon: KeyRound, label: 'shell.menu.security' },
+		...(manyClubs ? [{ key: 'clubs', href: '/parent/profile?view=clubs', icon: ArrowRightLeft, label: 'portal.switch_club' }] : [])
+	]);
 </script>
 
 <div class="grid min-w-0 gap-5">

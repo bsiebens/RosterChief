@@ -9,14 +9,14 @@
 	import { money } from '#lib/shop.ts';
 
 	/** The family at a glance: memberships and their invoices, forms still to fill in, vouchers, and a way to another club. */
-	let { overview, people }: { overview: PortalOverview; people: ProfilePerson[] } = $props();
+	let { overview, people, show = ['memberships', 'forms', 'vouchers', 'clubs'] }: { overview: PortalOverview; people: ProfilePerson[]; show?: ('memberships' | 'forms' | 'vouchers' | 'clubs')[] } = $props();
 
 	type Club = { slug: string; name: string; host: string; logo_url?: string | null };
 	let clubs = $state<Club[]>([]);
 	onMount(async () => {
 		const result = await api<Club[]>('GET', '/my-clubs');
 		// Only offered when the person belongs to more than one club; the one they are in is left out of the list.
-		if (result.ok && result.data && result.data.length > 1) clubs = result.data.filter((club) => club.host !== location.hostname);
+		if (result.ok && result.data && result.data.length > 1) clubs = result.data.filter((club) => club.host.split(':')[0] !== location.hostname);
 	});
 	const clubUrl = (club: Club) => `${location.protocol}//${club.host}${location.port ? ':' + location.port : ''}/`;
 	const name = (id: string | null) => people.find((person) => person.id === id)?.name ?? '';
@@ -26,7 +26,7 @@
 </script>
 
 <div class="grid min-w-0 gap-4">
-	<section class="card" aria-labelledby="mem-title">
+	{#if show.includes('memberships')}<section class="card" aria-labelledby="mem-title">
 		<div class="card-h"><IdCard size={17} aria-hidden="true" /><h2 id="mem-title">{t('portal.mem_title')}</h2><a class="link-more ml-auto" href="/parent?tab=payments">{t('portal.payments')} →</a></div>
 		<div class="divide-y divide-rule">
 			{#each overview.memberships as row (row.member_id + row.season)}
@@ -44,9 +44,9 @@
 				<p class="px-5 py-4 text-sm text-muted">{t('portal.req_no_membership')}</p>
 			{/each}
 		</div>
-	</section>
+	</section>{/if}
 
-	<section class="card" aria-labelledby="pf-title">
+	{#if show.includes('forms')}<section class="card" aria-labelledby="pf-title">
 		<div class="card-h"><ClipboardList size={17} aria-hidden="true" /><h2 id="pf-title">{t('portal.forms_open')}</h2><a class="link-more ml-auto" href="/parent/forms">{t('portal.forms')} →</a></div>
 		<div class="divide-y divide-rule">
 			{#each overview.forms as form (`${form.id}-${form.member_id}`)}
@@ -55,9 +55,9 @@
 				<p class="px-5 py-4 text-sm text-muted">{t('portal.no_forms')}</p>
 			{/each}
 		</div>
-	</section>
+	</section>{/if}
 
-	<section class="card" aria-labelledby="vo-title">
+	{#if show.includes('vouchers')}<section class="card" aria-labelledby="vo-title">
 		<div class="card-h"><Ticket size={17} aria-hidden="true" /><h2 id="vo-title">{t('portal.vouchers')}</h2></div>
 		<div class="divide-y divide-rule">
 			{#each overview.vouchers as voucher (voucher.id)}
@@ -69,9 +69,9 @@
 				<p class="px-5 py-4 text-sm text-muted">{t('portal.voucher_none')}</p>
 			{/each}
 		</div>
-	</section>
+	</section>{/if}
 
-	{#if clubs.length}
+	{#if show.includes('clubs') && clubs.length}
 		<section class="card" aria-labelledby="sw-title">
 			<div class="card-h"><ArrowRightLeft size={17} aria-hidden="true" /><h2 id="sw-title">{t('portal.switch_club')}</h2></div>
 			<div class="divide-y divide-rule">
