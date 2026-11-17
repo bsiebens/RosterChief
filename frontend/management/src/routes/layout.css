@@ -1291,16 +1291,14 @@ textarea[name="note"] {
     justify-content: center;
     gap: 0.2rem;
     color: var(--color-muted);
-    font: 700 0.72rem/1.1 var(--font-display);
-    letter-spacing: 0.045em;
+    font: 600 0.75rem/1.1 var(--font-sans);
     text-align: center;
-    text-transform: uppercase;
 }
 
 .portal-tab.active, .portal-tab:hover { color: var(--portal-tab-active); }
 .portal-tab { position: relative; }
 .portal-tab-badge { position: absolute; top: 0.3rem; left: calc(50% + 0.55rem); display: grid; min-width: 1.1rem; height: 1.1rem; place-items: center; border-radius: 999px; background: var(--color-club); color: var(--color-club-content); padding: 0 0.3rem; font: 700 0.65rem/1 var(--font-sans); letter-spacing: 0; }
-.portal-tab.active::before { content: ''; position: absolute; top: 0; left: 50%; width: 2.25rem; height: 2px; transform: translateX(-50%); border-radius: 0 0 2px 2px; background: var(--color-club); }
+/* The member tab bar has no bar above the active tab (only its colour); the coach side keeps its red one (see .portal-coach below). */
 
 .portal-ui .portal-masthead {
     padding-top: env(safe-area-inset-top);
@@ -1324,7 +1322,7 @@ textarea[name="note"] {
 .portal-coach .portal-tabs { background-color: #0b0d10; border-top-color: #2a2f38; }
 .portal-coach .portal-tab { color: #a8b0bd; }
 .portal-coach .portal-tab.active, .portal-coach .portal-tab:hover { color: #fff; }
-.portal-coach .portal-tab.active::before { height: 3px; }
+.portal-coach .portal-tab.active::before { content: ''; position: absolute; top: 0; left: 50%; width: 2.25rem; height: 3px; transform: translateX(-50%); border-radius: 0 0 2px 2px; background: var(--color-club); }
 
 /* On a phone the coach pages carry their title (and the add button) in a dark band under the masthead, as in the approved design. */
 @media (max-width: 47.99rem) {
@@ -1541,3 +1539,32 @@ textarea[name="note"] {
     background: var(--color-club);
     color: var(--color-club-content);
 }
+
+
+/* Phone header, as on the design boards: a title (with a small mono line above it), the person or team chip, the bell. Coaches get a near-black band
+   with a red rule and a hanging "Coach view" tag. Replaces the club masthead and the page title bar on phones. */
+.phone-top {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    display: flex;
+    min-height: 4rem;
+    align-items: center;
+    gap: 0.75rem;
+    padding: calc(0.75rem + env(safe-area-inset-top)) 1rem 0.25rem;
+    background: var(--color-paper);
+    color: var(--color-ink);
+}
+.phone-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 800 1.875rem/1 var(--font-display); letter-spacing: 0.02em; text-transform: uppercase; }
+.phone-sub { display: block; margin-bottom: 0.125rem; font: 400 0.6875rem/1.2 var(--font-mono); letter-spacing: 0.06em; color: var(--color-muted); }
+.phone-ib, .phone-chip { position: relative; display: inline-flex; height: 2.75rem; flex: none; align-items: center; justify-content: center; border: 1px solid var(--color-line); background: var(--portal-panel); color: inherit; }
+.phone-ib { width: 2.75rem; border-radius: 999px; }
+.phone-chip { gap: 0.5rem; border-radius: 999px; padding: 0 0.75rem 0 0.3rem; font-weight: 600; }
+.phone-dot { position: absolute; top: 0.5rem; right: 0.6rem; width: 0.6rem; height: 0.6rem; border-radius: 999px; background: var(--color-club); border: 2px solid var(--portal-panel); }
+.phone-switch { display: inline-flex; width: 2.75rem; height: 2.75rem; flex: none; align-items: center; justify-content: center; border-radius: 999px; background: var(--color-club); color: var(--color-club-content); }
+.phone-top.coach { padding-top: calc(1.25rem + env(safe-area-inset-top)); padding-bottom: 0.5rem; background: #0b0d10; color: #f1f3f6; border-bottom: 1px solid #2a2f38; }
+.phone-top.coach::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 5px; background: var(--color-club); }
+.phone-top.coach .phone-tag { position: absolute; left: 1rem; top: 5px; padding: 0.125rem 0.5rem; border-radius: 0 0 6px 6px; background: var(--color-club); color: var(--color-club-content); font: 400 0.625rem/1.3 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; }
+.phone-top.coach .phone-sub { color: #a8b0bd; }
+.phone-top.coach .phone-ib, .phone-top.coach .phone-chip { background: #171a20; border-color: #2a2f38; color: #f1f3f6; }
+.phone-top.coach .phone-dot { border-color: #171a20; }

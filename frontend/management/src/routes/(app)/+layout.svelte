@@ -3,6 +3,7 @@
 	import { Menu } from '@lucide/svelte';
 	import { header } from '#lib/header.svelte.ts';
 	import AppSwitcher from '#lib/components/AppSwitcher.svelte';
+	import PhoneHeader from '#lib/components/mobile/PhoneHeader.svelte';
 	import PortalNav from '#lib/components/PortalNav.svelte';
 	import PortalRail from '#lib/components/PortalRail.svelte';
 	import { rememberApp } from '#lib/landing.ts';
@@ -52,7 +53,9 @@
 	{/if}
 
 	<div class="flex min-w-0 flex-1 flex-col">
-		{#if clubShell && club}
+		{#if clubShell && club && portal}
+			<PhoneHeader mode={parent ? 'parent' : 'coach'} title={header.title} context={header.context} actions={header.actions} canSwitch={!!data.me?.has_member_portal_role} />
+		{:else if clubShell && club}
 			<div class="sticky top-0 z-30 bg-sidebar-bg text-sidebar-fg {portal ? 'md:hidden' : 'lg:hidden'}" class:portal-masthead={!!portal}>
 				<div class="flex items-start justify-between gap-2 px-3 pt-3 pb-2 sm:px-5">
 					<div class="grid min-w-0 content-start gap-2">
@@ -90,7 +93,7 @@
 			</div>
 		{/if}
 
-		<header class="z-10 min-h-14 shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-line bg-white px-3 py-2 sm:px-5 {portal ? 'md:sticky md:top-0 md:min-h-16 md:gap-4 md:px-7' : 'lg:sticky lg:top-0 lg:min-h-16 lg:gap-4 lg:px-7'} {portal && page.url.pathname === home ? 'hidden md:flex' : 'flex'}" class:portal-topbar={!!portal}>
+		<header class="z-10 min-h-14 shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-line bg-white px-3 py-2 sm:px-5 {portal ? 'md:sticky md:top-0 md:min-h-16 md:gap-4 md:px-7' : 'lg:sticky lg:top-0 lg:min-h-16 lg:gap-4 lg:px-7'} {portal ? 'hidden md:flex' : 'flex'}" class:portal-topbar={!!portal}>
 			{#if !clubShell}
 				<a class="flex shrink-0 items-center gap-2.5" href={home}>
 					{#if data.mode === 'club' && data.branding}

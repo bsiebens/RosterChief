@@ -1,26 +1,19 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { CalendarDays, Check, ChevronRight, Ellipsis, FileText, Wallet } from '@lucide/svelte';
-	import ClubCrest from '#lib/components/ClubCrest.svelte';
-	import PersonFilter from '#lib/components/PersonFilter.svelte';
 	import EventBackdrop from '#lib/components/portal/EventBackdrop.svelte';
-	import EventHero from '#lib/components/portal/EventHero.svelte';
-	import News from '#lib/components/portal/News.svelte';
-	import { formatDay, formatTime, statusLabelKey } from '#lib/events/types.ts';
-	import { t } from '#lib/i18n.svelte.ts';
+		import { formatDay, formatTime, kindLabelKey } from '#lib/events/types.ts';
+	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import type { PortalArticle, PortalEvent, PortalEventDisplay } from '#lib/portal.ts';
+	import { statusPill } from './pills.ts';
 
 	/**
-	 * Home on a phone. One job: what is next, and what needs me. The soonest event gets the large photo card (with the family's answers under
-	 * it); another child's next event is a slim photo card. "Needs you" is a menu of four shortcuts with counts instead of a list, then the
-	 * coming days with meet-up times, the games being followed and the latest news.
+	 * Home on a phone, as on the design boards. The header (greeting, person chip, bell) is the shell's. Here: the soonest event as a large photo
+	 * card with the family's answers under it (other children's events as slim photo cards), "Needs you" as four shortcuts with counts, this week
+	 * as dated rows with a status pill, the games being followed and the latest news as one card.
 	 */
 	let {
 		people,
-		selected = $bindable(''),
-		viewer,
-		greeting,
-		dateLabel,
 		nextEvents,
 		background,
 		crest,
@@ -33,15 +26,11 @@
 		following
 	}: {
 		people: { id: string; name: string; first_name: string; photo_url: string | null }[];
-		selected: string;
-		viewer: string;
-		greeting: string;
-		dateLabel: string;
 		nextEvents: PortalEvent[][];
 		background: string | null;
 		crest: string | null | undefined;
 		counts: { replies: number; documents: number; payments: number; forms: number };
-		weekItems: { key: string; event: PortalEventDisplay; badges: { text: string; cls: string }[] }[];
+		weekItems: { key: string; event: PortalEventDisplay; badges: { text: string; cls: string; status: string; who: string }[] }[];
 		news: PortalArticle[];
 		eventLink: (id: string) => string;
 		firstName: (id: string) => string;
@@ -49,7 +38,6 @@
 		following: Snippet;
 	} = $props();
 
-	const going = (row: PortalEvent) => row.status === 'present' || row.status === 'selected';
 	const open = $derived(counts.replies + counts.documents + counts.payments + counts.forms);
 	const tiles = $derived([
 		{ key: 'replies', href: '/parent?tab=calendar', label: t('portal.tile_replies'), n: counts.replies, icon: CalendarDays, tone: 'bg-danger-bg text-danger' },
@@ -59,37 +47,51 @@
 	]);
 	const timeLine = (event: PortalEventDisplay) => (event.gathering ? `${t('portal.meet_time', { time: formatTime(event.gathering) })} · ${t('portal.start_time', { time: formatTime(event.start) })}` : formatTime(event.start));
 	const when = (event: PortalEventDisplay) => `${formatDay(event.start)} · ${formatTime(event.start)}`;
-	const answer = (row: PortalEvent) => (going(row) ? { cls: 'bg-ok text-white', text: t(statusLabelKey('present')) } : row.status === 'maybe' ? { cls: 'bg-warn-bg text-warn-text', text: t(statusLabelKey(row.status)) } : { cls: 'bg-club text-club-content', text: t('portal.reply') });
+	const weekday = (iso: string) => new Date(iso).toLocaleDateString(getLang(), { weekday: 'short' });
+	// One row per child and event (the child's name after the title when the family has several), each with its status pill.
+	const weekRows = $derived(weekItems.slice(0, 6).flatMap((item) => item.badges.map((b, i) => ({ key: `${item.key}-${i}`, event: item.event, who: people.length > 1 ? b.who : '', pill: statusPill(b.status) }))).slice(0, 5));
+	const translation = (article: PortalArticle) => article.translations[getLang() === 'nl' ? 'nl' : 'en'];
 </script>
 
-<div class="grid min-w-0 gap-5">
-	<div class="flex items-baseline justify-between gap-2">
-		<h1 class="font-display text-3xl leading-none font-extrabold text-ink uppercase">{greeting}</h1>
-		<p class="font-mono text-[11px] tracking-[.12em] text-muted uppercase">{dateLabel}</p>
-	</div>
-	{#if people.length > 1}<PersonFilter {people} bind:selected {viewer} />{/if}
+{#snippet heading(label: string, link?: { href: string; text: string }, count?: number)}
+	<h2 class="flex items-center gap-2 px-0.5 font-display text-xl font-extrabold tracking-[.02em] text-ink uppercase">
+		<span class="flex-1">{label}</span>
+		{#if count}<span class="grid min-w-5.5 place-items-center rounded-full bg-club px-1.5 font-sans text-[13px] leading-[1.4rem] font-bold tracking-normal text-club-content normal-case">{count}</span>{/if}
+		{#if link}<a class="font-sans text-sm font-semibold tracking-normal text-club-dark normal-case" href={link.href}>{link.text}</a>{/if}
+	</h2>
+{/snippet}
 
+<div class="grid min-w-0 gap-5">
 	<section class="grid gap-2" aria-label={t('portal.next_up')}>
 		{#each nextEvents as rows, i (rows[0].event_id)}
 			{@const event = rows[0]}
 			{#if i === 0}
-				<article class="card overflow-hidden">
-					<a class="flex" href={eventLink(event.event_id)} data-sveltekit-reset="false" aria-label={event.title}><EventHero {event} {background} {crest} /></a>
-					<div class="grid gap-1 border-t border-sidebar-hairline bg-sidebar-hairline px-4 py-3 text-sidebar-fg">
-						{#each rows as row (row.id)}{@render rsvp(row, true, true)}{/each}
-						<a class="inline-flex min-h-11 items-center text-sm font-semibold text-sidebar-fg hover:underline" href={eventLink(event.event_id)} data-sveltekit-reset="false">{t('portal.event_details')} →</a>
-					</div>
-				</article>
-			{:else}
-				<a class="portal-event-banner relative isolate flex min-h-24 flex-col justify-end gap-1 overflow-hidden rounded-box px-4 py-3 text-white" href={eventLink(event.event_id)} data-sveltekit-reset="false">
+				<a class="portal-event-banner relative isolate flex min-h-60 flex-col justify-end gap-3 overflow-hidden rounded-[18px] border-s-0! p-[18px] text-[#fff]" href={eventLink(event.event_id)} data-sveltekit-reset="false" aria-label={event.title}>
 					<EventBackdrop src={background} />
-					<span class="flex items-center gap-2 text-xs font-semibold">
-						<ClubCrest name={rows[0].member_id ? firstName(rows[0].member_id) : ''} logoUrl={people.find((p) => p.id === rows[0].member_id)?.photo_url} size={24} />
-						<span class="min-w-0 flex-1 truncate">{rows.map((row) => firstName(row.member_id)).join(', ')} · {when(event)}</span>
-						{#each rows as row (row.id)}{@const a = answer(row)}<span class="rounded-full px-2.5 py-1 text-[11px] font-bold {a.cls}">{a.text}</span>{/each}
+					<span class="flex items-center gap-2"><span class="inline-flex h-[26px] items-center rounded-full border border-[#fff]/40 bg-[#fff]/20 px-2.5 text-[13px] font-bold">{t(kindLabelKey(event.kind))} · {when(event)}</span></span>
+					<span class="font-display text-4xl leading-[.98] font-extrabold uppercase">{event.title}</span>
+					<span class="text-[15px]">{timeLine(event)}{event.location ? ' · ' + event.location : ''}</span>
+					<span class="flex flex-wrap items-center gap-2">
+						{#each rows as row (row.id)}
+							{@const answered = row.status === 'present' || row.status === 'selected'}
+							<span class="inline-flex h-[30px] items-center gap-1.5 rounded-full px-3 text-sm font-bold {answered ? 'bg-[#0a6b42] text-[#fff]' : 'bg-club text-club-content'}">
+								{#if answered}<Check size={15} aria-hidden="true" />{/if}{people.length > 1 ? `${firstName(row.member_id)} · ` : ''}{statusPill(row.status).text}
+							</span>
+						{/each}
+						<span class="ml-auto font-bold underline">{t('portal.event_details')}</span>
 					</span>
-					<span class="font-display text-xl leading-none font-extrabold uppercase">{event.title}</span>
-					<span class="text-xs text-white/85">{timeLine(event)}{event.location ? ' · ' + event.location : ''}</span>
+				</a>
+			{:else}
+				<a class="portal-event-banner relative isolate flex min-h-24 flex-col justify-end gap-1.5 overflow-hidden rounded-box px-4 py-3 text-[#fff]" href={eventLink(event.event_id)} data-sveltekit-reset="false">
+					<EventBackdrop src={background} />
+					<span class="truncate font-mono text-xs tracking-[.04em] text-[#fff]/90 uppercase">{when(event)}</span>
+					<span class="font-display text-2xl leading-none font-extrabold uppercase">{event.title}</span>
+					<span class="flex flex-wrap items-center gap-1.5">
+						{#each rows as row (row.id)}
+							{@const p = statusPill(row.status)}
+							<span class="inline-flex h-7 items-center gap-1.5 rounded-full bg-[#fff]/15 pr-1 pl-3 text-[13px] font-semibold text-[#fff]">{people.length > 1 ? firstName(row.member_id) : ''}<span class="{p.cls} ml-1">{p.text}</span></span>
+						{/each}
+					</span>
 				</a>
 			{/if}
 		{:else}
@@ -97,12 +99,12 @@
 		{/each}
 	</section>
 
-	<section class="grid gap-2" aria-label={t('portal.attention')}>
-		<h2 class="flex items-center gap-2 font-display text-lg font-extrabold tracking-[.02em] text-ink uppercase">{t('portal.attention')}{#if open > 0}<span class="badge badge-sm badge-error">{open}</span>{/if}</h2>
-		<div class="grid grid-cols-4 gap-2">
+	<section class="grid gap-2" aria-label={t('portal.needs_you')}>
+		{@render heading(t('portal.needs_you'), undefined, open)}
+		<div class="grid grid-cols-4 gap-2.5">
 			{#each tiles as tile (tile.key)}
-				<a class="card relative grid min-h-22 place-items-center content-center gap-1.5 px-1 py-2 text-center text-xs font-semibold text-ink" href={tile.href}>
-					{#if tile.n > 0}<span class="absolute top-1.5 right-2 grid min-w-5 place-items-center rounded-full bg-club px-1 text-[11px] leading-5 font-bold text-club-content" aria-label={t('portal.todo_count', { n: tile.n })}>{tile.n}</span>{/if}
+				<a class="card relative grid min-h-21 place-items-center content-center gap-1.5 px-1 py-2 text-center text-[13px] font-semibold text-ink" href={tile.href}>
+					{#if tile.n > 0}<span class="absolute top-1.5 right-2 grid min-w-5 place-items-center rounded-full bg-club px-1 text-xs leading-5 font-bold text-club-content" aria-label={t('portal.todo_count', { n: tile.n })}>{tile.n}</span>{/if}
 					<span class="grid size-9 place-items-center rounded-box {tile.tone}"><tile.icon size={18} aria-hidden="true" /></span>
 					{tile.label}
 				</a>
@@ -110,16 +112,15 @@
 		</div>
 	</section>
 
-	{#if weekItems.length}
+	{#if weekRows.length}
 		<section class="grid gap-2" aria-label={t('portal.next_fourteen_days')}>
-			<h2 class="flex items-baseline font-display text-lg font-extrabold tracking-[.02em] text-ink uppercase">{t('portal.this_week')}<a class="link-more ml-auto" href="/parent?tab=calendar">{t('portal.agenda')} →</a></h2>
+			{@render heading(t('portal.this_week'), { href: '/parent?tab=calendar', text: t('portal.agenda') })}
 			<div class="card divide-y divide-rule overflow-hidden">
-				{#each weekItems.slice(0, 4) as { key, event, badges } (key)}
-					<a class="flex min-h-15 items-center gap-3 px-3 py-2" href={eventLink(event.event_id)} data-sveltekit-reset="false">
-						<span class="w-12 shrink-0 text-center leading-none"><b class="block font-display text-2xl font-extrabold text-ink">{new Date(event.start).getDate()}</b><span class="font-mono text-[11px] tracking-[.06em] text-muted uppercase">{new Date(event.start).toLocaleDateString(undefined, { weekday: 'short' })}</span></span>
-						<span class="min-w-0 flex-1"><span class="block truncate font-semibold text-ink">{event.title}</span><span class="block truncate text-sm text-muted">{timeLine(event)}</span></span>
-						<span class="flex shrink-0 flex-wrap justify-end gap-1">{#each badges.slice(0, 2) as badge, j (j)}<span class="badge badge-sm border {badge.cls}">{badge.text}</span>{/each}</span>
-						<ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" />
+				{#each weekRows as row (row.key)}
+					<a class="flex min-h-15 items-center gap-3 px-3.5 py-2.5" href={eventLink(row.event.event_id)} data-sveltekit-reset="false">
+						<span class="w-12 shrink-0 text-center leading-none"><b class="block font-display text-[1.625rem] font-extrabold text-ink">{new Date(row.event.start).getDate()}</b><span class="font-mono text-[11px] tracking-[.06em] text-muted uppercase">{weekday(row.event.start)}</span></span>
+						<span class="min-w-0 flex-1"><b class="block truncate text-base font-semibold text-ink">{row.event.title}{row.who ? ` · ${row.who}` : ''}</b><span class="block truncate text-sm text-muted">{timeLine(row.event)}</span></span>
+						<span class={row.pill.cls}>{row.pill.text}</span>
 					</a>
 				{/each}
 			</div>
@@ -129,9 +130,17 @@
 	{@render following()}
 
 	{#if news.length}
+		{@const article = news[0]}
 		<section class="grid gap-2" aria-label={t('portal.news')}>
-			<h2 class="flex items-baseline font-display text-lg font-extrabold tracking-[.02em] text-ink uppercase">{t('portal.latest_news')}<a class="link-more ml-auto" href="/parent?tab=news">{t('portal.all_news')} →</a></h2>
-			<News articles={news.slice(0, 1)} home />
+			{@render heading(t('portal.latest_news'), { href: '/parent?tab=news', text: t('portal.all_news') })}
+			<a class="card flex items-start gap-3 p-3.5" href={`/parent?tab=news&article=${article.id}`} data-sveltekit-reset="false">
+				<span class="flex min-w-0 flex-1 flex-col gap-0.5">
+					<span class="font-mono text-[11px] tracking-[.04em] text-muted uppercase">{(article.teams ?? []).join(', ') || t('portal.news')}{article.published_at ? ` · ${formatDay(article.published_at)}` : ''}</span>
+					<b class="mt-0.5 text-lg leading-tight font-semibold text-ink">{translation(article).title}</b>
+					{#if translation(article).excerpt}<span class="line-clamp-2 text-sm text-muted">{translation(article).excerpt}</span>{/if}
+				</span>
+				<ChevronRight size={18} class="mt-1 shrink-0 text-muted" aria-hidden="true" />
+			</a>
 		</section>
 	{/if}
 </div>

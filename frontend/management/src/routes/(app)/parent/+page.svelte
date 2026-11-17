@@ -26,6 +26,8 @@
 	import RequirementsCard from '#lib/components/portal/RequirementsCard.svelte';
 	import PortalAgenda from '#lib/components/portal/PortalAgenda.svelte';
 	import MobileHome from '#lib/components/mobile/MobileHome.svelte';
+	import HeaderChip from '#lib/components/mobile/HeaderChip.svelte';
+	import MobileAgenda from '#lib/components/mobile/MobileAgenda.svelte';
 	import MeHub from '#lib/components/mobile/MeHub.svelte';
 	import MobilePayments from '#lib/components/mobile/MobilePayments.svelte';
 	import PortalWeekGrid from '#lib/components/portal/PortalWeekGrid.svelte';
@@ -109,10 +111,10 @@
 
 	/** What "Next 14 days" lists: the family's games and practices, plus the officiating duties someone signed up for or was assigned (open invitations have their own card). */
 	const weekItems = $derived.by(() => {
-		const items: { key: string; event: PortalEventDisplay; badges: { text: string; cls: string }[] }[] = upcomingTwoWeeks.map((event) => ({
+		const items: { key: string; event: PortalEventDisplay; badges: { text: string; cls: string; status: string; who: string }[] }[] = upcomingTwoWeeks.map((event) => ({
 			key: event.event_id,
 			event,
-			badges: events.filter((row) => row.event_id === event.event_id).map((row) => ({ text: `${people.length > 1 ? `${firstName(row.member_id)} · ` : ''}${t(statusLabelKey(row.status))}`, cls: statusStyle(row.status) }))
+			badges: events.filter((row) => row.event_id === event.event_id).map((row) => ({ text: `${people.length > 1 ? `${firstName(row.member_id)} · ` : ''}${t(statusLabelKey(row.status))}`, cls: statusStyle(row.status), status: row.status, who: firstName(row.member_id) }))
 		}));
 		const now = new Date();
 		const end = new Date(now);
@@ -121,7 +123,7 @@
 			if (offer.status !== 'signed_up' && offer.status !== 'assigned') continue;
 			const start = new Date(offer.start);
 			if (offer.cancelled || start <= now || start >= end) continue;
-			items.push({ key: `duty-${offer.event_id}-${offer.member_id}`, event: offer, badges: [{ text: `${people.length > 1 ? `${firstName(offer.member_id)} · ` : ''}${t(`portal.crew_${offer.role}`)} · ${t(`portal.week_duty_${offer.status}`)}`, cls: 'border-line bg-subhead text-ink' }] });
+			items.push({ key: `duty-${offer.event_id}-${offer.member_id}`, event: offer, badges: [{ text: `${people.length > 1 ? `${firstName(offer.member_id)} · ` : ''}${t(`portal.crew_${offer.role}`)} · ${t(`portal.week_duty_${offer.status}`)}`, cls: 'border-line bg-subhead text-ink', status: 'duty', who: firstName(offer.member_id) }] });
 		}
 		return items.sort((a, b) => Date.parse(a.event.start) - Date.parse(b.event.start));
 	});
@@ -264,7 +266,12 @@
 	}
 	const sizeText = (bytes: number) => (bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 
-	usePageHeader(() => ({ title, context: tab === 'home' ? formatLongDay(new Date()) : undefined, actions: tab === 'home' && people.length > 1 ? headerPeople : tab === 'calendar' ? calendarActions : undefined }));
+	// The phone header is the board's: "Hi Bernard" with the short date above it, "Agenda", "News" ...; tablets and desktops keep the longer titles.
+	const shortDay = (date: Date) => new Intl.DateTimeFormat(getLang(), { weekday: 'short', day: 'numeric', month: 'short' }).format(date);
+	const headerTitle = $derived(phone ? (tab === 'home' ? t('portal.hi', { name: viewer?.first_name || viewer?.name || '' }) : tab === 'calendar' ? t('portal.agenda') : title) : title);
+	const headerContext = $derived(tab === 'home' ? (phone ? shortDay(new Date()) : formatLongDay(new Date())) : undefined);
+	const chipOptions = $derived(people.map((person) => ({ id: person.id, name: person.name, short: person.first_name || person.name, photo: person.photo_url })));
+	usePageHeader(() => ({ title: headerTitle, context: headerContext, actions: pageActions }));
 
 	async function reply(event: PortalEvent, status: string, note: string): Promise<boolean> {
 		if (busy) return false;
@@ -301,7 +308,14 @@
 <svelte:head><title>{pageTitle(title)}</title></svelte:head>
 
 {#snippet peoplePicker()}
-	<PersonFilter {people} bind:selected viewer={data.home.viewer} />
+	<div class="hidden md:block"><PersonFilter {people} bind:selected viewer={data.home.viewer} /></div>
+{/snippet}
+
+<!-- What the header carries: the desktop buttons as before, and on a phone the person chip (everyone / one child) on the pages that show a family's data. -->
+{#snippet pageActions()}
+	{#if tab === 'home' && people.length > 1}{@render headerPeople()}{/if}
+	{#if tab === 'calendar'}{@render calendarActions()}{/if}
+	{#if people.length > 1 && ['home', 'calendar', 'payments', 'documents'].includes(tab)}<div class="md:hidden"><HeaderChip options={chipOptions} bind:value={selected} allLabel={t('portal.everyone')} /></div>{/if}
 {/snippet}
 
 {#snippet rsvp(event: PortalEvent, quick = false, dark = false, seg = false)}
@@ -575,17 +589,6 @@
 	{/if}
 {/snippet}
 
-{#if tab !== 'home'}
-	<div class="flex items-center justify-between gap-2 md:hidden">
-		<h1 class="font-display text-2xl font-extrabold text-ink uppercase">{title}</h1>
-		{#if tab === 'calendar' && !crewOnly}
-			<a class="btn btn-outline gap-2 md:hidden" href={viewLink(view === 'list' ? 'month' : 'list')}>
-				{#if view === 'list'}<CalendarDays size={16} aria-hidden="true" />{t('portal.month_view')}{:else}<List size={16} aria-hidden="true" />{t('portal.schedule')}{/if}
-			</a>
-		{/if}
-	</div>
-{/if}
-
 {#if tab === 'calendar'}
 	{@render peoplePicker()}
 	{#if view === 'month'}
@@ -627,12 +630,8 @@
 			</div>
 		</section>
 	{:else}
-		<div class="flex gap-2 overflow-x-auto md:hidden" role="group" aria-label={t('portal.filter_kind')}>
-			{#each [['all', 'portal.kind_all'], ['game', 'portal.kind_games'], ['training', 'portal.kind_training'], ['crew', 'portal.kind_crew']] as [key, label] (key)}
-				<button type="button" class="portal-person text compact shrink-0" aria-pressed={kindFilter === key} onclick={() => (kindFilter = key)}>{t(label)}</button>
-			{/each}
-		</div>
-		<PortalAgenda entries={listEntries} href={eventLink} replies={replyStack} score={scoreMark} />
+		<div class="md:hidden"><MobileAgenda entries={calendar} href={eventLink} {people} {firstName} bind:kind={kindFilter} switchHref={viewLink('month')} /></div>
+		<div class="hidden md:block"><PortalAgenda entries={calendar} href={eventLink} replies={replyStack} score={scoreMark} /></div>
 	{/if}
 {:else if tab === 'news'}
 	<News articles={data.home.news} />
@@ -654,7 +653,7 @@
 	</div>
 {:else}
 	<div class="md:hidden">
-		<MobileHome {people} bind:selected viewer={data.home.viewer} greeting={title} dateLabel={formatLongDay(new Date())} {nextEvents} {background} crest={data.branding?.logo_url} counts={homeCounts} weekItems={weekItems} news={data.home.news} {eventLink} {firstName} {rsvp} {following} />
+		<MobileHome {people} {nextEvents} {background} crest={data.branding?.logo_url} counts={homeCounts} {weekItems} news={data.home.news} {eventLink} {firstName} {rsvp} {following} />
 	</div>
 	<div class="hidden md:contents">
 	<FollowedGames games={data.followed ?? []} crest={data.branding?.logo_url} clubName={data.branding?.name ?? ''} {background} />
