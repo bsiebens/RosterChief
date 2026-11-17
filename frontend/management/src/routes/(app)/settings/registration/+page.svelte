@@ -98,18 +98,20 @@
 							<input id="installment-offsets" name="installment_offsets" class="input input-bordered w-full" aria-describedby="installment-offsets-help" aria-invalid={!!errs.installment_offsets} bind:value={v.installment_offsets} />
 							<span id="installment-offsets-help" class="label-text-alt mt-1 block {errs.installment_offsets ? 'text-error' : ''}">{errs.installment_offsets || t('installments.offsets_help')}</span>
 						</div>
-						<div class="form-control max-w-xs">
+						<div class="grid gap-5 md:grid-cols-2 md:items-start">
+						<div class="form-control">
 							<label class="label" for="installment-grace"><span class="label-text">{t('installments.grace')}</span></label>
 							<input id="installment-grace" name="installment_grace_days" type="number" min="0" max="365" class="input input-bordered w-full" aria-describedby="installment-grace-help" aria-invalid={!!errs.installment_grace_days} bind:value={v.installment_grace_days} />
 							<span id="installment-grace-help" class="label-text-alt mt-1 block {errs.installment_grace_days ? 'text-error' : ''}">{errs.installment_grace_days || t('installments.grace_help')}</span>
 						</div>
-						<fieldset class="flex flex-wrap gap-x-5 gap-y-2">
+						<fieldset class="flex flex-wrap content-start gap-x-5 gap-y-2">
 							<legend class="mb-2 text-sm font-semibold">{t('installments.event_types')}</legend>
 							{#each EVENT_KINDS as kind (kind)}
 								<label class="flex items-center gap-2 text-sm"><input type="checkbox" class="checkbox checkbox-sm" name="installment_block_kinds" value={kind} bind:group={v.installment_block_kinds} /> {t(kindLabelKey(kind))}</label>
 							{/each}
 							{#if errs.installment_block_kinds}<p class="basis-full text-xs text-error">{errs.installment_block_kinds}</p>{/if}
 						</fieldset>
+						</div>
 					</section>
 				</div>
 
