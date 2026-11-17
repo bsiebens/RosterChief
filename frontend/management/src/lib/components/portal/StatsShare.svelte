@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
+	import { page } from '$app/state';
 	import { ChartColumn, Check, Copy, Link2, RefreshCw } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -14,7 +15,7 @@
 	let busy = $state(false);
 	let copied = $state(false);
 	let failed = $state(false);
-	const url = $derived(person.share_token ? `${location.origin}/stats/${person.share_token}` : '');
+	const url = $derived(person.share_token ? `${page.url.origin}/stats/${person.share_token}` : '');
 
 	async function set(on: boolean, rotate = false) {
 		busy = true;

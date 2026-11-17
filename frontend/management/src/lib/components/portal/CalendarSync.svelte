@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { CalendarDays, Check, Copy, RefreshCw } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Sheet from '#lib/components/portal/Sheet.svelte';
@@ -16,7 +17,7 @@
 	let busy = $state(false);
 	let failed = $state(false);
 	let copied = $state('');
-	const https = $derived(token ? `${location.origin}/api/v1/public/calendar/${token}.ics` : '');
+	const https = $derived(token ? `${page.url.origin}/api/v1/public/calendar/${token}.ics` : '');
 	const webcal = $derived(https.replace(/^https?:/, 'webcal:'));
 
 	async function show() {
