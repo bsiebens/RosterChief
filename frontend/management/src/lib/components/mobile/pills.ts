@@ -5,7 +5,7 @@ const BASE = 'inline-flex h-6 shrink-0 items-center rounded-full px-2.5 text-[13
 const TONE = {
 	ok: 'bg-ok-bg text-ok-text',
 	red: 'bg-danger-bg text-danger',
-	muted: 'bg-subhead text-muted'
+	muted: 'pill-muted'
 };
 
 export function statusPill(status: string): { cls: string; text: string } {

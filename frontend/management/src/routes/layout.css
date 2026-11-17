@@ -1266,6 +1266,8 @@ textarea[name="note"] {
 
 /* Club portal surfaces and the mobile tab bar. */
 .portal-ui {
+    --color-line: #d2d7df; /* borders and rules: a notch darker than the manage app so cards stand out from the page */
+    --color-rule: #e2e5ea;
     --portal-panel: #ffffff;
     --portal-hero: var(--tenant-sidebar-bg, #172942);
     --portal-hero-content: var(--tenant-sidebar-fg, #fff);
@@ -1588,7 +1590,12 @@ textarea[name="note"] {
 
 /* Documents on a phone: every person is a card of their own, with room between them, so it is clear what is for whom. */
 @media (max-width: 47.99rem) {
-    .req-card { display: grid; gap: 1.25rem; border: 0; background: transparent; box-shadow: none; }
+    .portal-ui .req-card { display: grid; gap: 1.25rem; border: 0; background: transparent !important; box-shadow: none; }
     .req-member { overflow: hidden; border: 1px solid var(--color-line); border-radius: var(--radius-box); background: var(--portal-panel); }
     .req-member:last-child { border-bottom: 1px solid var(--color-line); }
 }
+
+/* The neutral status pill (Can't, Maybe, Not picked): readable on a white card and on a dark one. */
+.pill-muted { background: #e3e6ec; color: #333c4b; }
+:root:not([data-theme='light']) .portal-ui .pill-muted { background: #262e3d; color: #b6bfce; }
+:root[data-theme='dark'] .portal-ui .pill-muted { background: #262e3d; color: #b6bfce; }
