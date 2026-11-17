@@ -53,6 +53,7 @@
 	]);
 	const settings = $derived([
 		{ key: 'profile', href: '/parent/profile', icon: UserRound, label: 'portal.profile_details' },
+		...(people.length > 1 ? [{ key: 'family', href: '/parent/profile', icon: UsersRound, label: 'portal.family' }] : []),
 		{ key: 'notifications', href: '/parent/notifications?view=settings', icon: Bell, label: 'portal.notifications' },
 		{ key: 'security', href: '/account/security', icon: KeyRound, label: 'shell.menu.security' },
 		...(manyClubs ? [{ key: 'clubs', href: '/parent/profile?view=clubs', icon: ArrowRightLeft, label: 'portal.switch_club' }] : [])
@@ -106,7 +107,6 @@
 			{#each settings as row (row.key)}
 				<a class="flex min-h-14 items-center gap-3 px-4" href={row.href}><span class="grid size-10 shrink-0 place-items-center rounded-box bg-subhead text-ink"><row.icon size={18} aria-hidden="true" /></span><b class="min-w-0 flex-1 text-ink">{t(row.label)}</b><ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" /></a>
 			{/each}
-			{#if people.length > 1}<a class="flex min-h-14 items-center gap-3 px-4" href="/parent/profile"><span class="grid size-10 shrink-0 place-items-center rounded-box bg-subhead text-ink"><UsersRound size={18} aria-hidden="true" /></span><b class="min-w-0 flex-1 text-ink">{t('portal.family')}</b><ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" /></a>{/if}
 			<div class="p-4"><ThemeSwitch /></div>
 		</div>
 	</section>
