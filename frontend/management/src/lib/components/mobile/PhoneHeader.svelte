@@ -29,6 +29,7 @@
 			if (path !== '/parent') return '/parent?tab=me';
 			return tab === 'payments' || tab === 'documents' ? '/parent?tab=me' : null;
 		}
+		if (path.startsWith('/coach/notifications')) return '/coach';
 		if (path.startsWith('/coach/news/')) return '/coach?tab=news';
 		if (path.startsWith('/calendar/events/')) return '/coach?tab=calendar';
 		return null;
@@ -40,12 +41,12 @@
 	{#if back}<a class="phone-ib" href={back} aria-label={t('common.back')}><ArrowLeft size={22} aria-hidden="true" /></a>{/if}
 	<h1 class="phone-title" class:long={title.length > 14}>{#if context}<span class="phone-sub">{context}</span>{/if}{title}</h1>
 	{#if actions}{@render actions()}{/if}
-	{#if mode === 'parent'}
-		<a class="phone-ib" href="/parent/notifications" aria-label={notifications.unread ? t('portal.todo_count', { n: notifications.unread }) : t('portal.notifications')}>
+	{#if mode === 'parent' || mode === 'coach'}
+		<a class="phone-ib" href="/{mode}/notifications" aria-label={notifications.unread ? t('portal.todo_count', { n: notifications.unread }) : t('portal.notifications')}>
 			<Bell size={22} aria-hidden="true" />{#if notifications.unread > 0}<span class="phone-dot"></span>{/if}
 		</a>
-	{:else}
-		<NotificationBell dark portal="coach" />
+	{/if}
+	{#if mode === 'coach'}
 		{#if canSwitch}<button type="button" class="phone-switch" aria-label={t('portal.switch_view')} onclick={() => (switchOpen = true)}><ArrowLeftRight size={20} aria-hidden="true" /></button>{/if}
 	{/if}
 </div>

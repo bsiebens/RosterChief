@@ -47,6 +47,7 @@ export function activePortalKey(url: { pathname: string; hash: string; searchPar
 	if (pathname.startsWith('/parent/shop')) return 'shop';
 	if (pathname.startsWith('/coach/teams/')) return 'teams';
 	if (pathname.startsWith('/coach/news')) return 'news';
+	if (pathname.startsWith('/coach/notifications')) return 'home';
 	if (pathname !== '/parent' && pathname !== '/coach') return 'calendar';
 	return searchParams.get('tab') || hash.slice(1) || 'home';
 }
