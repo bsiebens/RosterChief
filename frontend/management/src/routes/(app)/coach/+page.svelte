@@ -55,10 +55,13 @@
 
 {#snippet pageActions()}
 	{#if teams.length > 1 && tab !== 'news'}<div class="md:hidden"><HeaderChip options={teamOptions} bind:value={() => activeTeam?.id ?? '', (id) => (selected = id)} /></div>{/if}
-	{#if tab === 'news' && data.coach.can_add_news}{@render addPost()}{/if}
 {/snippet}
 
-{#snippet addPost()}<a class="btn btn-primary btn-square" href="/coach/news/new" aria-label={t('coach.add_post')}><Plus size={18} aria-hidden="true" /></a>{/snippet}
+{#snippet addButton(href: string, label: string)}
+	<!-- On a phone the button stays fixed above the tab bar while the list scrolls behind it. -->
+	<a class="btn btn-primary min-h-12 gap-2 max-md:fixed max-md:inset-x-3 max-md:bottom-[calc(3.5rem+env(safe-area-inset-bottom)+0.5rem)] max-md:z-20 max-md:mx-auto max-md:max-w-2xl max-md:shadow-lg md:mb-3 md:min-h-11 md:w-auto" {href}><Plus size={18} aria-hidden="true" />{label}</a>
+{/snippet}
+
 
 {#if teams.length > 1 && tab !== 'news'}
 	<div class="flex max-w-full gap-2 overflow-x-auto pb-1 max-md:hidden" role="group" aria-label={t('portal.teams')}>
@@ -69,13 +72,15 @@
 {/if}
 
 {#if tab === 'news'}
-	{#if data.coach.can_add_news}<a class="btn btn-primary mb-3 min-h-11 w-full gap-2 sm:w-auto" href="/coach/news/new"><Plus size={18} aria-hidden="true" />{t('coach.add_post')}</a>{/if}
+	{#if data.coach.can_add_news}{@render addButton('/coach/news/new', t('coach.add_post'))}{/if}
 	<CoachNews items={newsItems} articles={data.coach.news} mine={page.url.searchParams.get('mine') === '1'} canFilter={data.coach.can_add_news} />
+	{#if data.coach.can_add_news}<div class="h-16 md:hidden" aria-hidden="true"></div>{/if}
 {:else if tab === 'teams'}
 	<CoachSquad team={roster} positions={data.positions} />
 {:else if tab === 'calendar'}
-	{#if data.coach.can_create_events}<a class="btn btn-primary mb-3 min-h-11 w-full gap-2 sm:w-auto" href="/calendar/events/new?view=coach"><Plus size={18} aria-hidden="true" />{t('coach.add_event')}</a>{/if}
+	{#if data.coach.can_create_events}{@render addButton('/calendar/events/new?view=coach', t('coach.add_event'))}{/if}
 	<CoachEvents {events} />
+	{#if data.coach.can_create_events}<div class="h-16 md:hidden" aria-hidden="true"></div>{/if}
 {:else}
 	<CoachToday {events} background={data.coach.event_background} crest={data.branding?.logo_url} />
 {/if}
