@@ -34,7 +34,6 @@
     const phone = $derived(data.coachView && narrow.current);
     const viewQuery = $derived(data.coachView ? '?view=coach' : '');
     const editHref = $derived(`${eventEditHref(ev.id)}${viewQuery}`);
-    let menuOpen = $state(false);
     const tabHref = (key: string) => `?tab=${key}${data.coachView ? '&view=coach' : ''}`;
     // The month an event is in, as the coach calendar takes it (`YYYY-MM`), so going back lands on that month.
     const monthOf = (iso: string) => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
@@ -59,7 +58,6 @@
     let updating = $state(false);
     const canUpdate = $derived(past && ev.has_game_source && (ev.can_edit || ev.can_manage_attendance));
     let cancelOpen = $state(false);
-    const openCancel = () => { menuOpen = false; cancelOpen = true; };
     let busy = $state(false);
     const submit = () => {
         busy = true;
@@ -199,12 +197,19 @@
 
 {#snippet mobileTop()}
     <div class="grid min-w-0 gap-3 md:hidden">
-        <div class="flex items-center justify-end gap-2">
-            <div class="flex items-center gap-2">
-                {#if ev.can_edit}<a class="btn btn-primary min-h-11 gap-2" href={editHref}><Pencil size={16} aria-hidden="true"/> {t('common.edit')}</a>{/if}
-                <button type="button" class="btn btn-outline btn-square min-h-11" aria-label={t('coach.ev_actions')} onclick={() => (menuOpen = true)}><Ellipsis size={20} aria-hidden="true"/></button>
+        {#if ev.can_edit}
+            <div class="grid grid-cols-2 gap-2">
+                <a class="btn btn-primary min-h-11 gap-2" href={editHref}><Pencil size={16} aria-hidden="true"/> {t('common.edit')}</a>
+                <button type="button" class="btn btn-outline min-h-11 gap-2 {ev.cancelled ? '' : 'btn-error'}" onclick={() => (cancelOpen = true)}>
+                    {#if ev.cancelled}<RotateCcw size={16} aria-hidden="true"/> {t('events.reactivate')}{:else}<Ban size={16} aria-hidden="true"/> {t('events.cancel')}{/if}
+                </button>
             </div>
-        </div>
+        {/if}
+        {#if canUpdate}
+            <form method="POST" action="?/updateGame&view=coach" use:enhance={() => { updating = true; return async ({ update }) => { await update({ reset: false }); updating = false; }; }}>
+                <button class="btn btn-outline min-h-11 w-full gap-2" type="submit" disabled={updating}><RefreshCw size={16} class={updating ? 'animate-spin' : ''} aria-hidden="true"/> {t('events.update_game')}</button>
+            </form>
+        {/if}
         <section class="card min-w-0 overflow-hidden border-l-4 {style.bar}">
             <div class="grid min-w-0 gap-2.5 p-4">
                 <div class="flex flex-wrap items-center gap-1.5">
@@ -433,26 +438,6 @@
         {/if}
     {/if}
 </div>
-
-<Sheet open={menuOpen} title={t('coach.ev_actions')} onclose={() => (menuOpen = false)}>
-    <div class="grid gap-2 p-4 pt-0">
-        <h2 class="font-display text-xl font-extrabold text-ink uppercase">{t('coach.ev_actions')}</h2>
-        {#if ev.can_edit}
-            <a class="btn btn-outline min-h-12 justify-start gap-2" href={editHref}><Pencil size={16} aria-hidden="true"/> {t('coach.ev_menu_edit')}</a>
-        {/if}
-        {#if canUpdate}
-            <form method="POST" action="?/updateGame&view=coach" use:enhance={() => { updating = true; return async ({ update }) => { await update({ reset: false }); updating = false; menuOpen = false; }; }}>
-                <button class="btn btn-outline min-h-12 w-full justify-start gap-2" type="submit" disabled={updating}><RefreshCw size={16} class={updating ? 'animate-spin' : ''}/> {t('events.update_game')}</button>
-            </form>
-        {/if}
-        {#if ev.can_edit}
-            <button class="btn btn-outline min-h-12 justify-start gap-2 {ev.cancelled ? '' : 'btn-error'}" type="button" onclick={openCancel}>
-                {#if ev.cancelled}<RotateCcw size={16}/> {t('events.reactivate')}{:else}<Ban size={16}/> {t('events.cancel')}{/if}
-            </button>
-        {/if}
-        {#if ev.kind === 'game' && !ev.cancelled}<div class="flex"><FollowButton kind="event" id={ev.id}/></div>{/if}
-    </div>
-</Sheet>
 
 <Modal bind:open={cancelOpen} title={ev.cancelled ? t('events.reactivate_title') : t('events.cancel_title')}>
     <form method="POST" action={ev.cancelled ? '?/uncancel' : '?/cancel'} class="grid gap-3" use:enhance={submit}>
