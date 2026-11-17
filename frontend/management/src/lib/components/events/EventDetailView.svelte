@@ -36,7 +36,9 @@
     const editHref = $derived(`${eventEditHref(ev.id)}${viewQuery}`);
     let menuOpen = $state(false);
     const tabHref = (key: string) => `?tab=${key}${data.coachView ? '&view=coach' : ''}`;
-    const calendarHref = $derived(data.coachView ? `/coach?tab=calendar&team=${(data.event.teams ?? []).map((team) => team.id).join(',')}` : '/calendar');
+    // The month an event is in, as the coach calendar takes it (`YYYY-MM`), so going back lands on that month.
+    const monthOf = (iso: string) => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+    const calendarHref = $derived(data.coachView ? `/coach?tab=calendar&team=${(data.event.teams ?? []).map((team) => team.id).join(',')}&month=${monthOf(data.event.start)}` : '/calendar');
 
     // Phone coach view: Details, Attendance and (games and tournaments) Line-up; files live under Details.
     const phoneTabs = $derived([
@@ -70,7 +72,7 @@
 
     // On a coach phone the header is the board's: what you are looking at (Replies, Line-up, or the event itself) with the kind or opponent, day and time above it.
     const phoneTitle = $derived(shownTab === 'attendance' ? t('coach.mode_replies') : shownTab === 'lineup' ? t('events.tab.lineup') : ev.title);
-    const phoneContext = $derived(`${ev.opponent ? ev.opponent.name : t(kindLabelKey(ev.kind))} · ${new Intl.DateTimeFormat(getLang(), {weekday: 'short', day: 'numeric', month: 'short'}).format(new Date(ev.start))} · ${formatTime(ev.start)}`);
+    const phoneContext = $derived(`${new Intl.DateTimeFormat(getLang(), {weekday: 'short', day: 'numeric', month: 'short'}).format(new Date(ev.start))} · ${formatTime(ev.start)}`);
     usePageHeader(() => ({title: phone ? phoneTitle : ev.title, context: phone ? phoneContext : `${t(kindLabelKey(ev.kind))} · ${formatDay(ev.start)}`, badge, actions}));
     const whereWhen = $derived([formatRange(ev.start, ev.end), ev.location ? [ev.location.name, ev.location.city].filter(Boolean).join(', ') : ''].filter(Boolean).join(' · '));
 </script>
@@ -350,7 +352,6 @@
     {#if phone && shownTab === 'overview'}
         <div class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4">
             {@render mobileInfo()}
-            {@render details()}
             {#if data.attachments}
                 <EventAttachments eventId={ev.id} initial={data.attachments}/>
             {/if}

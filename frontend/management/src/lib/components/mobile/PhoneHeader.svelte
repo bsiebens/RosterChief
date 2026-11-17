@@ -32,7 +32,14 @@
 		}
 		if (path.startsWith('/coach/notifications')) return '/coach';
 		if (path.startsWith('/coach/news/')) return '/coach?tab=news';
-		if (path.startsWith('/calendar/events/')) return '/coach?tab=calendar';
+		if (path.startsWith('/calendar/events/')) {
+			// Back to the coach calendar on the team the event belongs to and the month it is in.
+			const event = page.data.event as { teams?: { id: string }[]; start?: string } | undefined;
+			if (!event?.start) return '/coach?tab=calendar';
+			const d = new Date(event.start);
+			const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+			return `/coach?tab=calendar&team=${(event.teams ?? []).map((team) => team.id).join(',')}&month=${month}`;
+		}
 		return null;
 	});
 </script>

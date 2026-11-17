@@ -6,9 +6,10 @@
 	import type { CoachEvent } from '#lib/portal.ts';
 	import PortalEventDate from '#lib/components/PortalEventDate.svelte';
 
-	let { events }: { events: CoachEvent[] } = $props();
+	let { events, initialMonth = '' }: { events: CoachEvent[]; /** `YYYY-MM`: the month to open on (coming back from an event). */ initialMonth?: string } = $props();
 	let filter = $state<'all' | 'game' | 'training'>('all');
-	let month = $state(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+	// svelte-ignore state_referenced_locally
+	let month = $state(/^\d{4}-\d{2}$/.test(initialMonth) ? new Date(Number(initialMonth.slice(0, 4)), Number(initialMonth.slice(5)) - 1, 1) : new Date(new Date().getFullYear(), new Date().getMonth(), 1));
 	let picked = $state('');
 	const FILTERS = [['all', 'portal.all'], ['game', 'coach.games'], ['training', 'events.kind.training']] as const;
 	const shown = $derived(events.filter((event) => filter === 'all' || (filter === 'game' ? isGame(event) : event.kind === 'training')));

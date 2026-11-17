@@ -80,7 +80,7 @@
 	<CoachSquad team={roster} positions={data.positions} />
 {:else if tab === 'calendar'}
 	{#if data.coach.can_create_events}{@render addButton('/calendar/events/new?view=coach', t('coach.add_event'))}{/if}
-	<CoachEvents {events} />
+	<CoachEvents {events} initialMonth={page.url.searchParams.get('month') ?? ''} />
 	{#if data.coach.can_create_events}<div class="h-[4.75rem] md:hidden" aria-hidden="true"></div>{/if}
 {:else}
 	<CoachToday {events} background={data.coach.event_background} crest={data.branding?.logo_url} />
