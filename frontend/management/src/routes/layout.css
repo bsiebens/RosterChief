@@ -1604,3 +1604,6 @@ textarea[name="note"] {
 @media (max-width: 47.99rem) {
     .portal-modal-sheet { inset: auto 0 0; margin: 0 auto; width: 100%; max-width: 42rem; max-height: 92dvh; border-radius: var(--radius-box) var(--radius-box) 0 0; padding-bottom: env(safe-area-inset-bottom); }
 }
+
+.phone-top .phone-title { flex: 1 1 auto; min-width: 6rem; }
+.phone-chip { padding: 0 0.6rem 0 0.3rem; gap: 0.4rem; }

@@ -23,9 +23,9 @@
 <div class="relative" data-chip>
 	<button type="button" class="phone-chip" aria-haspopup="listbox" aria-expanded={open} onclick={() => (open = !open)}>
 		<span class="flex">
-			{#each stack as o, i (o.id)}<span class="rounded-full border-2 border-(--portal-panel)" style:margin-left={i ? '-0.5rem' : '0'}><ClubCrest name={o.name} logoUrl={o.photo} size={30} /></span>{/each}
+			{#each stack as o, i (o.id)}<span class="rounded-full border-2 border-(--portal-panel)" style:margin-left={i ? '-0.4rem' : '0'}><ClubCrest name={o.name} logoUrl={o.photo} size={28} /></span>{/each}
 		</span>
-		<span class="max-w-28 truncate">{label}</span>
+		{#if current}<span class="max-w-24 truncate">{label}</span>{:else}<span class="sr-only">{label}</span>{/if}
 		<ChevronDown size={16} class="shrink-0 opacity-70" aria-hidden="true" />
 	</button>
 	{#if open}
