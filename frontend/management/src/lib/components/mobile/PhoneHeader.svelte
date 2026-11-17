@@ -18,6 +18,11 @@
 
 	onMount(() => void notifications.load());
 	let switchOpen = $state(false);
+	// The header stays mounted when going between the member and coach views: the switch sheet must not stay open behind that.
+	$effect(() => {
+		void page.url.pathname;
+		switchOpen = false;
+	});
 
 	// Where the round back button leads: Me for everything that lives behind it, the coach home for coach sub pages.
 	const back = $derived.by(() => {
@@ -27,7 +32,7 @@
 			if (path.startsWith('/member/notifications')) return tab === null && page.url.searchParams.get('view') !== 'settings' ? '/member' : '/member?tab=me';
 			if (path.startsWith('/member/shop')) return tab === null && page.url.searchParams.get('view') === 'orders' ? '/member?tab=me' : null;
 			if (path !== '/member') return '/member?tab=me';
-			if (tab === 'news' && page.url.searchParams.get('article')) return '/member?tab=news';
+			if (tab === 'news' && page.url.searchParams.get('article')) return page.url.searchParams.get('from') === 'home' ? '/member' : '/member?tab=news';
 			return tab === 'payments' || tab === 'documents' ? '/member?tab=me' : null;
 		}
 		if (path.startsWith('/coach/notifications')) return '/coach';

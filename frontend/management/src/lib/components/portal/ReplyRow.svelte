@@ -97,9 +97,9 @@
 				{#if event.deadline && !going}<p class="text-xs text-muted">{t('portal.reply_by', { when: formatDateTime(event.deadline) })}</p>{/if}
 			</div>
 		</div>
-		<div class="grid grid-cols-3 gap-1 rounded-box bg-subhead p-1" role="group" aria-label={t('portal.reply')}>
+		<div class="grid grid-cols-3 gap-2" role="group" aria-label={t('portal.reply')}>
 			{#each SWITCH as option (option.key)}
-				<button type="button" class="min-h-13 rounded-box text-base font-semibold {picked === option.key ? option.on : 'text-muted'}" aria-pressed={picked === option.key} disabled={busy} onclick={() => (choice = option.key)}>{t(option.label)}</button>
+				<button type="button" class="min-h-13 rounded-full border-2 text-base font-bold {picked === option.key ? option.on + ' border-transparent' : 'border-line bg-(--portal-panel) text-ink'}" aria-pressed={picked === option.key} disabled={busy} onclick={() => (choice = option.key)}>{t(option.label)}</button>
 			{/each}
 		</div>
 		{#if picked === 'absent'}

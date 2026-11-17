@@ -1617,3 +1617,8 @@ textarea[name="note"] {
 
 @keyframes toast-in { from { opacity: 0; transform: translateY(0.75rem); } to { opacity: 1; transform: none; } }
 .toast-in { animation: toast-in 0.18s ease-out; }
+
+/* The phone header is for phones only: tablets and desktops have the top bar (this must out-rank the display: flex above). */
+@media (min-width: 48rem) {
+    .phone-top { display: none; }
+}

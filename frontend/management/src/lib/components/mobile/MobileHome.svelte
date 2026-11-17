@@ -139,7 +139,7 @@
 		{@const article = news[0]}
 		<section class="grid gap-2" aria-label={t('portal.news')}>
 			{@render heading(t('portal.latest_news'), { href: '/member?tab=news', text: t('portal.all_news') })}
-			<a class="card flex items-start gap-3 p-3.5" href={`/member?tab=news&article=${article.id}`} data-sveltekit-reset="false">
+			<a class="card flex items-start gap-3 p-3.5" href={`/member?tab=news&article=${article.id}&from=home`} data-sveltekit-reset="false">
 				<span class="flex min-w-0 flex-1 flex-col gap-0.5">
 					<span class="font-mono text-[11px] tracking-[.04em] text-muted uppercase">{(article.teams ?? []).join(', ') || t('portal.news')}{article.published_at ? ` · ${formatDay(article.published_at)}` : ''}</span>
 					<b class="mt-0.5 text-lg leading-tight font-semibold text-ink">{translation(article).title}</b>
