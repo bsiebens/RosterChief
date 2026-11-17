@@ -36,7 +36,7 @@
 <div class="phone-top md:hidden {mode === 'coach' ? 'coach' : ''}">
 	{#if mode === 'coach'}<span class="phone-tag">{t('portal.coach_view')}</span>{/if}
 	{#if back}<a class="phone-ib" href={back} aria-label={t('common.back')}><ArrowLeft size={22} aria-hidden="true" /></a>{/if}
-	<h1 class="phone-title">{#if context}<span class="phone-sub">{context}</span>{/if}{title}</h1>
+	<h1 class="phone-title" class:long={title.length > 14}>{#if context}<span class="phone-sub">{context}</span>{/if}{title}</h1>
 	{#if actions}{@render actions()}{/if}
 	{#if mode === 'parent'}
 		<a class="phone-ib" href="/parent/notifications" aria-label={notifications.unread ? t('portal.todo_count', { n: notifications.unread }) : t('portal.notifications')}>

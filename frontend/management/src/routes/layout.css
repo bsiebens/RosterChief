@@ -1568,3 +1568,5 @@ textarea[name="note"] {
 .phone-top.coach .phone-sub { color: #a8b0bd; }
 .phone-top.coach .phone-ib, .phone-top.coach .phone-chip { background: #171a20; border-color: #2a2f38; color: #f1f3f6; }
 .phone-top.coach .phone-dot { border-color: #171a20; }
+
+.phone-title.long { white-space: normal; font-size: 1.5rem; line-height: 1.05; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
