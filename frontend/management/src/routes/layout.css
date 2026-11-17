@@ -1562,7 +1562,7 @@ textarea[name="note"] {
 .phone-chip { gap: 0.5rem; border-radius: 999px; padding: 0 0.75rem 0 0.3rem; font-weight: 600; }
 .phone-dot { position: absolute; top: 0.5rem; right: 0.6rem; width: 0.6rem; height: 0.6rem; border-radius: 999px; background: var(--color-club); border: 2px solid var(--portal-panel); }
 .phone-switch { display: inline-flex; width: 2.75rem; height: 2.75rem; flex: none; align-items: center; justify-content: center; border-radius: 999px; background: var(--color-club); color: var(--color-club-content); }
-.phone-top.coach { padding-top: calc(1.25rem + env(safe-area-inset-top)); padding-bottom: 0.5rem; background: #0b0d10; color: #f1f3f6; border-bottom: 1px solid #2a2f38; }
+.phone-top.coach { padding-top: calc(1.9rem + env(safe-area-inset-top)); padding-bottom: 0.5rem; background: #0b0d10; color: #f1f3f6; border-bottom: 1px solid #2a2f38; }
 .phone-top.coach::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 5px; background: var(--color-club); }
 .phone-top.coach .phone-tag { position: absolute; left: 1rem; top: 5px; padding: 0.125rem 0.5rem; border-radius: 0 0 6px 6px; background: var(--color-club); color: var(--color-club-content); font: 400 0.625rem/1.3 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; }
 .phone-top.coach .phone-sub { color: #a8b0bd; }

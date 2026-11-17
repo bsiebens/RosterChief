@@ -268,7 +268,7 @@
 
 	// The phone header is the board's: "Hi Bernard" with the short date above it, "Agenda", "News" ...; tablets and desktops keep the longer titles.
 	const shortDay = (date: Date) => new Intl.DateTimeFormat(getLang(), { weekday: 'short', day: 'numeric', month: 'short' }).format(date);
-	const headerTitle = $derived(phone ? (tab === 'home' ? t('portal.hi', { name: viewer?.first_name || viewer?.name || '' }) : tab === 'calendar' ? t('portal.agenda') : title) : title);
+	const headerTitle = $derived(phone ? (tab === 'home' ? t('portal.hi', { name: viewer?.first_name || viewer?.name || '' }) : tab === 'calendar' ? t('portal.agenda') : tab === 'payments' ? t('portal.tile_payments') : title) : title);
 	const headerContext = $derived(tab === 'home' ? (phone ? shortDay(new Date()) : formatLongDay(new Date())) : undefined);
 	const chipOptions = $derived(people.map((person) => ({ id: person.id, name: person.name, short: person.first_name || person.name, photo: person.photo_url })));
 	usePageHeader(() => ({ title: headerTitle, context: headerContext, actions: pageActions }));

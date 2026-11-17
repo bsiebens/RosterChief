@@ -5,6 +5,7 @@
 	import { ChevronRight, CircleCheck, ClipboardList, MessageSquareQuote, Star } from '@lucide/svelte';
 	import FormResponse from '#lib/components/forms/FormResponse.svelte';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
+	import HeaderChip from '#lib/components/mobile/HeaderChip.svelte';
 	import PersonFilter from '#lib/components/PersonFilter.svelte';
 	import Sheet from '#lib/components/portal/Sheet.svelte';
 	import { formatDateTime } from '#lib/events/types.ts';
@@ -16,10 +17,10 @@
 	import type { SharedEvaluation } from '#lib/portal.ts';
 
 	let { data } = $props();
-	usePageHeader(() => ({ title: t('portal.forms') }));
-
 	let selected = $state('');
 	const people = $derived(data.home.people);
+	const chipOptions = $derived(people.map((person) => ({ id: person.id, name: person.name, short: person.first_name || person.name, photo: person.photo_url })));
+	usePageHeader(() => ({ title: t('portal.forms'), actions: people.length > 1 ? chip : undefined }));
 	const person = (id: string) => people.find((candidate) => candidate.id === id);
 	const forms = $derived(data.home.forms.filter((form) => !selected || form.member_id === selected));
 	const submitted = $derived((data.home.submitted_forms ?? []).filter((form) => !selected || form.member_id === selected));
@@ -56,8 +57,10 @@
 	const comments = (evaluation: SharedEvaluation) => evaluation.answers.filter((answer) => (answer.field_type === 'text' || answer.field_type === 'textarea') && shown(answer));
 </script>
 
+{#snippet chip()}<div class="md:hidden"><HeaderChip options={chipOptions} bind:value={selected} allLabel={t('portal.everyone')} /></div>{/snippet}
+
 <div class="grid min-w-0 gap-4">
-	<PersonFilter {people} bind:selected viewer={data.home.viewer} />
+	<div class="hidden md:block"><PersonFilter {people} bind:selected viewer={data.home.viewer} /></div>
 	<div class="grid min-w-0 items-start gap-4 {data.evaluations.length ? 'xl:grid-cols-2' : 'max-w-3xl'}">
 		<section class="card" aria-labelledby="forms-title">
 			<div class="card-h"><ClipboardList size={17} aria-hidden="true" /><h2 id="forms-title">{t('portal.forms_open')}</h2>{#if forms.length}<span class="badge badge-sm badge-error ml-auto">{t('portal.forms_to_fill', { n: forms.length })}</span>{/if}</div>

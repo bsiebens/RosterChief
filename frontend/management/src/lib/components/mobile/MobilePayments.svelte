@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { Check, ChevronRight, FileText } from '@lucide/svelte';
-	import PersonFilter from '#lib/components/PersonFilter.svelte';
 	import { formatDateTime } from '#lib/events/types.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import type { ParentHome } from '#lib/portal.ts';
@@ -26,7 +25,6 @@
 </script>
 
 <div class="grid min-w-0 gap-5">
-	{#if people.length > 1}<PersonFilter {people} bind:selected viewer={home.viewer} />{/if}
 
 	<section class="grid gap-3 rounded-box bg-sidebar-bg p-4 text-sidebar-fg" aria-label={t('portal.pay_next')}>
 		{#if next}
