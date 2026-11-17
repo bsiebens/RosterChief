@@ -2,6 +2,10 @@
 export default {
 	en: {
 		'portal.theme': 'Appearance',
+		"coach.lineup_draft": "Line-up: draft",
+		"coach.lineup_scheduled": "Line-up goes out {when}",
+		"coach.lineup_none": "No line-up yet",
+		"portal.coach_view": "Coach view",
 		"portal.who_going": "Who's going",
 		"portal.going_summary": "{going} going · {out} can't · {waiting} no answer yet",
 		"portal.picked": "Picked",
@@ -34,6 +38,10 @@ export default {
 	},
 	nl: {
 		'portal.theme': 'Weergave',
+		"coach.lineup_draft": "Opstelling: concept",
+		"coach.lineup_scheduled": "Opstelling gaat uit op {when}",
+		"coach.lineup_none": "Nog geen opstelling",
+		"portal.coach_view": "Coachweergave",
 		"portal.who_going": "Wie komt er",
 		"portal.going_summary": "{going} komen · {out} kunnen niet · {waiting} nog geen antwoord",
 		"portal.picked": "Geselecteerd",
@@ -66,6 +74,10 @@ export default {
 	},
 	fr: {
 		'portal.theme': 'Apparence',
+		"coach.lineup_draft": "Composition : brouillon",
+		"coach.lineup_scheduled": "Composition publiée le {when}",
+		"coach.lineup_none": "Pas encore de composition",
+		"portal.coach_view": "Vue coach",
 		"portal.who_going": "Qui vient",
 		"portal.going_summary": "{going} viennent · {out} ne peuvent pas · {waiting} sans réponse",
 		"portal.picked": "Sélectionné",

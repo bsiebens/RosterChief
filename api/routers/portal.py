@@ -19,6 +19,7 @@ from api.routers.public_news import public_news_item
 from events.models import Attendance, Event, EventAttachment, EventTask, GameTimeline, Lineup, LineupSelection, Season
 from events.services import attachments as attachment_svc
 from events.services import attendance, follows, officiating_invitations, referees
+from events.services import lineup as lineup_svc
 from events.services import tasks as task_svc
 from events.services.attachments import ALLOWED_EXTENSIONS, MAX_ATTACHMENT_BYTES
 from formbuilder.models import FormSend, Submission
@@ -674,6 +675,9 @@ def coach_home(request):
                 "has_game_sheet": hasattr(event, "timeline"),
                 "cancelled": event.cancelled, "lineup": event.kind in (Event.EventKind.GAME, Event.EventKind.TOURNAMENT),
                 "lineup_published": getattr(getattr(event, "lineup", None), "published_at", None) is not None,
+                #: none / draft / scheduled / published, and when a scheduled one goes out
+                "lineup_status": lineup_svc.status(getattr(event, "lineup", None)) if event.kind in (Event.EventKind.GAME, Event.EventKind.TOURNAMENT) else "none",
+                "lineup_scheduled_at": getattr(getattr(event, "lineup", None), "scheduled_publish_at", None),
                 "can_manage_attendance": access.can_manage_attendance(request.user, event),
             }
             for event in events

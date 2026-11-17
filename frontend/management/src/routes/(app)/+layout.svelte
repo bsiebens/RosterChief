@@ -62,7 +62,7 @@
 								<span class="block truncate font-display text-lg leading-tight font-extrabold tracking-[.06em] uppercase">{club.name}</span>
 								{#if portal && (coach || season)}
 									<span class="portal-mode-label flex flex-wrap items-center gap-x-2 text-xs">
-										{#if coach}<strong class="font-display tracking-wider uppercase">{t('portal.coach')}</strong>{/if}
+										{#if coach}<strong class="rounded-full bg-club px-2 py-0.5 font-display text-[11px] tracking-wider text-club-content uppercase">{t('portal.coach_view')}</strong>{/if}
 										{#if season}<span>{season}</span>{/if}
 									</span>
 								{/if}

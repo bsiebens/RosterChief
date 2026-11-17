@@ -78,7 +78,7 @@ export type CoachEvent = {
 	id: string; title: string; start: string; end: string | null; gathering: string | null; location: string; location_detail?: LocationDetail | null; kind: string; deadline: string | null;
 	team_ids: string[]; opponent: string; opponent_logo: string | null; is_home: boolean; notes?: string;
 	going: number; out: number; unanswered: number; maybe: number; invited: number;
-	cancelled: boolean; lineup: boolean; lineup_published: boolean; has_game_sheet: boolean; can_manage_attendance: boolean;
+	cancelled: boolean; lineup: boolean; lineup_published: boolean; lineup_status?: 'none' | 'draft' | 'scheduled' | 'published'; lineup_scheduled_at?: string | null; has_game_sheet: boolean; can_manage_attendance: boolean;
 };
 
 export type CoachHome = {

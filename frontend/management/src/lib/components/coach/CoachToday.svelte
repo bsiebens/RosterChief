@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { ChevronRight, ClipboardList, ClipboardCheck, Users } from '@lucide/svelte';
-	import { formatDay, formatTime } from '#lib/events/types.ts';
-	import { attention, isUpcoming, remind } from '#lib/coach.ts';
+	import { formatDateTime, formatDay, formatTime } from '#lib/events/types.ts';
+	import { attention, isUpcoming, lineupChip, remind } from '#lib/coach.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import type { CoachEvent } from '#lib/portal.ts';
 	import PortalEventDate from '#lib/components/PortalEventDate.svelte';
@@ -58,7 +58,7 @@
 							<b class="block truncate text-sm text-ink">{event.title}</b>
 							<span class="block text-xs text-muted">{event.lineup && !event.lineup_published ? t('coach.time_lineup', { time: formatTime(event.start) }) : t('coach.time_going', { time: formatTime(event.start), n: event.going })}</span>
 						</span>
-						{#if event.lineup && !event.lineup_published}<span class="badge badge-sm badge-warning">{t('portal.lineup')}</span>{:else}<ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" />{/if}
+						{#if lineupChip(event, formatDateTime)}{@const chip = lineupChip(event, formatDateTime)!}<span class="badge badge-sm {chip.cls}">{t(chip.key, { when: chip.text ?? '' })}</span>{:else}<ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" />{/if}
 					</a>
 				{:else}
 					<p class="px-4 py-3 text-sm text-muted">{t('portal.no_events')}</p>

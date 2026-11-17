@@ -1319,10 +1319,17 @@ textarea[name="note"] {
 
 .portal-coach .portal-mode-label { color: inherit; }
 
+/* The coach side looks like its own app: a near-black band and tab bar under the club colour rule, in light and dark. */
+.portal-coach .portal-masthead { background: #0b0d10; border-bottom-color: var(--color-club); }
+.portal-coach .portal-tabs { background-color: #0b0d10; border-top-color: #2a2f38; }
+.portal-coach .portal-tab { color: #a8b0bd; }
+.portal-coach .portal-tab.active, .portal-coach .portal-tab:hover { color: #fff; }
+.portal-coach .portal-tab.active::before { height: 3px; }
+
 /* On a phone the coach pages carry their title (and the add button) in a dark band under the masthead, as in the approved design. */
 @media (max-width: 47.99rem) {
     .portal-coach .portal-topbar {
-        background-color: var(--portal-hero);
+        background-color: #0b0d10;
         color: var(--portal-hero-content);
         border-color: var(--color-sidebar-hairline);
     }

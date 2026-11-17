@@ -128,6 +128,19 @@ class PermissionModelTests(TestCase):
         self.assertEqual(set(rows), {str(draft.pk), str(published.pk)})
         self.assertIs(rows[str(draft.pk)]["lineup_published"], False)
         self.assertIs(rows[str(published.pk)]["lineup_published"], True)
+        self.assertEqual((rows[str(draft.pk)]["lineup_status"], rows[str(published.pk)]["lineup_status"]), ("none", "published"))  # no picks yet: nothing to call a draft
+
+    def test_coach_home_shows_when_a_scheduled_lineup_goes_out(self):
+        start = timezone.now() + datetime.timedelta(days=3)
+        goes_out = timezone.now() + datetime.timedelta(days=1)
+        with schema_context(self.club.schema_name):
+            game = Event.objects.create(title="Scheduled", kind=Event.EventKind.GAME, start=start, season=self.season)
+            game.teams.add(self.u12)
+            lineup = Lineup.objects.create(event=game, team=self.u12, scheduled_publish_at=goes_out)
+            lineup.selections.create(member=self.player)
+        row = next(r for r in self.call("get", "/portal/coach", self.users["head_coach"]).json()["events"] if r["id"] == str(game.pk))
+        self.assertEqual(row["lineup_status"], "scheduled")
+        self.assertTrue(row["lineup_scheduled_at"].startswith(goes_out.date().isoformat()))
 
     def test_sponsors_require_the_dedicated_permission(self):
         user = self.users["settings_admin"]

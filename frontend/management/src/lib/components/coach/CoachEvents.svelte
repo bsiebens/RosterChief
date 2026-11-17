@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { ChevronLeft, ChevronRight } from '@lucide/svelte';
-	import { formatTime } from '#lib/events/types.ts';
-	import { dateKey, goingShare, isGame, startOfToday } from '#lib/coach.ts';
+	import { formatDateTime, formatTime } from '#lib/events/types.ts';
+	import { dateKey, goingShare, isGame, lineupChip, startOfToday } from '#lib/coach.ts';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import type { CoachEvent } from '#lib/portal.ts';
 	import PortalEventDate from '#lib/components/PortalEventDate.svelte';
@@ -80,7 +80,7 @@
 					{#if event.cancelled}
 						<span class="badge badge-sm badge-error">{t('portal.cancelled')}</span>
 					{:else}
-						{#if event.lineup && !event.lineup_published && Date.parse(event.start) >= Date.now()}<span class="badge badge-sm badge-warning">{t('portal.lineup')}</span>{/if}
+						{#if lineupChip(event, formatDateTime)}{@const chip = lineupChip(event, formatDateTime)!}<span class="badge badge-sm {chip.cls}">{t(chip.key, { when: chip.text ?? '' })}</span>{/if}
 						{#if event.can_manage_attendance && event.invited > 0}
 							<span class="grid shrink-0 justify-items-end gap-1" title={t('coach.attendance_of', { going: event.going, invited: event.invited })}>
 								<span class="font-mono text-sm font-semibold text-ink">{event.going}/{event.invited}</span>
