@@ -25,6 +25,8 @@
 	import GameTimelineDialog from '#lib/components/portal/GameTimelineDialog.svelte';
 	import RequirementsCard from '#lib/components/portal/RequirementsCard.svelte';
 	import PortalAgenda from '#lib/components/portal/PortalAgenda.svelte';
+	import MobileHome from '#lib/components/mobile/MobileHome.svelte';
+	import MeHub from '#lib/components/mobile/MeHub.svelte';
 	import PortalWeekGrid from '#lib/components/portal/PortalWeekGrid.svelte';
 	import Sheet from '#lib/components/portal/Sheet.svelte';
 
@@ -56,7 +58,7 @@
 	let weekStart = $state(mondayOf(new Date()));
 	const weekDays = $derived(Array.from({ length: 7 }, (_, i) => new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + i)));
 	const moveWeek = (step: number) => (weekStart = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 7 * step));
-	const labels: Record<string, string> = { home: 'portal.home', calendar: 'shell.nav.calendar', news: 'shell.nav.news', me: 'portal.me', forms: 'portal.forms', payments: 'portal.payments' };
+	const labels: Record<string, string> = { home: 'portal.home', calendar: 'shell.nav.calendar', news: 'shell.nav.news', me: 'portal.me', forms: 'portal.forms', payments: 'portal.payments', documents: 'portal.tile_documents' };
 	// `data.home` is briefly gone while the app navigates away (to the manage app, say): the header code below still runs then, so these reads must not throw.
 	const people = $derived(data.home?.people ?? []);
 	const viewer = $derived(people.find((person) => person.id === data.home?.viewer));
@@ -219,6 +221,13 @@
 	const openTasks = $derived<OpenTask[]>(data.home?.tasks ?? []);
 	const hasAttention = $derived(!!(needsReply.length || filteredForms.length || officiatingInvites.length || openTasks.length));
 	const attentionCount = $derived(needsReply.length + filteredForms.length + officiatingInvites.length + openTasks.length);
+	// The four shortcuts on the phone Home: how many answers, documents, payments and forms are waiting.
+	const homeCounts = $derived({
+		replies: events.filter((event) => ['no_response', 'maybe'].includes(event.status) && canReply(event)).length + officiatingInvites.length,
+		documents: (data.overview?.memberships ?? []).filter((row) => !selected || row.member_id === selected).reduce((sum, row) => sum + row.requirements.filter((item) => ['missing', 'expired', 'declined', 'requested'].includes(item.state)).length, 0),
+		payments: openFees.length + openCharges.length,
+		forms: filteredForms.length
+	});
 	const viewLink = (v: string) => `/parent?tab=calendar&view=${v}`;
 	const calendarLink = $derived(crewOnly ? '/parent?tab=calendar&crew=1' : viewLink(view));
 	const eventLink = (id: string) => tab === 'calendar' ? `${calendarLink}&event=${id}` : `/parent?event=${id}`;
@@ -533,6 +542,10 @@
 	{#if sponsor.url && /^https?:\/\//i.test(sponsor.url)}<a class="grid size-full place-items-center p-2 hover:bg-subhead" href={sponsor.url} target="_blank" rel="noopener noreferrer" tabindex={hidden ? -1 : undefined}>{@render logo()}</a>{:else}<div class="grid size-full place-items-center p-2">{@render logo()}</div>{/if}
 {/snippet}
 
+{#snippet following()}
+	<FollowedGames games={data.followed ?? []} crest={data.branding?.logo_url} clubName={data.branding?.name ?? ''} {background} />
+{/snippet}
+
 {#snippet sponsors()}
 	{#if data.home.sponsors?.length}
 		{@const all = data.home.sponsors}
@@ -615,50 +628,24 @@
 {:else if tab === 'news'}
 	<News articles={data.home.news} />
 {:else if tab === 'me'}
-	<div class="grid min-w-0 items-start gap-4 md:grid-cols-[minmax(0,5fr)_minmax(0,4fr)]">
-		<div class="grid gap-4">
-			<section class="card card-body flex-row items-center gap-3">
-				<ClubCrest name={viewer?.name ?? ''} logoUrl={viewer?.photo_url} size={48} />
-				<h2 class="font-display text-xl font-extrabold text-ink uppercase">{viewer?.name}</h2>
-				<div class="ml-auto"><AccountMenu email={data.auth.status === 'authenticated' ? data.auth.user.email : ''} /></div>
-			</section>
-			{#if people.length > 1}
-				<section class="card card-body">
-					<h2 class="card-title"><UsersRound size={16} aria-hidden="true" />{t('portal.family')}</h2>
-					<ul class="divide-y divide-rule">
-						{#each people.filter((person) => person.id !== data.home.viewer) as person (person.id)}
-							<li class="flex min-h-12 items-center gap-3 py-2"><ClubCrest name={person.name} logoUrl={person.photo_url} size={32} /><span class="font-semibold">{person.name}</span></li>
-						{/each}
-					</ul>
-				</section>
-			{/if}
-		</div>
-		<div class="grid gap-4">
-			<section class="card divide-y divide-rule overflow-hidden">
-				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/parent/profile"><UserRound size={17} aria-hidden="true" />{t('portal.profile_details')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
-				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/parent/notifications"><Bell size={17} aria-hidden="true" />{t('portal.notifications')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
-				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/parent/profile#follow"><Shirt size={17} aria-hidden="true" />{t('portal.follow_title')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
-				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/parent/stats"><ChartColumn size={17} aria-hidden="true" />{t('portal.stats_page')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
-				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/parent?tab=payments"><Wallet size={17} aria-hidden="true" />{t('portal.payments')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
-				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/account/security"><KeyRound size={17} aria-hidden="true" />{t('shell.menu.security')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
-			</section>
-			<InstallPush />
-		</div>
-	</div>
+	<MeHub viewer={viewer} {people} email={data.auth.status === 'authenticated' ? data.auth.user.email : ''} counts={homeCounts} shop={data.home.shop_enabled} coach={!!data.me?.has_member_portal_role} />
+{:else if tab === 'documents'}
+	{@render peoplePicker()}
+	{#if data.overview}<RequirementsCard memberships={data.overview.memberships.filter((row) => !selected || row.member_id === selected)} {people} />{/if}
 {:else if tab === 'payments'}
 	{@render peoplePicker()}
 	<div class="grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
 		<div class="grid min-w-0 content-start gap-4">{@render payments()}</div>
-		<div class="grid min-w-0 content-start gap-4">
+		<div class="hidden min-w-0 content-start gap-4 md:grid">
 			{#if data.overview}<RequirementsCard memberships={data.overview.memberships.filter((row) => !selected || row.member_id === selected)} {people} />{/if}
 		</div>
 	</div>
 {:else}
-	<div class="flex flex-wrap items-baseline justify-between gap-2 md:hidden">
-		<h1 class="font-display text-2xl font-extrabold text-ink uppercase">{title}</h1>
-		<p class="text-sm text-muted">{formatLongDay(new Date())}</p>
+	<div class="md:hidden">
+		<MobileHome {people} bind:selected viewer={data.home.viewer} greeting={title} dateLabel={formatLongDay(new Date())} {nextEvents} {background} crest={data.branding?.logo_url} counts={homeCounts} weekItems={weekItems} news={data.home.news} {eventLink} {firstName} {rsvp} {following} />
 	</div>
-	<FollowedGames games={data.followed ?? []} crest={data.branding?.logo_url} clubName={data.branding?.name ?? ''} />
+	<div class="hidden md:contents">
+	<FollowedGames games={data.followed ?? []} crest={data.branding?.logo_url} clubName={data.branding?.name ?? ''} {background} />
 	<div class="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] xl:items-start xl:gap-5">
 		<div class="grid min-w-0 grid-cols-1 content-start gap-4">
 			<div class="xl:hidden">{@render peoplePicker()}</div>
@@ -694,6 +681,7 @@
 			{@render family()}
 			{@render sponsors()}
 		</aside>
+	</div>
 	</div>
 {/if}
 
