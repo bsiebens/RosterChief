@@ -25,7 +25,7 @@ from club.services import archive_club, restore_club
 from features import services as feature_services
 from features.models import Plan, Subscription
 
-from ..models import EU_COUNTRIES, BillingSettings, ClubBilling, Due, DuePayment, PlanPrice, grace_until_for
+from ..models import EU_COUNTRIES, BillingSettings, ClubBilling, Due, DuePayment, PlanCycle, PlanPrice, grace_until_for
 from . import BillingError
 from .invoices import clean_number, issue_invoice
 
@@ -34,9 +34,43 @@ def today() -> datetime.date:
     return timezone.localdate()
 
 
-def price_on(plan: Plan, day: datetime.date) -> PlanPrice | None:
-    """The price in force on ``day``; ``None`` means the plan cannot be billed (never "free")."""
-    return PlanPrice.objects.filter(plan=plan, active_from__lte=day).order_by("-active_from").first()
+def cycles_of(plan: Plan, *, active_only: bool = False) -> list[PlanCycle]:
+    """The plan's billing cycles in the order the platform chose (first = the default)."""
+    qs = PlanCycle.objects.filter(plan=plan).order_by("position", "duration_months")
+    return list(qs.filter(is_active=True) if active_only else qs)
+
+
+def default_cycle(plan: Plan) -> PlanCycle:
+    """The cycle a club gets when none is chosen: the plan's first active one."""
+    found = cycles_of(plan, active_only=True)
+    if not found:
+        raise BillingError(f"Plan '{plan.code}' has no active billing cycle.")
+    return found[0]
+
+
+def resolve_cycle(club, plan: Plan, cycle: PlanCycle | None = None, *, for_new: bool = False) -> PlanCycle:
+    """The cycle to bill ``club`` on for ``plan``: the one given (it must belong to the plan, and be active when a club is newly put on it),
+    else the one the club is already billed on (if it is a cycle of this plan), else the plan's first active cycle."""
+    if cycle is not None:
+        if cycle.plan_id != plan.pk:
+            raise BillingError("That billing cycle belongs to another plan.")
+        if for_new and not cycle.is_active:
+            raise BillingError(f"The {cycle.display_name} billing cycle is not active.")
+        return cycle
+    billing = ClubBilling.objects.filter(club=club).select_related("cycle").first()
+    if billing is not None and billing.cycle is not None and billing.cycle.plan_id == plan.pk:
+        return billing.cycle
+    return default_cycle(plan)
+
+
+def price_on(plan: Plan, day: datetime.date, cycle: PlanCycle | None = None) -> PlanPrice | None:
+    """The price of ``cycle`` (default: the plan's first cycle) in force on ``day``; ``None`` means it cannot be billed (never "free")."""
+    if cycle is None:
+        found = cycles_of(plan, active_only=True) or cycles_of(plan)
+        if not found:
+            return None
+        cycle = found[0]
+    return PlanPrice.objects.filter(cycle=cycle, active_from__lte=day).order_by("-active_from").first()
 
 
 def current_plan(club) -> Plan | None:
@@ -67,11 +101,9 @@ def compute_vat(club, net: Decimal, settings: BillingSettings | None = None) -> 
     return rate, (net * rate / 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), False
 
 
-def _terms(plan: Plan):
-    try:
-        return plan.terms
-    except Plan.terms.RelatedObjectDoesNotExist:  # pragma: no cover - created by signal
-        raise BillingError(f"Plan '{plan.code}' has no billing terms.") from None
+def cycle_of_due(due: Due) -> PlanCycle:
+    """The cycle a period was opened on (periods from before cycles existed fall back to the plan's first one)."""
+    return due.cycle or default_cycle(due.plan)
 
 
 @dataclass(frozen=True)
@@ -80,6 +112,7 @@ class PeriodQuote:
     the plan-change preview, so the numbers shown before a change are the numbers used by it."""
 
     plan: Plan
+    cycle: PlanCycle
     start: datetime.date
     end: datetime.date
     net: Decimal
@@ -93,22 +126,22 @@ class PeriodQuote:
         return self.net + self.vat_amount
 
 
-def quote_period(club, plan: Plan, start: datetime.date, *, is_trial: bool = False, period_end: datetime.date | None = None) -> PeriodQuote:
-    price = price_on(plan, start)
+def quote_period(club, plan: Plan, start: datetime.date, *, is_trial: bool = False, period_end: datetime.date | None = None, cycle: PlanCycle | None = None) -> PeriodQuote:
+    terms = resolve_cycle(club, plan, cycle)
+    price = price_on(plan, start, terms)
     if price is None:
-        raise BillingError(f"Plan '{plan.code}' has no price on {start}.")
-    terms = _terms(plan)
+        raise BillingError(f"Plan '{plan.code}' ({terms.display_name}) has no price on {start}.")
     if period_end is None:  # a trial passes its own end; otherwise the plan's period length applies
         period_end = start + relativedelta(months=terms.duration_months) - datetime.timedelta(days=1)
     net = Decimal("0") if is_trial else price.amount
     rate, vat_amount, reverse_charge = compute_vat(club, net)
-    return PeriodQuote(plan, start, period_end, net, rate, vat_amount, reverse_charge, grace_until_for(start, terms.grace_days))
+    return PeriodQuote(plan, terms, start, period_end, net, rate, vat_amount, reverse_charge, grace_until_for(start, terms.grace_days))
 
 
 @transaction.atomic
 def open_period(
     club, *, start: datetime.date | None = None, plan: Plan | None = None, is_trial: bool = False, period_end: datetime.date | None = None, actor=None, credit_reference: str | None = None, credit_note=None,
-    invoice_number: str | None = None, invoice: bool = True
+    invoice_number: str | None = None, invoice: bool = True, cycle: PlanCycle | None = None
 ) -> Due:
     """Open (and invoice) the billing period beginning ``start``.
 
@@ -140,7 +173,7 @@ def open_period(
         raise BillingError("This club has no plan.")
     if Due.objects.filter(club=club, period_start=start).exists():
         raise BillingError(f"A period starting {start} already exists.")
-    quote = quote_period(club, plan, start, is_trial=is_trial, period_end=period_end)
+    quote = quote_period(club, plan, start, is_trial=is_trial, period_end=period_end, cycle=cycle)
     if billing.trial_ends_at and start > billing.trial_ends_at and not is_trial:
         feature_services.convert_trial(club, actor=actor, reason="Trial ended: first paid period opened")
         billing.trial_ends_at = None
@@ -148,6 +181,7 @@ def open_period(
     due = Due.objects.create(
         club=club,
         plan=plan,
+        cycle=quote.cycle,
         amount=quote.net,
         vat_rate=quote.vat_rate,
         vat_amount=quote.vat_amount,
@@ -190,7 +224,7 @@ def issue_period_invoice(due: Due, *, number: str | None = None, credit_referenc
 
 
 @transaction.atomic
-def subscribe(club, plan: Plan, *, start: datetime.date | None = None, auto_renew: bool = True, auto_archive: bool = True, notes: str = "", trial_days: int | None = None, actor=None, invoice_number: str | None = None):
+def subscribe(club, plan: Plan, *, start: datetime.date | None = None, auto_renew: bool = True, auto_archive: bool = True, notes: str = "", trial_days: int | None = None, actor=None, invoice_number: str | None = None, cycle: PlanCycle | None = None):
     """Bill ``club`` on ``plan``. Returns ``(billing, due)``; ``due`` is None when only the plan changed.
 
     First time: opens the first period. Already billed: just moves the club to the new plan without touching the periods; the platform API
@@ -206,29 +240,31 @@ def subscribe(club, plan: Plan, *, start: datetime.date | None = None, auto_rene
         clean_number(invoice_number)
     if not plan.is_active:
         raise BillingError("That plan is not active.")
+    chosen = resolve_cycle(club, plan, cycle, for_new=True)
     if trial_days is not None:
         if not 1 <= trial_days <= 365:
             raise BillingError("A trial lasts 1 to 365 days.")
         if ClubBilling.objects.filter(club=club).exists():
             raise BillingError("A trial can only be started for a club that is not being billed yet.")
-        return _start_trial(club, plan, trial_days, start=start or today(), auto_renew=auto_renew, auto_archive=auto_archive, notes=notes, actor=actor, invoice_number=invoice_number)
+        return _start_trial(club, plan, trial_days, start=start or today(), auto_renew=auto_renew, auto_archive=auto_archive, notes=notes, actor=actor, invoice_number=invoice_number, cycle=chosen)
     billing, created = ClubBilling.objects.get_or_create(club=club)
     billing.auto_renew, billing.auto_archive, billing.notes = auto_renew, auto_archive, notes
     billing.trial_ends_at = None
+    billing.cycle = chosen
     billing.save()
     feature_services.subscribe(club, plan, actor=actor, reason="Billing subscription")
     if created or not Due.objects.filter(club=club).exists():
-        return billing, open_period(club, start=start or today(), plan=plan, actor=actor, invoice_number=invoice_number)
+        return billing, open_period(club, start=start or today(), plan=plan, actor=actor, invoice_number=invoice_number, cycle=chosen)
     return billing, None
 
 
-def _start_trial(club, plan: Plan, trial_days: int, *, start, auto_renew, auto_archive, notes, actor, invoice_number=None):
+def _start_trial(club, plan: Plan, trial_days: int, *, start, auto_renew, auto_archive, notes, actor, invoice_number=None, cycle=None):
     trial_ends_at = start + datetime.timedelta(days=trial_days - 1)
-    billing = ClubBilling.objects.create(club=club, auto_renew=auto_renew, auto_archive=auto_archive, notes=notes, trial_ends_at=trial_ends_at)
+    billing = ClubBilling.objects.create(club=club, auto_renew=auto_renew, auto_archive=auto_archive, notes=notes, trial_ends_at=trial_ends_at, cycle=cycle)
     # Subscription.trial_ends_at stays empty on purpose: a dated TRIAL subscription stops granting access on that date,
     # which would drop the club to the default plan before its first paid period starts. The billing trial end rules.
     feature_services.subscribe(club, plan, status=Subscription.TRIAL, actor=actor, reason=f"Trial started ({trial_days} days)")
-    due = open_period(club, start=start, plan=plan, is_trial=True, period_end=trial_ends_at, actor=actor, invoice_number=invoice_number)
+    due = open_period(club, start=start, plan=plan, is_trial=True, period_end=trial_ends_at, actor=actor, invoice_number=invoice_number, cycle=cycle)
     return billing, due
 
 
@@ -378,7 +414,7 @@ def subscriptions_due_for_renewal(day: datetime.date | None = None) -> list:
             continue
         last = Due.objects.filter(club=billing.club).exclude(status=Due.CANCELLED).order_by("-period_end").first()
         if billing.auto_renew:
-            if last is None or last.period_end <= day + datetime.timedelta(days=_terms(plan).renewal_lead_days):
+            if last is None or last.period_end <= day + datetime.timedelta(days=resolve_cycle(billing.club, plan).renewal_lead_days):
                 due.append(billing)
         elif last is not None and last.period_end < day:
             due.append(billing)
@@ -408,7 +444,7 @@ def upcoming_renewals(day: datetime.date | None = None) -> list[dict]:
         else:  # only future periods (or none): the first of those is the "next" one
             first = periods.order_by("period_start").first()
             next_start = first.period_start if first else day
-        lead = _terms(plan).renewal_lead_days
+        lead = resolve_cycle(club, plan).renewal_lead_days
         rows.append(
             {
                 "club": club,

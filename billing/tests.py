@@ -294,7 +294,7 @@ class TrialTests(BillingTestBase):
         self.assertIsNotNone(billing.trial_ends_at)
 
     def test_plan_has_no_trial_flag(self):
-        self.assertFalse(hasattr(self.plan.terms, "is_trial"))
+        self.assertFalse(hasattr(self.plan.cycles.first(), "is_trial"))
         self.assertFalse(hasattr(ClubBilling(), "post_trial_plan"))
 
 

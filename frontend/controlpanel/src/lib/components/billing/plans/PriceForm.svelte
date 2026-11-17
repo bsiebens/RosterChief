@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { platform } from '#lib/api.ts';
-	import type { BillingPlan } from '#lib/billing.ts';
+	import type { BillingPlan, PlanCycle } from '#lib/billing.ts';
 	import Alert from '#lib/components/Alert.svelte';
 	import { day, newKey, price } from '#lib/components/billing/cycles/fmt.ts';
 
-	let { plan, onclose, ondone }: { plan: BillingPlan; onclose: () => void; ondone: (message: string) => void } = $props();
+	let { plan, cycle, onclose, ondone }: { plan: BillingPlan; cycle: PlanCycle; onclose: () => void; ondone: (message: string) => void } = $props();
 
 	const id = $props.id();
 	const key = newKey();
@@ -15,7 +15,7 @@
 	let error = $state('');
 	let fields = $state<Record<string, string>>({});
 
-	const taken = $derived(plan.prices.some((p) => p.active_from === from));
+	const taken = $derived(cycle.prices.some((p) => p.active_from === from));
 	const past = $derived(!!from && from < today);
 
 	async function submit(e: SubmitEvent) {
@@ -28,14 +28,14 @@
 		if (!/^\d+(\.\d{1,2})?$/.test(a)) fields.amount = 'Enter an amount of 0 or more with at most two decimals, for example 50.00.';
 		if (Object.keys(fields).length) return;
 		busy = true;
-		const r = await platform('POST', `/billing/plans/${plan.plan.id}/prices`, { active_from: from, amount: a }, fetch, { 'Idempotency-Key': key });
+		const r = await platform('POST', `/billing/cycles/${cycle.id}/prices`, { active_from: from, amount: a }, fetch, { 'Idempotency-Key': key });
 		busy = false;
 		if (!r.ok) {
 			fields = r.fields;
 			return (error = r.message ?? 'The price could not be added.');
 		}
 		onclose();
-		ondone(`Price of € ${price(a)} for ${plan.plan.name} applies from ${day(from)}.`);
+		ondone(`Price of € ${price(a)} for ${plan.plan.name} (${cycle.name}) applies from ${day(from)}.`);
 	}
 </script>
 
@@ -52,7 +52,7 @@
 	</div>
 
 	<div class="form-control">
-		<label class="label" for="{id}-amount"><span class="label-text">Net amount per period (EUR, excl. VAT)</span></label>
+		<label class="label" for="{id}-amount"><span class="label-text">Net amount per period of {cycle.duration_months} month{cycle.duration_months === 1 ? '' : 's'} (EUR, excl. VAT)</span></label>
 		<input id="{id}-amount" class="input input-bordered w-full {fields.amount ? 'input-error' : ''}" inputmode="decimal" placeholder="50.00" bind:value={amount} aria-invalid={fields.amount ? 'true' : undefined} aria-describedby={fields.amount ? `${id}-amount-d` : undefined} />
 		{#if fields.amount}<span id="{id}-amount-d" class="mt-1 block text-xs text-club-dark">{fields.amount}</span>{/if}
 	</div>

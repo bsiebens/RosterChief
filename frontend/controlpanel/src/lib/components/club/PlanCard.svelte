@@ -91,6 +91,7 @@
 				<span class="font-display text-2xl leading-none font-extrabold text-ink uppercase">{current.plan.name}</span>
 				<span class="badge {tone(current.status)}">{current.status.replace('_', ' ')}</span>
 			</div>
+			{#if billing?.billed && billing.cycle}<div class="text-sm text-slate">Billed <strong>{billing.cycle.name.toLowerCase()}</strong> ({billing.cycle.duration_months} {billing.cycle.duration_months === 1 ? 'month' : 'months'} per period)</div>{/if}
 			<div class="font-mono text-[11px] text-muted">
 				since {date(current.starts_at)}{current.trial_ends_at ? ` · trial ends ${date(current.trial_ends_at)}` : ''}{current.ends_at ? ` · ends ${date(current.ends_at)}` : ''}
 			</div>

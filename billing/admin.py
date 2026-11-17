@@ -2,7 +2,7 @@ from django.contrib import admin
 
 from rosterchief.admin import PlatformAdminMixin
 
-from .models import BillingSettings, ClubBilling, ClubCreditEntry, CreditNote, CreditNoteSequence, Due, DuePayment, Invoice, InvoiceSequence, PlanPrice, PlanTerms
+from .models import BillingSettings, ClubBilling, ClubCreditEntry, CreditNote, CreditNoteSequence, Due, DuePayment, Invoice, InvoiceSequence, PlanCycle, PlanPrice
 
 
 class ReadOnlyMixin:
@@ -37,19 +37,20 @@ class BillingSettingsAdmin(PlatformAdminMixin, admin.ModelAdmin):
         return False
 
 
-@admin.register(PlanTerms)
-class PlanTermsAdmin(PlatformAdminMixin, admin.ModelAdmin):
-    list_display = ["plan", "duration_months", "renewal_lead_days", "grace_days"]
+@admin.register(PlanCycle)
+class PlanCycleAdmin(PlatformAdminMixin, admin.ModelAdmin):
+    list_display = ["plan", "label", "duration_months", "renewal_lead_days", "grace_days", "position", "is_active"]
+    list_filter = ["plan", "is_active"]
     raw_id_fields = ["plan"]
     list_select_related = ["plan"]
-    ordering = ["plan__name"]
+    ordering = ["plan__position", "plan__name", "position"]
 
 
 @admin.register(PlanPrice)
 class PlanPriceAdmin(PlatformAdminMixin, admin.ModelAdmin):
-    list_display = ["plan", "active_from", "amount"]
+    list_display = ["plan", "cycle", "active_from", "amount"]
     list_filter = ["plan"]
-    raw_id_fields = ["plan"]
+    raw_id_fields = ["plan", "cycle"]
     list_select_related = ["plan"]
     date_hierarchy = "active_from"
 

@@ -30,8 +30,8 @@ def sync_catalog() -> None:
         Feature.objects.update_or_create(code=f.code, defaults={"name": f.name, "description": f.description, "kind": f.kind, "is_active": True})
     Feature.objects.exclude(code__in=CATALOG).update(is_active=False)
 
-    for code, (name, features) in DEFAULT_PLANS.items():
-        plan, created = Plan.objects.get_or_create(code=code, defaults={"name": name})
+    for index, (code, (name, features)) in enumerate(DEFAULT_PLANS.items()):
+        plan, created = Plan.objects.get_or_create(code=code, defaults={"name": name, "position": index})  # seeded in the order the code lists them
         if created:
             for fcode, limit in features.items():
                 PlanFeature.objects.create(plan=plan, feature=Feature.objects.get(code=fcode), limit=limit)
@@ -175,7 +175,8 @@ def create_plan(*, code: str, name: str, description: str = "", features=(), act
     if Plan.objects.filter(code=code).exists():
         raise PlanError(f"A plan with code '{code}' already exists.")
     checked = _check_plan_features(features)
-    plan = Plan.objects.create(code=code, name=name, description=description)
+    last = Plan.objects.aggregate(top=models.Max("position"))["top"]
+    plan = Plan.objects.create(code=code, name=name, description=description, position=0 if last is None else last + 1)  # a new plan goes last
     _set_plan_features(plan, checked)
     log("plan_created", plan=plan, new={"name": name, "features": checked}, actor=actor)
     return plan
@@ -197,6 +198,30 @@ def update_plan(plan: Plan, *, name=None, description=None, is_active=None, feat
     new = {"name": plan.name, "is_active": plan.is_active, "features": {pf.feature.code: pf.limit for pf in plan.plan_features.select_related("feature")}}
     log("plan_updated", plan=plan, old=old, new=new, actor=actor)
     return plan
+
+
+@transaction.atomic
+def reorder_plans(plan_ids, *, actor=None) -> list[Plan]:
+    """Put the plans in the given order (positions 0, 1, 2 ...). Plans left out of the list keep their relative order after the listed ones."""
+    ids = list(plan_ids)
+    if len(ids) != len(set(ids)):
+        raise PlanError("A plan is listed twice.")
+    plans = {p.pk: p for p in Plan.objects.select_for_update()}
+    unknown = [i for i in ids if i not in plans]
+    if unknown:
+        raise PlanError("Unknown plan in the list.")
+    rest = [p.pk for p in Plan.objects.exclude(pk__in=ids).order_by("position", "name")]
+    ordered = ids + rest
+    before = [p.code for p in Plan.objects.order_by("position", "name")]
+    for index, pk in enumerate(ordered):
+        if plans[pk].position != index:
+            plans[pk].position = index
+            plans[pk].save(update_fields=["position", "modified"])
+    result = list(Plan.objects.order_by("position", "name"))
+    after = [p.code for p in result]
+    if after != before:
+        log("plans_reordered", old={"order": before}, new={"order": after}, actor=actor)
+    return result
 
 
 @transaction.atomic

@@ -39,12 +39,13 @@ class Plan(UUIDModel):
     name = models.CharField(_("name"), max_length=100)
     description = models.TextField(_("description"), blank=True)
     is_active = models.BooleanField(_("active"), default=True, help_text=_("Inactive plans cannot be chosen for new subscriptions."))
+    position = models.PositiveIntegerField(_("position"), default=0, db_index=True, help_text=_("Where the plan shows up in lists and pickers: lowest first, then by name. Set by dragging or moving plans in the control panel."))
     features = models.ManyToManyField(Feature, verbose_name=_("features"), through="PlanFeature", related_name="plans")
 
     class Meta:
         verbose_name = _("plan")
         verbose_name_plural = _("plans")
-        ordering = ["name"]
+        ordering = ["position", "name"]
 
     def __str__(self) -> str:
         return self.name

@@ -36,6 +36,7 @@ export type Due = {
 	id: string;
 	club: ClubRef;
 	plan: PlanRef;
+	cycle?: CycleRef | null;
 	amount: string;
 	vat_rate: string;
 	vat_amount: string;
@@ -101,6 +102,8 @@ export type PlanChangePreview = {
 	effective_date: string;
 	from_plan: PlanRef | null;
 	to_plan: PlanRef;
+	from_cycle?: CycleRef | null;
+	to_cycle?: CycleRef | null;
 	old_period: {
 		id: string;
 		period_start: string;
@@ -128,6 +131,7 @@ export type PlanChangePreview = {
 		period_start: string;
 		period_end: string;
 		plan: PlanRef;
+		cycle?: CycleRef | null;
 		net: string;
 		vat_rate: string;
 		vat_amount: string;
@@ -203,11 +207,31 @@ export type NumberPatternPreview = { valid: boolean; error: string | null; examp
 export type NumberingPreview = { invoice: NumberPatternPreview; credit_note: NumberPatternPreview; placeholders: { token: string; meaning: string }[]; literal_characters: string; max_length: number };
 export type InvoiceNumberEcho = { mode: 'custom' | 'automatic'; number: string | null; next_automatic: string | null };
 
+/** A billing cycle in short: what it is called and how long one period lasts. */
+export type CycleRef = { id: string; name: string; duration_months: number };
+export type CyclePrice = { id: string; active_from: string; amount: string };
+/** One way to be billed on a plan (monthly, quarterly, yearly ...), with its own dated prices. */
+export type PlanCycle = {
+	id: string;
+	plan_id: string;
+	/** The label, else Monthly / Quarterly / Yearly / Every N months. */
+	name: string;
+	label: string;
+	duration_months: number;
+	renewal_lead_days: number;
+	grace_days: number;
+	position: number;
+	is_active: boolean;
+	prices: CyclePrice[];
+	/** null = clubs cannot be billed on this cycle (no price yet). */
+	current_price: string | null;
+	club_count: number;
+};
 export type BillingPlan = {
 	plan: PlanRef;
 	is_active: boolean;
-	terms: { duration_months: number; renewal_lead_days: number; grace_days: number } | null;
-	prices: { id: string; active_from: string; amount: string }[];
-	current_price: string | null;
+	position: number;
+	/** In the order the platform chose; the first active one is the default. */
+	cycles: PlanCycle[];
 	club_count: number;
 };

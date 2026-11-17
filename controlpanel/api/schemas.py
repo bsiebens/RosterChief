@@ -224,12 +224,17 @@ class PlanFeatureOut(Schema):
     limit: int | None = None
 
 
+class PlanOrderIn(Schema):
+    plan_ids: list[UUID]
+
+
 class PlanOut(Schema):
     id: UUID
     code: str
     name: str
     description: str
     is_active: bool
+    position: int = 0
     is_default: bool
     subscriber_count: int
     features: list[PlanFeatureOut]
@@ -245,6 +250,7 @@ class PlanOut(Schema):
             name=plan.name,
             description=plan.description,
             is_active=plan.is_active,
+            position=plan.position,
             is_default=plan.code == DEFAULT_PLAN,
             subscriber_count=Subscription.objects.filter(plan=plan, ends_at__isnull=True).count(),
             features=[PlanFeatureOut(code=pf.feature.code, name=pf.feature.name, kind=pf.feature.kind, limit=pf.limit) for pf in plan.plan_features.select_related("feature").order_by("feature__code")],
@@ -507,10 +513,16 @@ from datetime import date  # noqa: E402
 from decimal import Decimal  # noqa: E402
 
 
-class TermsIO(Schema):
-    duration_months: int = 12
-    renewal_lead_days: int = 30
-    grace_days: int = 30
+class CycleRef(Schema):
+    """A billing cycle in short: what it is called and how long a period lasts."""
+
+    id: UUID
+    name: str
+    duration_months: int
+
+    @staticmethod
+    def of(cycle) -> CycleRef | None:
+        return CycleRef(id=cycle.pk, name=cycle.display_name, duration_months=cycle.duration_months) if cycle is not None else None
 
 
 class PriceIn(Schema):
@@ -524,27 +536,78 @@ class PriceOut(Schema):
     amount: Decimal
 
 
+class CycleIn(Schema):
+    label: str = ""  # optional custom name; empty = named after the length (Monthly, Quarterly, Yearly ...)
+    duration_months: int = 12
+    renewal_lead_days: int = 30
+    grace_days: int = 30
+    is_active: bool = True
+
+
+class CyclePatch(Schema):
+    label: str | None = None
+    duration_months: int | None = None
+    renewal_lead_days: int | None = None
+    grace_days: int | None = None
+    is_active: bool | None = None
+
+
+class CycleOrderIn(Schema):
+    cycle_ids: list[UUID]
+
+
+class PlanCycleOut(Schema):
+    id: UUID
+    plan_id: UUID
+    name: str  # display name: the label, else Monthly / Quarterly / Yearly / Every N months
+    label: str
+    duration_months: int
+    renewal_lead_days: int
+    grace_days: int
+    position: int
+    is_active: bool
+    prices: list[PriceOut]
+    current_price: Decimal | None = None  # None = clubs cannot be billed on this cycle (no price yet)
+    club_count: int  # billed clubs on it now
+
+    @staticmethod
+    def of(cycle) -> PlanCycleOut:
+        from billing.models import ClubBilling
+        from billing.services.dues import price_on, today
+
+        price = price_on(cycle.plan, today(), cycle)
+        return PlanCycleOut(
+            id=cycle.pk,
+            plan_id=cycle.plan_id,
+            name=cycle.display_name,
+            label=cycle.label,
+            duration_months=cycle.duration_months,
+            renewal_lead_days=cycle.renewal_lead_days,
+            grace_days=cycle.grace_days,
+            position=cycle.position,
+            is_active=cycle.is_active,
+            prices=[PriceOut(id=p.pk, active_from=p.active_from, amount=p.amount) for p in cycle.prices.all()],
+            current_price=price.amount if price else None,
+            club_count=ClubBilling.objects.filter(cycle=cycle, club__subscriptions__plan=cycle.plan, club__subscriptions__ends_at__isnull=True).distinct().count(),
+        )
+
+
 class BillingPlanOut(Schema):
     plan: PlanRef
     is_active: bool
-    terms: TermsIO
-    prices: list[PriceOut]
-    current_price: Decimal | None = None  # None = cannot be billed (no price yet)
+    position: int = 0
+    cycles: list[PlanCycleOut]  # in the order the platform chose; the first active one is the default
     club_count: int
 
     @staticmethod
     def of(plan) -> BillingPlanOut:
-        from billing.services.dues import price_on, today
         from features.models import Subscription
 
-        t = plan.terms
-        price = price_on(plan, today())
         return BillingPlanOut(
             plan=PlanRef(id=plan.pk, code=plan.code, name=plan.name),
             is_active=plan.is_active,
-            terms=TermsIO(duration_months=t.duration_months, renewal_lead_days=t.renewal_lead_days, grace_days=t.grace_days),
-            prices=[PriceOut(id=p.pk, active_from=p.active_from, amount=p.amount) for p in plan.prices.all()],
-            current_price=price.amount if price else None,
+            position=plan.position,
+            cycles=[PlanCycleOut.of(c) for c in plan.cycles.order_by("position", "duration_months")],
             club_count=Subscription.objects.filter(plan=plan, ends_at__isnull=True, club__billing__isnull=False).count(),
         )
 
@@ -866,6 +929,7 @@ class DueOut(Schema):
     id: UUID
     club: ClubRef
     plan: PlanRef
+    cycle: CycleRef | None = None
     amount: Decimal  # NET, excluding VAT
     vat_rate: Decimal
     vat_amount: Decimal
@@ -917,6 +981,7 @@ class DueOut(Schema):
             id=due.pk,
             club=ClubRef(id=due.club.pk, name=due.club.name, slug=due.club.slug),
             plan=PlanRef(id=due.plan.pk, code=due.plan.code, name=due.plan.name),
+            cycle=CycleRef.of(due.cycle),
             amount=due.amount,
             vat_rate=due.vat_rate,
             vat_amount=due.vat_amount,
@@ -951,6 +1016,7 @@ class ClubBillingOut(Schema):
     auto_renew: bool | None = None
     auto_archive: bool | None = None
     notes: str = ""
+    cycle: CycleRef | None = None  # how the club is billed on its plan
     trial_ends_at: date | None = None
     downgraded_at: datetime | None = None  # set while the club is on the default plan because a period is overdue
     owed: Decimal
@@ -966,11 +1032,13 @@ class SubscribeBillingIn(Schema):
     auto_archive: bool = True
     notes: str = ""
     trial_days: int | None = Field(None, ge=1, le=365)  # free trial of this many days; only for a club that is not billed yet
+    cycle_id: UUID | None = None  # the billing cycle (monthly, yearly ...); omit for the plan's first active one
     invoice_number: str | None = None  # custom number for the first period's invoice (the trial's zero invoice too); omit for automatic
 
 
 class PlanChangeIn(Schema):
     plan_id: UUID
+    cycle_id: UUID | None = None  # the billing cycle on the new plan; omit for the plan's first active one (or, on the same plan, a different cycle is required)
     effective_date: date | None = None  # default today; between the day after the current period's start and today
     invoice_number: str | None = None  # custom number for the NEW period's invoice; omit for automatic
 
@@ -1025,6 +1093,7 @@ class NewPeriodOut(Schema):
     period_start: date
     period_end: date
     plan: PlanRef
+    cycle: CycleRef | None = None
     net: Decimal
     vat_rate: Decimal
     vat_amount: Decimal
@@ -1039,6 +1108,8 @@ class PlanChangePreviewOut(Schema):
     effective_date: date
     from_plan: PlanRef | None = None
     to_plan: PlanRef
+    from_cycle: CycleRef | None = None
+    to_cycle: CycleRef | None = None
     old_period: OldPeriodOut | None = None  # null when no period covers the switch date
     cancelled_periods: list[CancelledPeriodOut]
     credit_notes_to_issue: list[CreditNoteToIssueOut]
@@ -1085,12 +1156,16 @@ class PlanChangePreviewOut(Schema):
             effective_date=change.effective_date,
             from_plan=ref(change.plan_from) if change.plan_from else None,
             to_plan=ref(change.plan_to),
+            from_cycle=CycleRef.of(change.cycle_from),
+            to_cycle=CycleRef.of(change.cycle_to),
             old_period=old,
             cancelled_periods=[CancelledPeriodOut(id=c.due.pk, period_start=c.due.period_start, period_end=c.due.period_end, total=c.total, paid=c.paid, invoice_number=c.invoice.number if c.invoice else None) for c in change.cancelled],
             credit_notes_to_issue=[CreditNoteToIssueOut(for_invoice=inv.number if inv else None, net=m.net, vat=m.vat, total=m.total) for inv, m, _due in change.credit_notes_to_issue],
             credit_balance_before=change.credit_balance_before,
             credit_available_for_new_period=change.credit_available,
-            new_period=NewPeriodOut(period_start=q.start, period_end=q.end, plan=ref(q.plan), net=q.net, vat_rate=q.vat_rate, vat_amount=q.vat_amount, total=q.total, reverse_charge=q.reverse_charge, grace_until=q.grace_until),
+            new_period=NewPeriodOut(
+                period_start=q.start, period_end=q.end, plan=ref(q.plan), cycle=CycleRef.of(q.cycle), net=q.net, vat_rate=q.vat_rate, vat_amount=q.vat_amount, total=q.total, reverse_charge=q.reverse_charge, grace_until=q.grace_until
+            ),
             credit_applied=change.credit_applied,
             amount_payable_after_credit=change.amount_payable,
             credit_balance_after=change.credit_balance_after,

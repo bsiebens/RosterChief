@@ -23,6 +23,7 @@ from ..schemas import (
     OverrideIn,
     OverrideOut,
     PlanCreateIn,
+    PlanOrderIn,
     PlanOut,
     PlanUpdateIn,
     SubscribeIn,
@@ -52,13 +53,22 @@ def list_features(request):
 # --- plans --------------------------------------------------------------------------------------------------------
 
 
-@router.get("/plans", response=list[PlanOut], summary="Plans and the features they include")
+@router.get("/plans", response=list[PlanOut], summary="Plans and the features they include, in the order the platform chose")
 @paginate
 def list_plans(request, include_inactive: bool = True):
-    qs = Plan.objects.order_by("name")
+    qs = Plan.objects.order_by("position", "name")
     if not include_inactive:
         qs = qs.filter(is_active=True)
     return [PlanOut.of(p) for p in qs]
+
+
+@router.put("/plans/order", response=list[PlanOut], summary="Put the plans in this order (ids first to last); it applies everywhere plans are listed or offered")
+def order_plans(request, payload: PlanOrderIn):
+    try:
+        plans = services.reorder_plans(payload.plan_ids, actor=request.user)
+    except services.PlanError as e:
+        raise ApiError(422, "validation_error", str(e), {"plan_ids": [str(e)]}) from e
+    return [PlanOut.of(p) for p in plans]
 
 
 @router.post("/plans", response={201: PlanOut}, summary="Create a plan")
