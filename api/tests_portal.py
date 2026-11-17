@@ -13,7 +13,7 @@ from django_tenants.utils import schema_context
 from club.models import Club, Domain
 from club.services import create_club, ensure_member_for_user
 from controlpanel.tests import PASSWORD, login_session, make_user
-from events.models import Attendance, Event
+from events.models import Attendance, Event, Season
 from members.models import Family, FamilyMembership, Member
 from notifications.models import WebPushSubscription
 from sponsoring.models import Sponsor
@@ -174,6 +174,20 @@ class PortalProfileTests(ParentPortalTests):
         self.assertIs(next(row for row in data["categories"] if row["key"] == "news")["push"], False)
         self.assertEqual(data["quiet_hours"]["start"], "22:00")
         self.assertEqual(self.call("put", "/portal/me/notifications", token, {"categories": {"admin": {"push": False}}}).status_code, 422)
+
+    def test_home_lists_the_whole_current_season_not_just_90_days_either_side(self):
+        token = self.token()
+        today = timezone.localdate()
+        with schema_context(self.club.schema_name):
+            old = Event.objects.create(title="Season opener", kind=Event.EventKind.TRAINING, start=timezone.now() - datetime.timedelta(days=150))
+            old.invited_members.add(self.child)
+            Attendance.objects.get_or_create(event=old, member=self.child)
+        titles = [row["title"] for row in self.call("get", "/portal/home", token).json()["events"]]
+        self.assertNotIn("Season opener", titles)
+        with schema_context(self.club.schema_name):
+            Season.objects.create(start_date=today - datetime.timedelta(days=200), end_date=today + datetime.timedelta(days=100))
+        titles = [row["title"] for row in self.call("get", "/portal/home", token).json()["events"]]
+        self.assertIn("Season opener", titles)
 
     def test_home_says_why_a_reply_is_not_possible_instead_of_offering_it(self):
         token = self.token()

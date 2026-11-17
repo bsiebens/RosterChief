@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { CalendarDays, List } from '@lucide/svelte';
 	import { formatTime, kindStyle } from '#lib/events/types.ts';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
@@ -58,6 +59,13 @@
 		for (const row of rows) map.set(key(new Date(row.start)), [...(map.get(key(new Date(row.start))) ?? []), row]);
 		return [...map.entries()];
 	});
+	// The list opens on today, or on the first day with something after today (the last day when the season is over).
+	onMount(() => {
+		if (!chips) return;
+		const target = groups.find(([day]) => day >= todayKey)?.[0] ?? groups.at(-1)?.[0];
+		if (!target) return;
+		requestAnimationFrame(() => document.getElementById(`agenda-${target}`)?.scrollIntoView({ block: 'start' }));
+	});
 	const longDay = (iso: string) => new Intl.DateTimeFormat(getLang(), { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${iso}T12:00:00`));
 </script>
 
@@ -69,7 +77,7 @@
 	</div>{/if}
 
 	{#each groups as [day, list] (day)}
-		<section class="grid gap-2">
+		<section class="grid scroll-mt-20 gap-2" id="agenda-{day}">
 			<h2 class="flex items-baseline gap-2 px-0.5 font-display text-xl font-extrabold tracking-[.02em] text-ink uppercase">
 				{day === todayKey ? t('portal.go_today') : longDay(day)}{#if day === todayKey}<span class="ml-auto font-mono text-xs font-normal tracking-[.04em] text-muted">{longDay(day)}</span>{/if}
 			</h2>
@@ -99,6 +107,8 @@
 	{/each}
 </div>
 
-<div class="sticky bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-10 -mx-3 mt-2 border-t border-line bg-paper px-4 py-2.5 sm:-mx-5">
-	<a class="btn btn-outline w-full gap-2" href={switchHref}>{#if switchMonth}<CalendarDays size={16} aria-hidden="true" />{t('portal.month_view')}{:else}<List size={16} aria-hidden="true" />{t('portal.schedule')}{/if}</a>
+<!-- The month / schedule switch sits in a band above the tab bar; the list scrolls above it. -->
+<div class="action-dock md:hidden">
+	<a class="btn btn-primary min-h-12 gap-2 text-base" href={switchHref}>{#if switchMonth}<CalendarDays size={18} aria-hidden="true" />{t('portal.month_view')}{:else}<List size={18} aria-hidden="true" />{t('portal.schedule')}{/if}</a>
 </div>
+<div class="h-[4.75rem] md:hidden" aria-hidden="true"></div>

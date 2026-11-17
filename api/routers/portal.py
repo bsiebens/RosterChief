@@ -1,6 +1,6 @@
 """Club app endpoints scoped to the signed-in member and their children."""
 
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
@@ -212,8 +212,15 @@ def portal_home(request):
     now = timezone.now()
     team_ids = TeamMembership.objects.filter(member_id__in=people, season__end_date__gte=timezone.localdate()).values("team_id")
     news = member_news().filter(Q(teams__isnull=True) | Q(teams__in=team_ids)).distinct().prefetch_related("teams", "photos")[:12]
+    # The agenda shows the whole season: the window is at least 90 days either side of today, and wider when the current season is.
+    window_start, window_end = now - timedelta(days=90), now + timedelta(days=90)
+    season = Season.objects.filter(start_date__lte=timezone.localdate(now), end_date__gte=timezone.localdate(now)).order_by("start_date").first()
+    if season is not None:
+        zone = timezone.get_current_timezone()
+        window_start = min(window_start, timezone.make_aware(datetime.combine(season.start_date, time.min), zone))
+        window_end = max(window_end, timezone.make_aware(datetime.combine(season.end_date, time.max), zone))
     events = list(
-        Attendance.objects.filter(member_id__in=people, event__start__range=(now - timedelta(days=90), now + timedelta(days=90)))
+        Attendance.objects.filter(member_id__in=people, event__start__range=(window_start, window_end))
         .select_related("event__location", "event__opponent", "member")
         .order_by("event__start", "member_id", "id")
     )

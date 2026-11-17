@@ -18,7 +18,7 @@
 	}
 </script>
 
-<section class="card card-body">
+<section class="card card-body max-md:gap-1 max-md:p-2.5">
 	<div class="mb-1 flex items-center justify-between">
 		<button type="button" class="btn btn-ghost btn-square" aria-label={t('portal.month_previous')} onclick={() => move(-1)}><ChevronLeft size={18} aria-hidden="true" /></button>
 		<h2 class="card-title">{formatMonth(month)}</h2>
@@ -28,7 +28,7 @@
 		{#each Array(7) as _, i (i)}<span class="text-[11px] font-semibold text-muted">{weekday(i)}</span>{/each}
 		{#each days as date (dayKey(date))}
 			{@const key = dayKey(date)}
-			<button type="button" class="relative grid aspect-square max-h-12 min-h-8 place-items-center rounded-box text-sm tabular-nums {selected === key ? 'bg-club font-bold text-club-content' : 'hover:bg-subhead'} {date.getMonth() === month.getMonth() ? '' : 'text-dim'}"
+			<button type="button" class="relative grid aspect-square max-h-12 min-h-8 place-items-center max-md:aspect-auto max-md:h-9 rounded-box text-sm tabular-nums {selected === key ? 'bg-club font-bold text-club-content' : 'hover:bg-subhead'} {date.getMonth() === month.getMonth() ? '' : 'text-dim'}"
 				aria-label={new Intl.DateTimeFormat(getLang(), { dateStyle: 'full' }).format(date)}
 				aria-pressed={selected === key} onclick={() => { selected = selected === key ? '' : key; if (date.getMonth() !== month.getMonth()) month = new Date(date.getFullYear(), date.getMonth(), 1); }}>
 				{date.getDate()}

@@ -593,9 +593,9 @@
 	{@render peoplePicker()}
 	{#if view === 'month'}
 		<div class="grid min-w-0 items-start gap-4 md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-			<div class="grid gap-3">
+			<div class="grid gap-3 max-md:sticky max-md:top-[calc(4rem+env(safe-area-inset-top))] max-md:z-10 max-md:-mx-3 max-md:bg-paper max-md:px-3 max-md:pb-2">
 				<MonthPicker bind:month bind:selected={pickedDay} events={eventDays} />
-				<p class="flex flex-wrap gap-x-4 gap-y-1 px-1 text-xs text-muted">{#each kindsPresent as kind (kind)}<span class="inline-flex items-center gap-1.5"><span class="size-2 rounded-full {kindStyle(kind).dot}"></span>{t(kindLabelKey(kind))}</span>{/each}</p>
+				<p class="flex flex-wrap gap-x-4 gap-y-1 px-1 text-xs text-muted max-md:hidden">{#each kindsPresent as kind (kind)}<span class="inline-flex items-center gap-1.5"><span class="size-2 rounded-full {kindStyle(kind).dot}"></span>{t(kindLabelKey(kind))}</span>{/each}</p>
 			</div>
 			<div class="md:hidden"><MobileAgenda entries={agenda} href={eventLink} {people} {firstName} kind="all" switchHref={viewLink('list')} switchMonth={false} chips={false} past /></div>
 			<section class="card card-body hidden min-w-0 md:block">
@@ -631,7 +631,7 @@
 			</div>
 		</section>
 	{:else}
-		<div class="md:hidden"><MobileAgenda entries={calendar} href={eventLink} {people} {firstName} bind:kind={kindFilter} switchHref={viewLink('month')} /></div>
+		<div class="md:hidden"><MobileAgenda entries={calendar} href={eventLink} {people} {firstName} bind:kind={kindFilter} switchHref={viewLink('month')} past /></div>
 		<div class="hidden md:block"><PortalAgenda entries={calendar} href={eventLink} replies={replyStack} score={scoreMark} /></div>
 	{/if}
 {:else if tab === 'news'}
