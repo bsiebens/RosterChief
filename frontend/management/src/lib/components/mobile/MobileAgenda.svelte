@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { CalendarDays, List } from '@lucide/svelte';
 	import { formatTime, kindStyle } from '#lib/events/types.ts';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
@@ -11,7 +10,7 @@
 	 * row per child and event (start time and child in a tile, title, meet-up time and place, how many are going) with the status pill, and a
 	 * button above the tab bar for the month view. Tapping a row opens the event, where the answer is given.
 	 */
-	let { entries, href, people, firstName, kind = $bindable('all'), switchHref, switchMonth = true, chips = true, past = false }: {
+	let { entries, href, people, firstName, kind = $bindable('all'), switchHref, switchMonth = true, chips = true, past = false, focusKey = '' }: {
 		entries: CalendarEntry[];
 		href: (eventId: string) => string;
 		people: { id: string }[];
@@ -24,6 +23,8 @@
 		chips?: boolean;
 		/** Also show days before today (a month or a picked day). */
 		past?: boolean;
+		/** Changes when the list should scroll to today again (another month, a picked day). */
+		focusKey?: string;
 	} = $props();
 
 	const KINDS = [
@@ -59,12 +60,20 @@
 		for (const row of rows) map.set(key(new Date(row.start)), [...(map.get(key(new Date(row.start))) ?? []), row]);
 		return [...map.entries()];
 	});
-	// The list opens on today, or on the first day with something after today (the last day when the season is over).
-	onMount(() => {
-		if (!chips) return;
-		const target = groups.find(([day]) => day >= todayKey)?.[0] ?? groups.at(-1)?.[0];
+	// The list opens on today, or on the first day with something after today. In the schedule an over season ends on its last day; in a month
+	// view a past month simply starts at the top. `focusKey` changes when the month or the picked day does, and the list scrolls again.
+	$effect(() => {
+		void focusKey;
+		if (!window.matchMedia('(max-width: 47.99rem)').matches) return; // larger screens use the other agenda
+		const target = groups.find(([day]) => day >= todayKey)?.[0] ?? (chips ? groups.at(-1)?.[0] : undefined);
 		if (!target) return;
-		requestAnimationFrame(() => document.getElementById(`agenda-${target}`)?.scrollIntoView({ block: 'start' }));
+		requestAnimationFrame(() => {
+			const element = document.getElementById(`agenda-${target}`);
+			if (!element) return;
+			// Below the sticky page header and, in the month view, the calendar that stays on top.
+			const stuck = document.querySelector('[data-sticky-top]')?.getBoundingClientRect().height ?? 0;
+			window.scrollTo({ top: element.getBoundingClientRect().top + window.scrollY - (68 + stuck + 8) });
+		});
 	});
 	const longDay = (iso: string) => new Intl.DateTimeFormat(getLang(), { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${iso}T12:00:00`));
 </script>
@@ -77,7 +86,7 @@
 	</div>{/if}
 
 	{#each groups as [day, list] (day)}
-		<section class="grid scroll-mt-20 gap-2" id="agenda-{day}">
+		<section class="grid gap-2" id="agenda-{day}">
 			<h2 class="flex items-baseline gap-2 px-0.5 font-display text-xl font-extrabold tracking-[.02em] text-ink uppercase">
 				{day === todayKey ? t('portal.go_today') : longDay(day)}{#if day === todayKey}<span class="ml-auto font-mono text-xs font-normal tracking-[.04em] text-muted">{longDay(day)}</span>{/if}
 			</h2>
