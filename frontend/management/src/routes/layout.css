@@ -1577,3 +1577,11 @@ textarea[name="note"] {
 .portal-event-banner[data-kind='meeting'] { border-inline-start-color: var(--color-primary); }
 .portal-event-banner[data-kind='social'] { border-inline-start-color: var(--color-ok); }
 .portal-event-banner[data-kind='other'] { border-inline-start-color: var(--color-dim); }
+
+/* The kind pill on an event card is solid in the event's colour. */
+.portal-event-banner .kind-pill { background: var(--color-club); color: var(--color-club-content); }
+.portal-event-banner[data-kind='training'] .kind-pill { background: var(--color-ice); color: var(--color-ice-ink); }
+.portal-event-banner[data-kind='tournament'] .kind-pill { background: var(--color-warn); color: #2b1a00; }
+.portal-event-banner[data-kind='meeting'] .kind-pill { background: #fff; color: var(--color-primary); }
+.portal-event-banner[data-kind='social'] .kind-pill { background: var(--color-ok); color: #fff; }
+.portal-event-banner[data-kind='other'] .kind-pill { background: var(--color-dim); color: #0b0d10; }

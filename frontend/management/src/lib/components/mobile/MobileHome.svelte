@@ -68,7 +68,7 @@
 			{#if i === 0}
 				<a data-kind={event.kind} class="portal-event-banner relative isolate flex min-h-60 flex-col justify-end gap-3 overflow-hidden rounded-box p-[18px] text-[#fff]" href={eventLink(event.event_id)} data-sveltekit-reset="false" aria-label={event.title}>
 					<EventBackdrop src={background} />
-					<span class="flex items-center gap-2"><span class="inline-flex h-[26px] items-center rounded-full border border-[#fff]/40 bg-[#fff]/20 px-2.5 text-[13px] font-bold">{t(kindLabelKey(event.kind))} · {when(event)}</span></span>
+					<span class="flex items-center gap-2"><span class="kind-pill inline-flex h-[26px] items-center rounded-full px-2.5 text-[13px] font-bold">{t(kindLabelKey(event.kind))} · {when(event)}</span></span>
 					<span class="font-display text-4xl leading-[.98] font-extrabold uppercase">{event.title}</span>
 					<span class="text-[15px]">{timeLine(event)}{event.location ? ' · ' + event.location : ''}</span>
 					<span class="flex flex-wrap items-center gap-2">
