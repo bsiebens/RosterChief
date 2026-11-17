@@ -560,6 +560,14 @@
 	{#if sponsor.url && /^https?:\/\//i.test(sponsor.url)}<a class="grid size-full place-items-center p-2 hover:bg-subhead" href={sponsor.url} target="_blank" rel="noopener noreferrer" tabindex={hidden ? -1 : undefined}>{@render logo()}</a>{:else}<div class="grid size-full place-items-center p-2">{@render logo()}</div>{/if}
 {/snippet}
 
+{#snippet followingLive()}
+	<FollowedGames games={data.followed ?? []} crest={data.branding?.logo_url} clubName={data.branding?.name ?? ''} {background} show="live" />
+{/snippet}
+
+{#snippet followingRest()}
+	<FollowedGames games={data.followed ?? []} crest={data.branding?.logo_url} clubName={data.branding?.name ?? ''} {background} show="rest" />
+{/snippet}
+
 {#snippet following()}
 	<FollowedGames games={data.followed ?? []} crest={data.branding?.logo_url} clubName={data.branding?.name ?? ''} {background} />
 {/snippet}
@@ -654,7 +662,7 @@
 	</div>
 {:else}
 	<div class="md:hidden">
-		<MobileHome {people} {nextEvents} {background} crest={data.branding?.logo_url} counts={homeCounts} {weekItems} news={data.home.news} {eventLink} {firstName} {rsvp} {following} />
+		<MobileHome {people} {nextEvents} {background} crest={data.branding?.logo_url} counts={homeCounts} {weekItems} news={data.home.news} {eventLink} {firstName} {rsvp} following={followingRest} live={followingLive} />
 		{@render sponsors()}
 	</div>
 	<div class="hidden md:contents">

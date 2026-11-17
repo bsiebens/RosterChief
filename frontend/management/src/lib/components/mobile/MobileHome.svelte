@@ -6,6 +6,7 @@
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import type { PortalArticle, PortalEvent, PortalEventDisplay } from '#lib/portal.ts';
 	import { statusPill } from './pills.ts';
+	import { liveGames } from '#lib/live.svelte.ts';
 
 	/**
 	 * Home on a phone, as on the design boards. The header (greeting, person chip, bell) is the shell's. Here: the soonest event as a large photo
@@ -23,7 +24,8 @@
 		eventLink,
 		firstName,
 		rsvp,
-		following
+		following,
+		live
 	}: {
 		people: { id: string; name: string; first_name: string; photo_url: string | null }[];
 		nextEvents: PortalEvent[][];
@@ -36,6 +38,8 @@
 		firstName: (id: string) => string;
 		rsvp: Snippet<[PortalEvent, boolean, boolean]>;
 		following: Snippet;
+		/** The followed games on now, shown above everything else. */
+		live: Snippet;
 	} = $props();
 
 	const open = $derived(counts.replies + counts.documents + counts.payments + counts.forms);
@@ -62,10 +66,11 @@
 {/snippet}
 
 <div class="grid min-w-0 gap-5">
+	{@render live()}
 	<section class="grid gap-2" aria-label={t('portal.next_up')}>
 		{#each nextEvents as rows, i (rows[0].event_id)}
 			{@const event = rows[0]}
-			{#if i === 0}
+			{#if i === 0 && liveGames.count === 0}
 				<a data-kind={event.kind} class="portal-event-banner relative isolate flex min-h-60 flex-col justify-end gap-3 overflow-hidden rounded-box p-[18px] text-[#fff]" href={eventLink(event.event_id)} data-sveltekit-reset="false" aria-label={event.title}>
 					<EventBackdrop src={background} />
 					<span class="flex items-center gap-2"><span class="kind-pill inline-flex h-[26px] items-center rounded-full px-2.5 text-[13px] font-bold">{t(kindLabelKey(event.kind))} · {when(event)}</span></span>

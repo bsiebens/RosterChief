@@ -8,13 +8,14 @@
 	import type { FollowedGame, GameSheet } from '#lib/portal.ts';
 	import EventBackdrop from './EventBackdrop.svelte';
 	import GameTimelineDialog from './GameTimelineDialog.svelte';
+	import { liveGames } from '#lib/live.svelte.ts';
 
 	/**
 	 * The games the person follows (live, coming up in the next day, or just finished) as small full-width cards on top of Home: both teams
 	 * with their logos or initials, the score, where it is played and a LIVE badge while it is on. They update by themselves; a click opens the
 	 * game's timeline as the competition captured it (and keeps refreshing it while the game is live).
 	 */
-	let { games: initial, crest = null, clubName = '', background = null }: { games: FollowedGame[]; crest?: string | null; clubName?: string; /** The club's event background: a live game sits on it (greyscale, darkened), with white text. */ background?: string | null } = $props();
+	let { games: initial, crest = null, clubName = '', background = null, show: which = 'all' }: { /** `live`: only the games on now (several swipe sideways); `rest`: the others; `all`: everything in one list. */ show?: 'all' | 'live' | 'rest'; games: FollowedGame[]; crest?: string | null; clubName?: string; /** The club's event background: a live game sits on it (greyscale, darkened), with white text. */ background?: string | null } = $props();
 	// svelte-ignore state_referenced_locally
 	let games = $state(initial);
 	$effect(() => {
@@ -22,6 +23,17 @@
 	});
 
 	const anyLive = $derived(games.some((game) => game.status === 'live'));
+	const shown = $derived(games.filter((game) => (which === 'all' ? true : which === 'live' ? game.status === 'live' : game.status !== 'live')));
+	$effect(() => {
+		if (which !== 'rest') liveGames.count = games.filter((game) => game.status === 'live').length;
+	});
+	// Several live games sit side by side: swipe, with a dot per game.
+	const carousel = $derived(which === 'live' && shown.length > 1);
+	let strip = $state<HTMLElement>();
+	let slide = $state(0);
+	const onscroll = () => {
+		if (strip) slide = Math.round(strip.scrollLeft / (strip.scrollWidth / shown.length));
+	};
 	async function refresh() {
 		if (document.hidden) return;
 		const result = await api<FollowedGame[]>('GET', '/portal/followed');
@@ -70,13 +82,13 @@
 	};
 </script>
 
-{#if games.length}
-	<section class="grid gap-2" aria-label={t('portal.following')}>
-		{#each games as game (game.event_id)}
+{#if shown.length}
+	<section bind:this={strip} {onscroll} class={carousel ? 'flex snap-x snap-mandatory gap-2 overflow-x-auto' : 'grid gap-2'} aria-label={t('portal.following')}>
+		{#each shown as game (game.event_id)}
 			{@const [left, right] = sides(game)}
 			{@const live = game.status === 'live'}
 			{@const ink = live ? 'text-[#fff]' : 'text-ink'}
-			<button type="button" class="card relative isolate grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 overflow-hidden border-l-4 px-3 text-left transition-colors md:gap-3 md:px-4 {live ? 'portal-event-banner min-h-32 py-4 text-[#fff]' : 'py-2.5 hover:bg-subhead border-l-ice'}" onclick={() => show(game)} aria-label={t('portal.timeline_view') + ': ' + game.title}>
+			<button type="button" class="card relative isolate grid {carousel ? 'w-[88%] shrink-0 snap-center' : 'w-full'} min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 overflow-hidden border-l-4 px-3 text-left transition-colors md:gap-3 md:px-4 {live ? 'portal-event-banner min-h-32 py-4 text-[#fff]' : 'py-2.5 hover:bg-subhead border-l-ice'}" onclick={() => show(game)} aria-label={t('portal.timeline_view') + ': ' + game.title}>
 				{#if live}<EventBackdrop src={background} />{/if}
 				<span class="flex min-w-0 flex-col-reverse items-center gap-1 md:flex-row md:justify-end md:gap-3">
 					<span class="line-clamp-2 min-w-0 text-center font-display text-sm leading-tight font-extrabold break-words {ink} uppercase md:truncate md:text-right md:text-lg">{left.name}</span>
@@ -104,6 +116,7 @@
 			</button>
 		{/each}
 	</section>
+	{#if carousel}<div class="flex justify-center gap-1.5" aria-hidden="true">{#each shown as game, i (game.event_id)}<span class="size-1.5 rounded-full {i === slide ? 'bg-club' : 'bg-line'}"></span>{/each}</div>{/if}
 {/if}
 
 {#if opened && sheet}
