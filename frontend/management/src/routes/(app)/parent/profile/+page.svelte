@@ -13,6 +13,7 @@
 	import Field from '#lib/components/Field.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
+	import { formatPhone } from '#lib/phone.ts';
 	import { api } from '#lib/management-api.ts';
 	import type { ProfilePerson } from '#lib/portal.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
@@ -161,7 +162,7 @@
 				{@render editor(person)}
 			{:else}
 				<div class="card divide-y divide-rule overflow-hidden">
-					{#each [[t('portal.date_of_birth'), person.date_of_birth ? formatDay(parseIsoDate(person.date_of_birth) ?? person.date_of_birth) : '–'], [t('portal.email'), person.email || t('portal.email_managed')], [t('portal.phone'), person.phone || '–'], [t('portal.emergency_phone'), person.emergency_phone || '–']] as [label, value] (label)}
+					{#each [[t('portal.date_of_birth'), person.date_of_birth ? formatDay(parseIsoDate(person.date_of_birth) ?? person.date_of_birth) : '–'], [t('portal.email'), person.email || t('portal.email_managed')], [t('portal.phone'), formatPhone(person.phone) || '–'], [t('portal.emergency_phone'), formatPhone(person.emergency_phone) || '–']] as [label, value] (label)}
 						<div class="flex min-h-14 flex-col justify-center px-4 py-2"><span class="text-sm text-muted">{label}</span><b class="break-words text-ink">{value}</b></div>
 					{/each}
 				</div>
