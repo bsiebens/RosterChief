@@ -4,7 +4,7 @@
 	import type { BillingPlan, PlanCycle } from '#lib/billing.ts';
 	import Alert from '#lib/components/Alert.svelte';
 	import CycleDialog from '#lib/components/billing/plans/CycleDialog.svelte';
-	import PlanCard from '#lib/components/billing/plans/PlanCard.svelte';
+	import PlanTable from '#lib/components/billing/plans/PlanTable.svelte';
 	import PriceDialog from '#lib/components/billing/plans/PriceDialog.svelte';
 	import VatNote from '#lib/components/billing/plans/VatNote.svelte';
 
@@ -65,22 +65,16 @@
 	<div class="card"><p class="p-6 text-center text-sm text-muted">There are no plans yet.</p></div>
 {:else}
 	<p class="text-sm text-muted">Each plan can be billed in several ways, each with its own price. Use the arrows to put plans and cycles in the order you want them listed and offered; the first active cycle is what a club gets when none is chosen.</p>
-	<div class="grid gap-4 lg:grid-cols-2">
-		{#each data.plans as plan, i (plan.plan.id)}
-			<PlanCard
-				{plan}
-				{canEdit}
-				index={i}
-				total={data.plans.length}
-				{busy}
-				onmoveplan={(d) => movePlan(plan, d)}
-				onmovecycle={(c, d) => moveCycle(plan, c, d)}
-				onaddcycle={() => ((cycleEdit = null), (cycleTarget = plan))}
-				oneditcycle={(c) => ((cycleEdit = c), (cycleTarget = plan))}
-				onprice={(c) => (priceTarget = { plan, cycle: c })}
-			/>
-		{/each}
-	</div>
+	<PlanTable
+		plans={data.plans}
+		{canEdit}
+		{busy}
+		onmoveplan={movePlan}
+		onmovecycle={moveCycle}
+		onaddcycle={(plan) => ((cycleEdit = null), (cycleTarget = plan))}
+		oneditcycle={(plan, c) => ((cycleEdit = c), (cycleTarget = plan))}
+		onprice={(plan, c) => (priceTarget = { plan, cycle: c })}
+	/>
 {/if}
 
 <CycleDialog bind:target={cycleTarget} cycle={cycleEdit} ondone={done} />
