@@ -75,19 +75,21 @@
 			</h2>
 			<div class="card divide-y divide-rule overflow-hidden">
 				{#each list as row (row.id)}
-					<a class="flex min-h-17 items-center gap-3 px-3.5 py-2.5 {row.cancelled ? 'opacity-60' : ''}" href={href(row.eventId)} data-sveltekit-reset="false">
-						<b class="w-14 shrink-0 text-center font-display text-[1.625rem] leading-none font-extrabold text-ink">{formatTime(row.start)}</b>
+					<a class="flex min-h-17 items-start gap-3 px-3.5 py-2.5 {row.cancelled ? 'opacity-60' : ''}" href={href(row.eventId)} data-sveltekit-reset="false">
+						<b class="w-14 shrink-0 self-center text-center font-display text-[1.625rem] leading-none font-extrabold text-ink">{formatTime(row.start)}</b>
 						<span class="min-w-0 flex-1">
-							<b class="block text-base leading-snug font-semibold text-ink {row.cancelled ? 'line-through' : ''}">{row.title}</b>
+							<span class="flex items-start justify-between gap-3">
+								<b class="min-w-0 text-base leading-snug font-semibold text-ink {row.cancelled ? 'line-through' : ''}">{row.title}</b>
+								{#if row.going != null}<span class="shrink-0 pt-0.5 text-sm whitespace-nowrap text-muted">{t('portal.n_going', { n: row.going })}</span>{/if}
+							</span>
 							{#if row.line}<span class="block text-sm text-muted">{row.line}</span>{/if}
-							{#if row.going != null}<span class="block text-sm text-muted">{t('portal.n_going', { n: row.going })}</span>{/if}
 							{#if row.who.length > 1 || (people.length > 1 && row.who.length)}
 								<span class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1.5">
 									{#each row.who as w (w.name)}<span class="inline-flex items-center gap-1.5 text-sm font-semibold text-ink">{w.name}<span class={w.pill.cls}>{w.pill.text}</span></span>{/each}
 								</span>
 							{/if}
 						</span>
-						{#if row.who.length === 1 && people.length <= 1}<span class={row.who[0].pill.cls}>{row.who[0].pill.text}</span>{/if}
+						{#if row.who.length === 1 && people.length <= 1}<span class="{row.who[0].pill.cls} self-center">{row.who[0].pill.text}</span>{/if}
 					</a>
 				{/each}
 			</div>
