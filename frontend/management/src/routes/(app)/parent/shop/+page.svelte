@@ -305,22 +305,22 @@
 
 			{#if view === 'orders'}
 			<section class="card scroll-mt-44 xl:scroll-mt-20" id="orders" aria-labelledby="orders-title">
-				<div class="card-h"><ReceiptText size={17} aria-hidden="true" /><h2 id="orders-title">{t('portal.shop.orders')}</h2></div>
+				<div class="card-h max-md:hidden"><ReceiptText size={17} aria-hidden="true" /><h2 id="orders-title">{t('portal.shop.orders')}</h2></div>
 				{#if orderError || !data.orders}<div class="p-4"><Alert kind="error">{orderError || t('common.error.generic')}</Alert></div>{/if}
 				<div class="divide-y divide-rule">
 					{#each receipts as receipt (receipt.id)}
 						{@const cancelled = receipt.fulfillment_status === 'cancelled'}
 						<details class="group" open={latest?.id === receipt.id}>
-							<summary class="flex cursor-pointer list-none flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4 hover:bg-subhead [&::-webkit-details-marker]:hidden">
+							<summary class="flex cursor-pointer list-none flex-wrap items-center gap-x-4 gap-y-2 px-4 py-4 hover:bg-subhead md:px-5 [&::-webkit-details-marker]:hidden">
 								<span class="min-w-0 flex-1">
-									<b class="block font-display text-lg leading-tight font-extrabold text-ink uppercase">{receipt.number}</b>
-									<span class="text-xs text-muted">{formatDay(receipt.created)} · {itemsText(receipt.lines.reduce((sum, line) => sum + line.quantity, 0))}</span>
+									<b class="block font-display text-lg leading-tight font-extrabold whitespace-nowrap text-ink uppercase">{receipt.number}</b>
+									<span class="text-sm text-muted md:text-xs">{formatDay(receipt.created)} · {itemsText(receipt.lines.reduce((sum, line) => sum + line.quantity, 0))}</span>
 								</span>
-								<span class="flex flex-wrap items-center gap-1.5">
+								<span class="flex flex-wrap items-center gap-1.5 max-md:order-last max-md:basis-full">
 									<span class="badge {cancelled ? 'badge-error' : ['delivered', 'completed'].includes(receipt.fulfillment_status) ? 'badge-success' : receipt.fulfillment_status === 'ready_for_pickup' ? 'badge-warning' : 'badge-info'}">{statusText(receipt.fulfillment_status)}</span>
 									{#if !cancelled}<span class="badge {receipt.payment_status === 'paid' ? 'badge-success' : receipt.payment_status === 'refunded' ? 'badge-info' : 'badge-warning'}">{t(`shop.orders.payment.${receipt.payment_status}`)}</span>{/if}
 								</span>
-								<b class="min-w-20 text-right font-mono text-ink tabular-nums">{money(receipt.total)}</b>
+								<b class="text-right font-mono text-lg text-ink tabular-nums md:min-w-20 md:text-base">{money(receipt.total)}</b>
 								<ChevronDown size={16} class="shrink-0 text-muted transition-transform group-open:rotate-180" aria-hidden="true" />
 							</summary>
 							<div class="grid gap-4 border-t border-line bg-subhead px-5 py-4 text-sm">
