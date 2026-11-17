@@ -7,6 +7,7 @@
 	import { t } from '#lib/i18n.svelte.ts';
 	import Avatar from '#lib/components/Avatar.svelte';
 	import Sheet from '#lib/components/portal/Sheet.svelte';
+	import Toast from '#lib/components/Toast.svelte';
 
 	type Answer = 'present' | 'maybe' | 'absent';
 	/** The coach's attendance screen: replies and check-in, saved together. Shown in the event page's Attendance tab on phones. */
@@ -144,7 +145,6 @@
 			<label class="sr-only" for="att-search">{t('portal.search_players')}</label>
 			<input id="att-search" type="search" class="input w-full sm:max-w-xs" placeholder={t('portal.search_players')} bind:value={query} />
 		</div>
-		{#if message}<p class="border-b border-line px-3.5 py-2 text-sm {failed ? 'text-danger' : 'text-ok-text'}" role={failed ? 'alert' : 'status'}>{message}</p>{/if}
 		<ul class="divide-y divide-rule">
 			{#each rows as row (row.member.id)}
 				{@const answer = current(row)}
@@ -183,6 +183,8 @@
 	</div></div>
 	<div class="h-[4.75rem] md:hidden" aria-hidden="true"></div>
 </div>
+
+<Toast {message} error={failed} onhide={() => (message = '')} />
 
 <Sheet open={!!noting} title={noting ? `${noting.last_name}, ${noting.first_name}` : ''} onclose={() => (noting = null)}>
 	{#if noting}

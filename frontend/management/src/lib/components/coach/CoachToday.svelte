@@ -5,6 +5,7 @@
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import type { CoachEvent } from '#lib/portal.ts';
 	import PortalEventDate from '#lib/components/PortalEventDate.svelte';
+	import Toast from '#lib/components/Toast.svelte';
 	import EventBackdrop from '#lib/components/portal/EventBackdrop.svelte';
 	import EventHero from '#lib/components/portal/EventHero.svelte';
 
@@ -31,6 +32,8 @@
 		busy = '';
 	}
 </script>
+
+<Toast message={notice} onhide={() => (notice = '')} />
 
 {#snippet heading(label: string, link?: { href: string; text: string }, count?: number)}
 	<h2 class="flex items-center gap-2 px-0.5 font-display text-xl font-extrabold tracking-[.02em] text-ink uppercase">
@@ -61,7 +64,6 @@
 				</div>
 			{/if}
 		</section>
-		{#if notice}<p class="-mt-2 px-1 text-sm text-muted" role="status">{notice}</p>{/if}
 	{:else}
 		<p class="card card-body text-sm text-muted">{t('portal.no_events')}</p>
 	{/if}
@@ -159,7 +161,6 @@
 						</div>
 					{/each}
 				</div>
-				{#if notice}<p class="border-t border-rule px-4 py-2 text-sm text-muted" role="status">{notice}</p>{/if}
 				{#if needs.more}<div class="flex justify-end border-t border-rule px-4"><a class="link-more" href="/coach?tab=calendar">{t('coach.see_all')} →</a></div>{/if}
 			</section>
 		{/if}
