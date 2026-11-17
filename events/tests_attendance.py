@@ -744,7 +744,7 @@ class ReplyDeadlineTests(AttendanceTestBase):
         self.reply("absent", "Injured")
         notes = self.inbox_for(self.coach_user)
         self.assertEqual(notes.filter(title="Late withdrawal").count(), 1)
-        self.assertNotIn("Injured", notes.get(title="Late withdrawal").body)
+        self.assertIn("Reason: Injured", notes.get(title="Late withdrawal").body)
 
     def test_a_withdrawal_before_the_deadline_notifies_nobody(self):
         self.reply("present")

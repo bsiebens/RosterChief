@@ -554,10 +554,10 @@ def notify_coach_dropout(event, member, coach) -> int:
     return len(told)
 
 
-def notify_coach_withdrawal(event, member, actor) -> int:
-    """``member`` (or a guardian, ``actor``: a Member or a User) said they can't make it after all once the reply deadline had
-    passed: the event's managers with a login hear about it, the same people and channel as a line-up dropout. The reason is
-    not part of the text. Returns how many were told."""
+def notify_coach_withdrawal(event, member, actor, reason: str = "") -> int:
+    """``member`` (answering themselves or through a guardian, ``actor``: a Member or a User) said they can't make it after all
+    once the reply deadline had passed: the event's managers with a login hear about it, the same people and channel as a
+    line-up dropout, with the reason given. Returns how many were told."""
     actor_member = actor if isinstance(actor, Member) else Member.objects.filter(user=actor).first() if actor is not None else None
     actor_user_id = actor_member.user_id if actor_member is not None else getattr(actor, "pk", None)
     managers = event_managers(event)
@@ -565,11 +565,11 @@ def notify_coach_withdrawal(event, member, actor) -> int:
         managers = managers.exclude(pk=actor_member.pk)
     if actor_user_id is not None:
         managers = managers.exclude(user_id=actor_user_id)
-    who = actor_member.get_full_name() if actor_member is not None else "A guardian"
+    reason = (reason or "").strip()
     told = _notify_members(
         managers,
         title="Late withdrawal",
-        body=(f"{member.get_full_name()} can't make it to {event.title} after all (after the reply deadline)." if actor_member is None or actor_member.pk == member.pk else f"{who} says {member.get_full_name()} can't make it to {event.title} after all (after the reply deadline)."),
+        body=f"{member.get_full_name()} can't make it to {event.title} after all (after the reply deadline)." + (f" Reason: {reason}" if reason else ""),
         kind=inbox.Kind.WARNING,
         href=_href(event),
         category=Category.COACH,
