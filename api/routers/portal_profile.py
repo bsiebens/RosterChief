@@ -4,7 +4,7 @@ import json
 from datetime import date, time
 from uuid import UUID
 
-from django.db.models import Q
+from django.db.models import F, Q
 from django.utils import timezone
 from ninja import File, Router, Schema, UploadedFile
 from ninja.errors import HttpError
@@ -155,14 +155,14 @@ def update_notification_settings(request, payload: SettingsIn):
 
 
 def _follows(request, people):
-    """The club's teams with whether this account follows them (live game pushes and the cards on Home), the family's own teams first,
+    """The club's teams with whether this account follows them (live game pushes and the cards on Home), in the club's own team order (the family's teams are marked, not moved),
     plus the single games followed directly that are still to come."""
     mine = set(TeamMembership.objects.filter(member_id__in=people, season__end_date__gte=timezone.localdate()).values_list("team_id", flat=True))
     followed = follows.followed_team_ids(request.user)
-    teams = Team.objects.filter(tournament_only=False).order_by("ordering", "name")
+    teams = Team.objects.filter(tournament_only=False).order_by(F("ordering").asc(nulls_last=True), "name")
     games = EventFollow.objects.filter(user=request.user, event__start__gte=timezone.now()).select_related("event").order_by("event__start")
     return {
-        "teams": sorted(({"id": team.pk, "name": team.name, "mine": team.pk in mine, "followed": team.pk in followed} for team in teams), key=lambda team: not team["mine"]),
+        "teams": [{"id": team.pk, "name": team.name, "mine": team.pk in mine, "followed": team.pk in followed} for team in teams],
         "games": [{"event_id": row.event_id, "title": row.event.title, "start": row.event.start} for row in games],
     }
 

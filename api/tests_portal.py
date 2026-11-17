@@ -453,6 +453,18 @@ class PortalProfileTests(ParentPortalTests):
         self.assertFalse(state["teams"][0]["followed"])
 
 
+    def test_followable_teams_come_in_the_clubs_team_order(self):
+        from teams.models import Team
+
+        token = self.token()
+        with schema_context(self.club.schema_name):
+            Team.objects.create(name="Alpha", short_name="AL")
+            Team.objects.create(name="Zulu", short_name="ZU", ordering=1)
+            Team.objects.create(name="Mike", short_name="MI", ordering=2)
+        names = [t["name"] for t in self.call("get", "/portal/me/follows", token).json()["teams"]]
+        self.assertEqual(names, ["Zulu", "Mike", "Alpha"])
+
+
     def test_requirement_hand_in_waits_for_review_then_locks(self):
         from events.models import Season
         from members.models import ClubMembership, OnboardingRequirement
