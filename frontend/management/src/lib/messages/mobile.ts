@@ -2,6 +2,9 @@
 export default {
 	en: {
 		'portal.theme': 'Appearance',
+		"coach.all_events": "All events",
+		"coach.n_going": "{n} going",
+		"coach.squad_counts": "{players} players · {staff} staff",
 		"portal.delete_all": "Delete all",
 		"portal.delete_all_confirm": "Delete all? Tap again",
 		"portal.notif_settings_title": "Notification settings",
@@ -91,6 +94,9 @@ export default {
 	},
 	nl: {
 		'portal.theme': 'Weergave',
+		"coach.all_events": "Alle events",
+		"coach.n_going": "{n} komen",
+		"coach.squad_counts": "{players} spelers · {staff} staf",
 		"portal.delete_all": "Alles verwijderen",
 		"portal.delete_all_confirm": "Alles verwijderen? Tik opnieuw",
 		"portal.notif_settings_title": "Meldingsinstellingen",
@@ -180,6 +186,9 @@ export default {
 	},
 	fr: {
 		'portal.theme': 'Apparence',
+		"coach.all_events": "Tous les événements",
+		"coach.n_going": "{n} présents",
+		"coach.squad_counts": "{players} joueurs · {staff} staff",
 		"portal.delete_all": "Tout supprimer",
 		"portal.delete_all_confirm": "Tout supprimer ? Touchez à nouveau",
 		"portal.notif_settings_title": "Paramètres de notification",

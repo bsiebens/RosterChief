@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { Plus } from '@lucide/svelte';
-	import { t } from '#lib/i18n.svelte.ts';
+	import { getLang, t } from '#lib/i18n.svelte.ts';
+	import HeaderChip from '#lib/components/mobile/HeaderChip.svelte';
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import CoachEvents from '#lib/components/coach/CoachEvents.svelte';
@@ -25,16 +26,43 @@
 	const tab = $derived(page.url.searchParams.get('tab') || page.url.hash.slice(1) || 'home');
 	const labels: Record<string, string> = { home: 'portal.today', calendar: 'shell.nav.events', teams: 'portal.squad', news: 'shell.nav.news' };
 	const title = $derived(t(labels[tab] ?? labels.home));
-	usePageHeader(() => ({ title, context: teams.length > 1 || tab !== 'home' ? activeTeam?.name : undefined, actions: tab === 'calendar' && data.coach.can_create_events ? addEvent : tab === 'news' && data.coach.can_add_news ? addPost : null }));
+	// The phone header is the board's: the date above "Today", the squad size above "Squad", the team chip and the bell; larger screens keep the team name as context.
+	let phone = $state(false);
+	$effect(() => {
+		const query = window.matchMedia('(max-width: 47.99rem)');
+		phone = query.matches;
+		const update = () => (phone = query.matches);
+		query.addEventListener('change', update);
+		return () => query.removeEventListener('change', update);
+	});
+	const shortDay = (date: Date) => new Intl.DateTimeFormat(getLang(), { weekday: 'short', day: 'numeric', month: 'short' }).format(date);
+	const headerContext = $derived(
+		phone
+			? tab === 'home'
+				? shortDay(new Date())
+				: tab === 'teams' && roster
+					? t('coach.squad_counts', { players: roster.roster.length, staff: roster.staff.length })
+					: undefined
+			: teams.length > 1 || tab !== 'home'
+				? activeTeam?.name
+				: undefined
+	);
+	const teamOptions = $derived(teams.map((team) => ({ id: team.id, name: team.name, short: team.name.replace(/^.*\s(?=\S+$)/, '') || team.name })));
+	usePageHeader(() => ({ title, context: headerContext, actions: pageActions }));
 </script>
 
 <svelte:head><title>{pageTitle(title)}</title></svelte:head>
+
+{#snippet pageActions()}
+	{#if teams.length > 1 && tab !== 'news'}<div class="md:hidden"><HeaderChip options={teamOptions} bind:value={() => activeTeam?.id ?? '', (id) => (selected = id)} /></div>{/if}
+	{#if tab === 'calendar' && data.coach.can_create_events}{@render addEvent()}{:else if tab === 'news' && data.coach.can_add_news}{@render addPost()}{/if}
+{/snippet}
 
 {#snippet addEvent()}<a class="btn btn-primary btn-square" href="/calendar/events/new?view=coach" aria-label={t('coach.add_event')}><Plus size={18} aria-hidden="true" /></a>{/snippet}
 {#snippet addPost()}<a class="btn btn-primary btn-square" href="/coach/news/new" aria-label={t('coach.add_post')}><Plus size={18} aria-hidden="true" /></a>{/snippet}
 
 {#if teams.length > 1 && tab !== 'news'}
-	<div class="flex max-w-full gap-2 overflow-x-auto pb-1" role="group" aria-label={t('portal.teams')}>
+	<div class="flex max-w-full gap-2 overflow-x-auto pb-1 max-md:hidden" role="group" aria-label={t('portal.teams')}>
 		{#each teams as team (team.id)}
 			<button class="portal-person compact text" aria-pressed={activeTeam?.id === team.id} type="button" onclick={() => (selected = team.id)}>{team.name}</button>
 		{/each}

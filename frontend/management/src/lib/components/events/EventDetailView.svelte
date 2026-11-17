@@ -18,8 +18,8 @@
     import EventLineup from '#lib/components/events/EventLineup.svelte';
     import EventTasks from '#lib/components/events/EventTasks.svelte';
     import {usePageHeader} from '#lib/header.svelte.ts';
-    import {t} from '#lib/i18n.svelte.ts';
-    import {describeRecurrence, eventEditHref, formatDateTime, formatDay, formatRange, kindLabelKey, kindStyle, mapsHref, statusLabelKey, statusStyle} from '#lib/events/types.ts';
+    import {getLang, t} from '#lib/i18n.svelte.ts';
+    import {describeRecurrence, eventEditHref, formatDateTime, formatDay, formatRange, formatTime, kindLabelKey, kindStyle, mapsHref, statusLabelKey, statusStyle} from '#lib/events/types.ts';
 
     import type {ActionData, PageData} from '../../../routes/(app)/calendar/events/[id]/$types';
 
@@ -68,7 +68,10 @@
         };
     };
 
-    usePageHeader(() => ({title: ev.title, context: `${t(kindLabelKey(ev.kind))} · ${formatDay(ev.start)}`, badge, actions}));
+    // On a coach phone the header is the board's: what you are looking at (Replies, Line-up, or the event itself) with the kind or opponent, day and time above it.
+    const phoneTitle = $derived(shownTab === 'attendance' ? t('coach.mode_replies') : shownTab === 'lineup' ? t('events.tab.lineup') : ev.title);
+    const phoneContext = $derived(`${ev.opponent ? ev.opponent.name : t(kindLabelKey(ev.kind))} · ${new Intl.DateTimeFormat(getLang(), {weekday: 'short', day: 'numeric', month: 'short'}).format(new Date(ev.start))} · ${formatTime(ev.start)}`);
+    usePageHeader(() => ({title: phone ? phoneTitle : ev.title, context: phone ? phoneContext : `${t(kindLabelKey(ev.kind))} · ${formatDay(ev.start)}`, badge, actions}));
     const whereWhen = $derived([formatRange(ev.start, ev.end), ev.location ? [ev.location.name, ev.location.city].filter(Boolean).join(', ') : ''].filter(Boolean).join(' · '));
 </script>
 
@@ -156,13 +159,13 @@
 
 {#snippet mobileTop()}
     <div class="grid min-w-0 gap-3 md:hidden">
-        <div class="flex items-center justify-between gap-2">
-            <a class="btn btn-outline min-h-11 gap-2" href={calendarHref}><ArrowLeft size={16} aria-hidden="true"/> {t('portal.schedule')}</a>
+        <div class="flex items-center justify-end gap-2">
             <div class="flex items-center gap-2">
                 {#if ev.can_edit}<a class="btn btn-primary min-h-11 gap-2" href={editHref}><Pencil size={16} aria-hidden="true"/> {t('common.edit')}</a>{/if}
                 <button type="button" class="btn btn-outline btn-square min-h-11" aria-label={t('coach.ev_actions')} onclick={() => (menuOpen = true)}><Ellipsis size={20} aria-hidden="true"/></button>
             </div>
         </div>
+        {#if shownTab === 'overview'}
         <section class="card min-w-0 overflow-hidden border-l-4 {style.bar}">
             <div class="grid min-w-0 gap-2.5 p-4">
                 <div class="flex flex-wrap items-center gap-1.5">
@@ -214,6 +217,7 @@
                 {/if}
             </div>
         </section>
+        {/if}
         <nav class="card min-w-0" aria-label={t('events.tabs')}>
             <div class="grid px-1" style="grid-template-columns: repeat({phoneTabs.length}, minmax(0, 1fr))">
                 {#each phoneTabs as item (item.key)}

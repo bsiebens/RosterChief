@@ -55,7 +55,7 @@
 		{ answer: 'absent', label: 'coach.answer_out', on: 'bg-club border-club text-club-content' }
 	];
 	const subline = (row: AttendanceRow) => {
-		const base = [row.jersey_number != null ? `#${row.jersey_number}` : '', row.position].filter(Boolean).join(' · ');
+		const base = [row.position].filter(Boolean).join(' · ');
 		if (current(row) === 'absent') return [t('coach.seg_out'), row.note, noteOf(row)].filter(Boolean).join(' · ');
 		return current(row) === '' ? [base, t('coach.no_reply_note')].filter(Boolean).join(' · ') : base;
 	};
@@ -135,7 +135,7 @@
 			<div class="flex items-center gap-2">
 				<div class="flex min-w-0 flex-1 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="group" aria-label={t('portal.all')}>
 					{#each SEGMENTS as [key, label] (key)}
-						<button type="button" class="portal-person compact text shrink-0 !px-3" aria-pressed={filter === key} onclick={() => (filter = key)}>{key === 'unknown' ? '?' : t(label)} {counts[key]}</button>
+						<button type="button" class="inline-flex h-[38px] shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[15px] font-semibold {filter === key ? 'border-ink bg-ink text-paper' : 'border-line bg-(--portal-panel) text-ink'}" aria-pressed={filter === key} onclick={() => (filter = key)}>{key === 'unknown' ? t('coach.waiting') : t(label)} <span class="tabular-nums {filter === key ? '' : 'text-muted'}">{counts[key]}</span></button>
 					{/each}
 				</div>
 			</div>
@@ -149,10 +149,11 @@
 			{#each rows as row (row.member.id)}
 				{@const answer = current(row)}
 				<li class="flex min-h-14 items-center gap-3 px-3.5 py-2">
-					<Avatar first_name={row.first_name} last_name={row.last_name} size="size-9" text="text-xs" />
+					<span class="grid size-7 shrink-0 place-items-center rounded-full {answer === 'present' ? 'bg-ok text-[#fff]' : answer === 'absent' ? 'bg-club text-club-content' : answer === 'maybe' ? 'bg-warn text-[#1b1400]' : 'border-2 border-line text-transparent'}" aria-hidden="true">{#if answer === 'present'}<Check size={15} />{:else if answer === 'absent'}<Minus size={15} />{:else if answer === 'maybe'}<CircleHelp size={15} />{/if}</span>
+					<span class="grid size-9 shrink-0 place-items-center rounded-box bg-subhead font-display text-base font-extrabold text-ink">{row.jersey_number ?? '–'}</span>
 					<div class="min-w-0 flex-1">
-						<p class="truncate text-sm font-semibold text-ink">{row.last_name}, {row.first_name}</p>
-						<p class="truncate text-xs {answer === 'absent' ? 'text-club-dark' : 'text-muted'}">{subline(row)}{#if mode === 'answers' && shownUp(row) !== null} · {t(shownUp(row) ? 'events.att.checked_in' : 'events.att.no_show')}{/if}</p>
+						<p class="truncate text-base font-semibold text-ink">{row.first_name} {row.last_name}</p>
+						<p class="truncate text-sm {answer === 'absent' ? 'text-club-dark' : 'text-muted'}">{subline(row)}{#if mode === 'answers' && shownUp(row) !== null} · {t(shownUp(row) ? 'events.att.checked_in' : 'events.att.no_show')}{/if}</p>
 					</div>
 					{#if mode === 'answers'}
 						<div class="inline-flex shrink-0 gap-1" role="group" aria-label={row.last_name + ', ' + row.first_name}>
