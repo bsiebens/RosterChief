@@ -75,8 +75,8 @@
 		{#each games as game (game.event_id)}
 			{@const [left, right] = sides(game)}
 			{@const live = game.status === 'live'}
-			{@const ink = live ? 'text-white' : 'text-ink'}
-			<button type="button" class="card relative isolate grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 overflow-hidden border-l-4 px-3 text-left transition-colors md:gap-3 md:px-4 {live ? 'portal-event-banner min-h-32 py-4 text-white' : 'py-2.5 hover:bg-subhead border-l-ice'}" onclick={() => show(game)} aria-label={t('portal.timeline_view') + ': ' + game.title}>
+			{@const ink = live ? 'text-[#fff]' : 'text-ink'}
+			<button type="button" class="card relative isolate grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 overflow-hidden border-l-4 px-3 text-left transition-colors md:gap-3 md:px-4 {live ? 'portal-event-banner min-h-32 py-4 text-[#fff]' : 'py-2.5 hover:bg-subhead border-l-ice'}" onclick={() => show(game)} aria-label={t('portal.timeline_view') + ': ' + game.title}>
 				{#if live}<EventBackdrop src={background} />{/if}
 				<span class="flex min-w-0 flex-col-reverse items-center gap-1 md:flex-row md:justify-end md:gap-3">
 					<span class="line-clamp-2 min-w-0 text-center font-display text-sm leading-tight font-extrabold break-words {ink} uppercase md:truncate md:text-right md:text-lg">{left.name}</span>
@@ -86,19 +86,19 @@
 					{#if game.status === 'scheduled'}
 						<span class="font-display text-3xl leading-none font-extrabold {ink} tabular-nums">{formatTime(game.start)}</span>
 					{:else}
-						<span class="font-display {live ? 'text-5xl' : 'text-3xl'} leading-none font-extrabold tabular-nums {ink}">{left.score ?? '–'}<span class="px-1.5 {live ? 'text-white/70' : 'text-muted'}">:</span>{right.score ?? '–'}</span>
+						<span class="font-display {live ? 'text-5xl' : 'text-3xl'} leading-none font-extrabold tabular-nums {ink}">{left.score ?? '–'}<span class="px-1.5 {live ? 'text-[#fff]/70' : 'text-muted'}">:</span>{right.score ?? '–'}</span>
 					{/if}
 					{#if game.status === 'live'}
 						<span class="inline-flex items-center gap-1.5 rounded-full bg-club px-2 py-0.5 font-mono text-[10px] font-bold tracking-wide text-club-content uppercase"><span class="size-1.5 animate-pulse rounded-full bg-current"></span>{t('portal.live')}</span>
 					{:else}
-						<span class="font-mono text-[10px] tracking-wide {live ? 'text-white/80' : 'text-muted'} uppercase">{game.status === 'final' ? t('portal.final') : new Date(game.start).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+						<span class="font-mono text-[10px] tracking-wide {live ? 'text-[#fff]/80' : 'text-muted'} uppercase">{game.status === 'final' ? t('portal.final') : new Date(game.start).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}</span>
 					{/if}
 				</span>
 				<span class="flex min-w-0 flex-col items-center gap-1 md:flex-row md:gap-3">
 					<ClubCrest name={right.name} logoUrl={right.logo} size={live ? 52 : 40} />
 					<span class="min-w-0">
 						<span class="line-clamp-2 block text-center font-display text-sm leading-tight font-extrabold break-words {ink} uppercase md:truncate md:text-left md:text-lg">{right.name}</span>
-						{#if game.location}<span class="hidden items-center gap-1 truncate text-xs {live ? 'text-white/80' : 'text-muted'} md:flex"><MapPin size={12} class="shrink-0" aria-hidden="true" />{game.location}</span>{/if}
+						{#if game.location}<span class="hidden items-center gap-1 truncate text-xs {live ? 'text-[#fff]/80' : 'text-muted'} md:flex"><MapPin size={12} class="shrink-0" aria-hidden="true" />{game.location}</span>{/if}
 					</span>
 				</span>
 			</button>

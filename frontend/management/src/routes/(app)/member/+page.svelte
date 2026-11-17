@@ -655,6 +655,7 @@
 {:else}
 	<div class="md:hidden">
 		<MobileHome {people} {nextEvents} {background} crest={data.branding?.logo_url} counts={homeCounts} {weekItems} news={data.home.news} {eventLink} {firstName} {rsvp} {following} />
+		{@render sponsors()}
 	</div>
 	<div class="hidden md:contents">
 	<FollowedGames games={data.followed ?? []} crest={data.branding?.logo_url} clubName={data.branding?.name ?? ''} {background} />
