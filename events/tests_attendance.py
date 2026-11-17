@@ -737,3 +737,16 @@ class ReplyDeadlineTests(AttendanceTestBase):
         with self.assertRaises(Invalid) as refused:
             self.reply("absent", "Sick")
         self.assertEqual(refused.exception.code, "rsvp_closed")
+
+    def test_a_late_withdrawal_notifies_the_coach(self):
+        self.reply("present")
+        self.close_deadline()
+        self.reply("absent", "Injured")
+        notes = self.inbox_for(self.coach_user)
+        self.assertEqual(notes.filter(title="Late withdrawal").count(), 1)
+        self.assertNotIn("Injured", notes.get(title="Late withdrawal").body)
+
+    def test_a_withdrawal_before_the_deadline_notifies_nobody(self):
+        self.reply("present")
+        self.reply("absent", "Injured")
+        self.assertFalse(self.inbox_for(self.coach_user).filter(title="Late withdrawal").exists())

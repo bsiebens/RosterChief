@@ -378,6 +378,10 @@ def set_answer_as_member(actor, attendance: Attendance, status: str, note: str =
         from events.services.lineup import notify_coach_dropout
 
         notify_coach_dropout(event, member, actor)
+    elif withdrawing:
+        from events.services.lineup import notify_coach_withdrawal
+
+        notify_coach_withdrawal(event, member, actor)
     return attendance
 
 

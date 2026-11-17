@@ -63,6 +63,8 @@
 	const picked = $derived(choice ?? current);
 	// Once the reply deadline has passed the choice is closed: someone who is going can still say they can't make it after all, nothing else.
 	const afterDeadline = $derived(!!event.deadline && Date.parse(event.deadline) < Date.now());
+	// Going, after the deadline: the status pill stays on the row and "Can't make it after all" is its own full-width button underneath, not squeezed next to it.
+	const late = $derived(afterDeadline && going && !event.cancelled);
 	const switchable = $derived(seg && canReply && !noInvite && !lateInstalment && !event.cancelled && !afterDeadline);
 	const changed = $derived(picked !== '' && (picked !== current || (picked === 'absent' && note.trim() !== '' && note.trim() !== event.note)));
 	const SWITCH = [
@@ -137,12 +139,15 @@
 						{#if !quick}<button type="button" class="btn btn-sm min-h-11 md:h-8 md:min-h-0 {shown === 'maybe' ? 'btn-warning' : 'btn-outline'}" aria-pressed={shown === 'maybe'} disabled={busy} onclick={() => answer('maybe')}>{t('portal.maybe')}</button>{/if}
 					{/if}
 				{/if}
-				{#if canReply}
+				{#if canReply && !late}
 					<button type="button" class="btn btn-sm min-h-11 md:h-8 md:min-h-0 {['absent', 'excused', 'dropout'].includes(shown) ? '' : 'btn-outline'} {dark ? 'border-sidebar-chip bg-transparent! text-sidebar-fg hover:bg-sidebar-hairline' : ''}" disabled={busy} aria-expanded={open} onclick={() => (open = !open)}>{t(going ? (afterDeadline ? 'portal.cant_make_it_after_all' : 'portal.cant_make_it') : 'portal.cant_go')}</button>
 				{/if}
 			{/if}
 		</div>
 	</div>
+	{#if late && canReply && !noInvite && !open}
+		<button type="button" class="btn min-h-11 w-full gap-2 {dark ? 'border-sidebar-chip bg-transparent! text-sidebar-fg hover:bg-sidebar-hairline' : 'btn-outline'}" disabled={busy} aria-expanded={open} onclick={() => (open = true)}>{t('portal.cant_make_it_after_all')}</button>
+	{/if}
 	{#if lateInstalment && canReply}<p class="rounded-box px-3 py-2 text-xs {dark ? 'bg-sidebar-hairline text-sidebar-fg' : 'bg-warn-bg text-warn-text'}" role="status">{t('portal.late')}</p>{/if}
 	{#if canReply && open && !noInvite}
 		<form use:reveal class="grid gap-3 rounded-box border p-3.5 {dark ? 'border-sidebar-chip bg-sidebar-hairline' : 'border-line bg-subhead'}" onsubmit={(e) => { e.preventDefault(); submitReason(); }}>
