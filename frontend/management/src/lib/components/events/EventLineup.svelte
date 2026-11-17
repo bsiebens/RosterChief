@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { CalendarClock, Check, Megaphone, Plus, Save, Trash2, Users, X } from '@lucide/svelte';
+	import { CalendarClock, Check, FileDown, Megaphone, Plus, Save, Trash2, Users, X } from '@lucide/svelte';
 	import Sheet from '#lib/components/portal/Sheet.svelte';
 	import LineupMeta from '#lib/components/events/LineupMeta.svelte';
 	import LineupLines from '#lib/components/events/LineupLines.svelte';
@@ -202,15 +202,22 @@
 				{/each}
 			</section>
 		{:else if view === 'lines' && linesOn}
-			<LineupLines template={lineup.template ?? []} members={pickedMembers} bind:slots editable busy={busy} {pdfHref} onsave={save} saveDisabled={!dirty} />
+			<LineupLines template={lineup.template ?? []} members={pickedMembers} bind:slots editable busy={busy} {pdfHref} onsave={save} saveDisabled={!dirty} hideActions />
 		{/if}
 		<p class="text-xs text-muted">{lineup.published_at ? t('events.lineup.notify_hint_published') : t('events.lineup.notify_hint')}</p>
 		<div class="action-dock md:sticky md:bottom-2 md:z-10 md:rounded-box md:border md:border-line md:bg-(--portal-panel) md:p-2.5 md:shadow-sm"><div class="grid w-full gap-1.5">
 			{#if dirty}<p class="text-center text-xs font-semibold text-warn-text">{t('coach.lu_unsaved')} · {t('events.lineup.picked', { n: picked.length })}</p>{/if}
+			{#if view === 'lines' && linesOn}
+				<div class="flex items-center gap-2">
+					{#if pdfHref}<a class="btn btn-outline min-h-12 flex-1 gap-2" href={pdfHref} target="_blank" rel="noopener"><FileDown size={16} /> {t('coach.lu_pdf')}</a>{/if}
+					<button class="btn btn-primary min-h-12 flex-1 gap-2" type="button" disabled={!dirty || busy} onclick={save}><Save size={16} /> {t('coach.lu_save_lines')}</button>
+				</div>
+			{:else}
 			<div class="flex items-center gap-2">
 				<button class="btn btn-outline min-h-12 flex-1 gap-2" type="button" disabled={!dirty || busy} onclick={save}><Save size={16} /> {t('events.lineup.save')}</button>
 				<button class="btn btn-primary min-h-12 flex-1 gap-2" type="button" disabled={busy || (!picked.length && !lineup.published_at)} onclick={openPublish}><Megaphone size={16} /> {lineup.published_at ? t('events.lineup.publish_changes') : t('events.lineup.publish')}</button>
 			</div>
+			{/if}
 		</div></div>
 		<div class="h-28 md:hidden" aria-hidden="true"></div>
 	</div>
