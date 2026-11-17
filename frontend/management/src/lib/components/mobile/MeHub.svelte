@@ -33,7 +33,7 @@
 	const todo = $derived([
 		{ key: 'documents', href: '/parent?tab=documents', icon: FileText, label: t('portal.tile_documents'), n: counts.documents, tone: 'bg-warn-bg text-warn-text', hint: counts.documents ? t('portal.me_docs_open', { n: counts.documents }) : t('portal.me_all_good') },
 		{ key: 'payments', href: '/parent?tab=payments', icon: Wallet, label: t('portal.tile_payments'), n: counts.payments, tone: 'bg-info-bg text-info-text', hint: counts.payments ? t('portal.me_pay_open', { n: counts.payments }) : t('portal.me_all_good') },
-		{ key: 'forms', href: '/parent/forms', icon: ClipboardList, label: t('portal.forms'), n: counts.forms, tone: 'bg-danger-bg text-danger', hint: counts.forms ? t('portal.me_forms_open', { n: counts.forms }) : t('portal.me_all_good') }
+		{ key: 'forms', href: '/parent/forms', icon: ClipboardList, label: t('portal.forms_evaluations'), n: counts.forms, tone: 'bg-danger-bg text-danger', hint: counts.forms ? t('portal.me_forms_open', { n: counts.forms }) : t('portal.me_all_good') }
 	]);
 	const club = $derived([
 		...(shop ? [{ key: 'shop', href: '/parent/shop', icon: ShoppingBag, label: t('shop.nav'), hint: '' }] : []),

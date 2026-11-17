@@ -11,7 +11,7 @@ export function portalItems(mode: PortalMode, shopEnabled: boolean): PortalItem[
 				{ key: 'calendar', href: '/parent?tab=calendar', label: 'shell.nav.calendar', icon: CalendarDays },
 				{ key: 'news', href: '/parent?tab=news', label: 'shell.nav.news', icon: Newspaper },
 				...(shopEnabled ? [{ key: 'shop', href: '/parent/shop', label: 'shop.nav', icon: ShoppingBag }] : []),
-				{ key: 'forms', href: '/parent/forms', label: 'portal.forms', icon: ClipboardList },
+				{ key: 'forms', href: '/parent/forms', label: 'portal.forms_evaluations', icon: ClipboardList },
 				{ key: 'me', href: '/parent?tab=me', label: 'portal.me', icon: UserRound }
 			]
 		: [

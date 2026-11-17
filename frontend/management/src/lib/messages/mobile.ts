@@ -2,6 +2,7 @@
 export default {
 	en: {
 		'portal.theme': 'Appearance',
+		"portal.forms_evaluations": "Forms & evaluations",
 		"portal.download_pdf": "Download PDF",
 		"portal.cant_make_it_after_all": "Can't make it after all",
 		"portal.pill_going": "Going",
@@ -87,6 +88,7 @@ export default {
 	},
 	nl: {
 		'portal.theme': 'Weergave',
+		"portal.forms_evaluations": "Formulieren & evaluaties",
 		"portal.download_pdf": "PDF downloaden",
 		"portal.cant_make_it_after_all": "Toch niet kunnen komen",
 		"portal.pill_going": "Komt",
@@ -172,6 +174,7 @@ export default {
 	},
 	fr: {
 		'portal.theme': 'Apparence',
+		"portal.forms_evaluations": "Formulaires et évaluations",
 		"portal.download_pdf": "Télécharger le PDF",
 		"portal.cant_make_it_after_all": "Finalement empêché",
 		"portal.pill_going": "Vient",
