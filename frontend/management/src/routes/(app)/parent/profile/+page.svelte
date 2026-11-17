@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
+	import { page } from '$app/state';
 	import { Camera, Check, ChevronRight, Shirt, Trash2, UserRound } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
@@ -17,7 +18,9 @@
 	import { pageTitle } from '#lib/title.svelte.ts';
 
 	let { data } = $props();
-	usePageHeader(() => ({ title: t('portal.profile') }));
+	// Me > Follow teams opens this page on that one block (`?view=follow`); the phone profile itself no longer carries it.
+	const followOnly = $derived(page.url.searchParams.get('view') === 'follow');
+	usePageHeader(() => ({ title: t(followOnly ? 'portal.follow_title' : 'portal.profile') }));
 
 	// svelte-ignore state_referenced_locally
 	let who = $state(data.people.find((person) => person.is_self)?.id ?? data.people[0]?.id ?? '');
@@ -131,6 +134,9 @@
 {/snippet}
 
 <div class="grid min-w-0 gap-5 md:hidden">
+	{#if followOnly}
+		{#if data.follows}<FollowTeams initial={data.follows} />{/if}
+	{:else}
 	<section class="grid gap-2" aria-label={t('portal.family')}>
 		<h2 class="font-display text-lg font-extrabold tracking-[.02em] text-ink uppercase">{t('portal.family_people')}</h2>
 		<div class="card divide-y divide-rule overflow-hidden">
@@ -169,7 +175,7 @@
 	{/each}
 
 	{#if data.overview}<ProfileOverview overview={data.overview} people={data.people} />{/if}
-	{#if data.follows}<div id="follow"><FollowTeams initial={data.follows} /></div>{/if}
+	{/if}
 </div>
 
 <div class="hidden md:block">

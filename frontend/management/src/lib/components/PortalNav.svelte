@@ -8,8 +8,19 @@
 	const items = $derived(compact ? portalPhoneItems(mode, shopEnabled) : portalItems(mode, shopEnabled));
 	const active = $derived(activePortalKey(page.url));
 	const meActive = $derived((compact ? ME_PHONE_PAGES : ME_PAGES).includes(active));
-	// A dot on Me when a form or a payment is waiting for the family (members only; the numbers come from the Home data when it is loaded).
-	const todo = $derived(mode === 'parent' ? (page.data.home?.forms?.length ?? 0) + (page.data.home?.fees ?? []).filter((fee: { balance: string }) => Number(fee.balance) > 0).length : 0);
+	// The count on Me (forms and payments waiting for the family). The numbers come from the Home data, which only some pages load, so the last
+	// count seen is kept (also for this browser tab) and shown on the pages that do not carry it, such as the shop.
+	const fresh = $derived(mode === 'parent' && page.data.home ? (page.data.home.forms?.length ?? 0) + (page.data.home.fees ?? []).filter((fee: { balance: string }) => Number(fee.balance) > 0).length : null);
+	let remembered = $state(0);
+	$effect(() => {
+		if (fresh !== null) {
+			remembered = fresh;
+			try { sessionStorage.setItem('rc-me-count', String(fresh)); } catch { /* storage blocked: the count just starts at zero */ }
+		} else if (remembered === 0) {
+			try { remembered = Number(sessionStorage.getItem('rc-me-count')) || 0; } catch { /* nothing remembered */ }
+		}
+	});
+	const todo = $derived(mode === 'parent' ? (fresh ?? remembered) : 0);
 </script>
 
 <nav class={compact ? 'portal-tabs grid auto-cols-[minmax(0,1fr)] grid-flow-col' : 'flex flex-col gap-0.5 px-2.5'} aria-label={t('shell.nav.label')}>

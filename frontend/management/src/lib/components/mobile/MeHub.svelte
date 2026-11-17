@@ -38,7 +38,7 @@
 	const club = $derived([
 		...(shop ? [{ key: 'orders', href: '/parent/shop?view=orders', icon: ReceiptText, label: t('portal.shop.orders'), hint: '' }] : []),
 		{ key: 'follow', href: '/parent/stats', icon: ChartColumn, label: t('portal.follow_stats'), hint: '' },
-		{ key: 'teams', href: '/parent/profile#follow', icon: Shirt, label: t('portal.follow_title'), hint: '' }
+		{ key: 'teams', href: '/parent/profile?view=follow', icon: Shirt, label: t('portal.follow_title'), hint: '' }
 	]);
 	const settings = [
 		{ key: 'profile', href: '/parent/profile', icon: UserRound, label: 'portal.profile_details' },
