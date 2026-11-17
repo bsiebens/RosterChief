@@ -24,6 +24,7 @@
 		const path = page.url.pathname;
 		const tab = page.url.searchParams.get('tab');
 		if (mode === 'parent') {
+			if (path.startsWith('/parent/notifications')) return tab === null && page.url.searchParams.get('view') !== 'settings' ? '/parent' : '/parent?tab=me';
 			if (path !== '/parent') return '/parent?tab=me';
 			return tab === 'payments' || tab === 'documents' ? '/parent?tab=me' : null;
 		}

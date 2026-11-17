@@ -42,7 +42,7 @@
 	]);
 	const settings = [
 		{ key: 'profile', href: '/parent/profile', icon: UserRound, label: 'portal.profile_details' },
-		{ key: 'notifications', href: '/parent/notifications', icon: Bell, label: 'portal.notifications' },
+		{ key: 'notifications', href: '/parent/notifications?view=settings', icon: Bell, label: 'portal.notifications' },
 		{ key: 'security', href: '/account/security', icon: KeyRound, label: 'shell.menu.security' }
 	];
 </script>

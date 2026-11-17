@@ -2,6 +2,9 @@
 export default {
 	en: {
 		'portal.theme': 'Appearance',
+		"portal.delete_all": "Delete all",
+		"portal.delete_all_confirm": "Delete all? Tap again",
+		"portal.notif_settings_title": "Notification settings",
 		"portal.forms_evaluations": "Forms & evaluations",
 		"portal.download_pdf": "Download PDF",
 		"portal.cant_make_it_after_all": "Can't make it after all",
@@ -88,6 +91,9 @@ export default {
 	},
 	nl: {
 		'portal.theme': 'Weergave',
+		"portal.delete_all": "Alles verwijderen",
+		"portal.delete_all_confirm": "Alles verwijderen? Tik opnieuw",
+		"portal.notif_settings_title": "Meldingsinstellingen",
 		"portal.forms_evaluations": "Formulieren & evaluaties",
 		"portal.download_pdf": "PDF downloaden",
 		"portal.cant_make_it_after_all": "Toch niet kunnen komen",
@@ -174,6 +180,9 @@ export default {
 	},
 	fr: {
 		'portal.theme': 'Apparence',
+		"portal.delete_all": "Tout supprimer",
+		"portal.delete_all_confirm": "Tout supprimer ? Touchez à nouveau",
+		"portal.notif_settings_title": "Paramètres de notification",
 		"portal.forms_evaluations": "Formulaires et évaluations",
 		"portal.download_pdf": "Télécharger le PDF",
 		"portal.cant_make_it_after_all": "Finalement empêché",
