@@ -184,7 +184,7 @@
 	<div class="h-[4.75rem] md:hidden" aria-hidden="true"></div>
 </div>
 
-<Toast {message} error={failed} onhide={() => (message = '')} />
+<Toast {message} error={failed} aboveBand onhide={() => (message = '')} />
 
 <Sheet open={!!noting} title={noting ? `${noting.last_name}, ${noting.first_name}` : ''} onclose={() => (noting = null)}>
 	{#if noting}
