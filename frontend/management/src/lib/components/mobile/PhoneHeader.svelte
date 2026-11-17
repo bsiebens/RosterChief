@@ -27,6 +27,7 @@
 			if (path.startsWith('/member/notifications')) return tab === null && page.url.searchParams.get('view') !== 'settings' ? '/member' : '/member?tab=me';
 			if (path.startsWith('/member/shop')) return tab === null && page.url.searchParams.get('view') === 'orders' ? '/member?tab=me' : null;
 			if (path !== '/member') return '/member?tab=me';
+			if (tab === 'news' && page.url.searchParams.get('article')) return '/member?tab=news';
 			return tab === 'payments' || tab === 'documents' ? '/member?tab=me' : null;
 		}
 		if (path.startsWith('/coach/notifications')) return '/coach';

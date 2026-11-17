@@ -58,7 +58,7 @@
 {/snippet}
 
 {#if selected && !desktop}
-	<a class="btn btn-outline mb-3 justify-self-start gap-2" href={closeHref} data-sveltekit-reset="false"><ArrowLeft size={16} aria-hidden="true" />{t('portal.news')}</a>
+	<a class="btn btn-outline mb-3 justify-self-start gap-2 max-md:hidden" href={closeHref} data-sveltekit-reset="false"><ArrowLeft size={16} aria-hidden="true" />{t('portal.news')}</a>
 	<div class="card overflow-hidden">{@render articleView()}</div>
 {:else}
 {#if home}
@@ -69,9 +69,9 @@
 {/if}
 {#if !home}
 	<!-- Phone: two choices, my teams or the whole club; the article list is below. -->
-	<div class="mb-3 grid grid-cols-2 gap-1 rounded-box bg-subhead p-1 md:hidden" role="group" aria-label={t('portal.news_filter')}>
+	<div class="mb-3 flex gap-2 md:hidden" role="group" aria-label={t('portal.news_filter')}>
 		{#each [['teams', 'portal.news_mine'], ['club', 'portal.news_club_all']] as [key, label] (key)}
-			<button type="button" class="min-h-11 rounded-box text-sm font-semibold {phoneScope === key ? 'bg-white text-ink shadow-sm' : 'text-muted'}" aria-pressed={phoneScope === key} onclick={() => (phoneScope = key as 'teams' | 'club')}>{t(label)}</button>
+			<button type="button" class="inline-flex h-[38px] items-center rounded-full border px-4 text-[15px] font-semibold {phoneScope === key ? 'border-ink bg-ink text-paper' : 'border-line bg-(--portal-panel) text-ink'}" aria-pressed={phoneScope === key} onclick={() => (phoneScope = key as 'teams' | 'club')}>{t(label)}</button>
 		{/each}
 	</div>
 	<div class="mb-4 flex flex-wrap items-center gap-2 max-md:hidden">
