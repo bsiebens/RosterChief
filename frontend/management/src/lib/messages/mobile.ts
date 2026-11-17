@@ -2,6 +2,7 @@
 export default {
 	en: {
 		'portal.theme': 'Appearance',
+		"coach.lu_picked_n": "Picked {n}",
 		"coach.all_events": "All events",
 		"coach.n_going": "{n} going",
 		"coach.squad_counts": "{players} players · {staff} staff",
@@ -94,6 +95,7 @@ export default {
 	},
 	nl: {
 		'portal.theme': 'Weergave',
+		"coach.lu_picked_n": "Gekozen {n}",
 		"coach.all_events": "Alle events",
 		"coach.n_going": "{n} komen",
 		"coach.squad_counts": "{players} spelers · {staff} staf",
@@ -186,6 +188,7 @@ export default {
 	},
 	fr: {
 		'portal.theme': 'Apparence',
+		"coach.lu_picked_n": "Choisis {n}",
 		"coach.all_events": "Tous les événements",
 		"coach.n_going": "{n} présents",
 		"coach.squad_counts": "{players} joueurs · {staff} staff",

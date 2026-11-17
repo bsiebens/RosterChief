@@ -177,10 +177,11 @@
 		</ul>
 	</section>
 
-	<div class="sticky bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-10 flex items-center gap-2 rounded-box border border-line bg-(--portal-panel) p-2.5 shadow-sm md:bottom-2">
+	<div class="action-dock md:sticky md:bottom-2 md:z-10 md:rounded-box md:border md:border-line md:bg-(--portal-panel) md:p-2.5 md:shadow-sm"><div class="flex w-full items-center gap-2">
 		{#if mode === 'answers' && upcoming}<button type="button" class="btn btn-primary min-h-12 flex-1" disabled={busy === 'remind' || counts.unknown === 0} onclick={nudge}>{t('coach.remind_n', { n: counts.unknown })}</button>{/if}
 		<button type="button" class="btn {mode === 'answers' && upcoming ? 'btn-outline' : 'btn-primary'} min-h-12 flex-1" disabled={saving || !pending} onclick={save}>{t('coach.save_attendance')}{#if pending} ({pending}){/if}</button>
-	</div>
+	</div></div>
+	<div class="h-[4.75rem] md:hidden" aria-hidden="true"></div>
 </div>
 
 <Sheet open={!!noting} title={noting ? `${noting.last_name}, ${noting.first_name}` : ''} onclose={() => (noting = null)}>

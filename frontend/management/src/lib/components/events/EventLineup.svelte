@@ -38,9 +38,10 @@
 	let busy = $state(false);
 	let errorMsg = $state('');
 	let okMsg = $state('');
-	let view = $state<'players' | 'picked' | 'lines'>('players');
+	let view = $state<'players' | 'lines'>('players');
 	let query = $state('');
 	let onlyAvailable = $state(false);
+	let onlyPicked = $state(false);
 	const q = $derived(query.trim().toLocaleLowerCase());
 	const isOut = (m: LineupMember) => ['absent', 'excused', 'dropout'].includes(m.status);
 	const toggle = (m: LineupMember) => {
@@ -69,7 +70,7 @@
 	const groups = $derived(byPosition(lineup.members));
 	const shownGroups = $derived(
 		groups
-			.map(([position, members]) => [position, members.filter((m) => (!onlyAvailable || m.available) && (!q || m.member.name.toLocaleLowerCase().includes(q)))] as [string, LineupMember[]])
+			.map(([position, members]) => [position, members.filter((m) => (!onlyAvailable || m.available) && (!onlyPicked || picked.includes(m.member.id)) && (!q || m.member.name.toLocaleLowerCase().includes(q)))] as [string, LineupMember[]])
 			.filter(([, members]) => members.length)
 	);
 	/** Takes one player out of the pick (saved with "Save draft" or "Publish"). */
@@ -152,17 +153,20 @@
 
 {#snippet mobileEditor()}
 	<div class="grid min-w-0 gap-3">
-		<div class="grid gap-2 {linesOn ? 'grid-cols-3' : 'grid-cols-2'}" role="group" aria-label={t('events.tab.lineup')}>
-			{#each [['players', t('coach.lu_view_players')], ['picked', t('coach.lu_view_picked', { n: picked.length })], ...(linesOn ? [['lines', t('coach.lu_view_lines')]] : [])] as [key, label] (key)}
+		{#if linesOn}
+		<div class="grid gap-2 grid-cols-2" role="group" aria-label={t('events.tab.lineup')}>
+			{#each [['players', t('coach.lu_view_players')], ...(linesOn ? [['lines', t('coach.lu_view_lines')]] : [])] as [key, label] (key)}
 				<button type="button" class="min-h-11 min-w-0 rounded-full border px-2 font-display text-sm font-bold tracking-wide uppercase {view === key ? 'border-ink bg-ink text-paper' : 'border-line bg-(--portal-panel) text-ink'}" aria-pressed={view === key} onclick={() => (view = key as typeof view)}>{label}</button>
 			{/each}
 		</div>
+		{/if}
 		{#if view === 'players'}
 			<section class="card overflow-hidden">
 				<div class="flex items-center gap-2 border-b border-line px-3.5 py-2">
 					<label class="sr-only" for="lu-search">{t('portal.search_players')}</label>
 					<input id="lu-search" type="search" class="input min-w-0 flex-1" placeholder={t('portal.search_players')} bind:value={query} />
 					<button type="button" class="inline-flex h-[38px] shrink-0 items-center rounded-full border px-3.5 text-[15px] font-semibold {onlyAvailable ? 'border-ink bg-ink text-paper' : 'border-line bg-(--portal-panel) text-ink'}" aria-pressed={onlyAvailable} onclick={() => (onlyAvailable = !onlyAvailable)}>{t('coach.lu_available')}</button>
+					<button type="button" class="inline-flex h-[38px] shrink-0 items-center rounded-full border px-3.5 text-[15px] font-semibold {onlyPicked ? 'border-ink bg-ink text-paper' : 'border-line bg-(--portal-panel) text-ink'}" aria-pressed={onlyPicked} onclick={() => (onlyPicked = !onlyPicked)}>{t('coach.lu_picked_n', { n: picked.length })}</button>
 				</div>
 				{#each shownGroups as [position, members] (position)}
 					<div>
@@ -199,32 +203,16 @@
 			</section>
 		{:else if view === 'lines' && linesOn}
 			<LineupLines template={lineup.template ?? []} members={pickedMembers} bind:slots editable busy={busy} {pdfHref} onsave={save} saveDisabled={!dirty} />
-		{:else}
-			<section class="card overflow-hidden">
-				{#each pickedGroups as [position, members] (position)}
-					<p class="bg-subhead px-3.5 py-1.5 font-display text-xs font-bold tracking-[.08em] text-muted uppercase">{position}</p>
-					<ul class="divide-y divide-rule">
-						{#each members as m (m.member.id)}
-							<li class="flex min-h-14 items-center gap-3 px-3.5 py-2">
-								<span class="w-6 shrink-0 text-right font-display font-extrabold text-ink">{m.jersey_number ?? ''}</span>
-								<span class="min-w-0 flex-1"><span class="block truncate text-sm font-semibold text-ink">{m.member.name}</span><LineupMeta {m} /></span>
-								<button type="button" class="btn btn-outline btn-square min-h-11 shrink-0 text-muted" disabled={busy} aria-label={t('events.lineup.drop_named', { name: m.member.name })} onclick={() => drop(m.member.id)}><Trash2 size={17} aria-hidden="true" /></button>
-							</li>
-						{/each}
-					</ul>
-				{:else}
-					<p class="px-4 py-6 text-center text-sm text-muted">{t('events.lineup.none_picked')}</p>
-				{/each}
-			</section>
 		{/if}
 		<p class="text-xs text-muted">{lineup.published_at ? t('events.lineup.notify_hint_published') : t('events.lineup.notify_hint')}</p>
-		<div class="sticky bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-10 grid gap-1.5 rounded-box border border-line bg-(--portal-panel) p-2.5 shadow-sm">
+		<div class="action-dock md:sticky md:bottom-2 md:z-10 md:rounded-box md:border md:border-line md:bg-(--portal-panel) md:p-2.5 md:shadow-sm"><div class="grid w-full gap-1.5">
 			{#if dirty}<p class="text-center text-xs font-semibold text-warn-text">{t('coach.lu_unsaved')} · {t('events.lineup.picked', { n: picked.length })}</p>{/if}
 			<div class="flex items-center gap-2">
 				<button class="btn btn-outline min-h-12 flex-1 gap-2" type="button" disabled={!dirty || busy} onclick={save}><Save size={16} /> {t('events.lineup.save')}</button>
 				<button class="btn btn-primary min-h-12 flex-1 gap-2" type="button" disabled={busy || (!picked.length && !lineup.published_at)} onclick={openPublish}><Megaphone size={16} /> {lineup.published_at ? t('events.lineup.publish_changes') : t('events.lineup.publish')}</button>
 			</div>
-		</div>
+		</div></div>
+		<div class="h-28 md:hidden" aria-hidden="true"></div>
 	</div>
 {/snippet}
 
