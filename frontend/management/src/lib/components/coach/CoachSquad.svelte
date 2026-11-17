@@ -90,7 +90,7 @@
 			{/each}
 		</div>
 		<section class="card min-w-0 scroll-mt-20" id="coach-staff">
-			<div class="card-h"><h2>{t('portal.staff')}</h2>{#if canManage}<button type="button" class="btn btn-outline btn-sm ml-auto min-h-9 gap-1.5" onclick={() => openStaff(null)}><Plus size={14} aria-hidden="true" />{t('coach.add_staff')}</button>{/if}</div>
+			<div class="card-h"><h2>{t('portal.staff')}</h2>{#if canManage}<button type="button" class="btn btn-outline btn-sm ml-auto min-h-9 gap-1.5 max-md:hidden" onclick={() => openStaff(null)}><Plus size={14} aria-hidden="true" />{t('coach.add_staff')}</button>{/if}</div>
 			{#if staffError}<div class="px-4 pt-3"><Alert kind="error">{staffError}</Alert></div>{/if}
 			<ul class="divide-y divide-rule">
 				{#each team.staff as member (member.id)}
@@ -142,10 +142,14 @@
 	</div>
 
 	{#if canManage}
-		<div class="sticky bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-10 mt-3 flex gap-2 md:hidden">
-			<button type="button" class="btn btn-primary min-h-12 flex-[2] gap-2 shadow-lg" onclick={() => openPlayer(null)}><Plus size={16} aria-hidden="true" />{t('coach.add_player')}</button>
-			<a class="btn btn-outline min-h-12 flex-1 !bg-(--portal-panel) shadow-lg" href="#coach-staff">{t('portal.staff')}</a>
+		<!-- On a phone: a band above the tab bar with the two ways to add someone; the list scrolls above it. -->
+		<div class="action-dock md:hidden">
+			<div class="flex gap-2">
+				<button type="button" class="btn btn-primary min-h-12 flex-1 gap-2" onclick={() => openPlayer(null)}><Plus size={16} aria-hidden="true" />{t('coach.add_player')}</button>
+				<button type="button" class="btn btn-outline min-h-12 flex-1 gap-2" onclick={() => openStaff(null)}><Plus size={16} aria-hidden="true" />{t('coach.add_staff')}</button>
+			</div>
 		</div>
+		<div class="h-[4.75rem] md:hidden" aria-hidden="true"></div>
 	{/if}
 
 	<CoachPlayerSheet player={viewed} open={!!viewed} onclose={() => (viewing = '')} teamId={team.id} seasonId={team.season_id} {canManage} onedit={() => openPlayer(viewed)} />
