@@ -12,7 +12,7 @@
 </script>
 
 {#if people.length > 1}
-	<div class="flex max-w-full items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden {compact ? '' : 'pb-1'}" role="group" aria-label={t('portal.person')}>
+	<div class="flex max-w-full flex-wrap items-center gap-2" role="group" aria-label={t('portal.person')}>
 		{#if all}<button class="portal-person" class:compact type="button" aria-pressed={!selected} onclick={() => (selected = '')}>
 			<span class="grid {compact ? 'size-6' : 'size-7'} place-items-center rounded-full {!selected ? 'bg-white text-club' : 'bg-primary text-primary-content'}"><UsersRound size={compact ? 12 : 14} aria-hidden="true" /></span>{t('portal.all')}
 		</button>{/if}

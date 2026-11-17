@@ -36,8 +36,8 @@
 </script>
 
 {#if banner}
-	<section class="card" aria-labelledby="stats-share-title">
-		<div class="flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3 sm:px-5">
+	<section class="card min-w-0 max-w-full" aria-labelledby="stats-share-title">
+		<div class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3 sm:px-5">
 			<div class="flex min-w-0 flex-1 basis-60 items-center gap-3">
 				<Link2 size={18} class="shrink-0 text-muted" aria-hidden="true" />
 				<div class="min-w-0"><b id="stats-share-title" class="block text-ink">{t('portal.stats_public')}</b><span class="block text-xs text-muted">{t('portal.stats_public_help', { name: person.first_name })}</span></div>
