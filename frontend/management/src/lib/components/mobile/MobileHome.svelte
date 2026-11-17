@@ -66,7 +66,7 @@
 		{#each nextEvents as rows, i (rows[0].event_id)}
 			{@const event = rows[0]}
 			{#if i === 0}
-				<a class="portal-event-banner relative isolate flex min-h-60 flex-col justify-end gap-3 overflow-hidden rounded-box p-[18px] text-[#fff]" href={eventLink(event.event_id)} data-sveltekit-reset="false" aria-label={event.title}>
+				<a data-kind={event.kind} class="portal-event-banner relative isolate flex min-h-60 flex-col justify-end gap-3 overflow-hidden rounded-box p-[18px] text-[#fff]" href={eventLink(event.event_id)} data-sveltekit-reset="false" aria-label={event.title}>
 					<EventBackdrop src={background} />
 					<span class="flex items-center gap-2"><span class="inline-flex h-[26px] items-center rounded-full border border-[#fff]/40 bg-[#fff]/20 px-2.5 text-[13px] font-bold">{t(kindLabelKey(event.kind))} · {when(event)}</span></span>
 					<span class="font-display text-4xl leading-[.98] font-extrabold uppercase">{event.title}</span>
@@ -82,7 +82,7 @@
 					</span>
 				</a>
 			{:else}
-				<a class="portal-event-banner relative isolate flex min-h-24 flex-col justify-end gap-1.5 overflow-hidden rounded-box px-4 py-3 text-[#fff]" href={eventLink(event.event_id)} data-sveltekit-reset="false">
+				<a data-kind={event.kind} class="portal-event-banner relative isolate flex min-h-24 flex-col justify-end gap-1.5 overflow-hidden rounded-box px-4 py-3 text-[#fff]" href={eventLink(event.event_id)} data-sveltekit-reset="false">
 					<EventBackdrop src={background} />
 					<span class="truncate font-mono text-xs tracking-[.04em] text-[#fff]/90 uppercase">{when(event)}</span>
 					<span class="font-display text-2xl leading-none font-extrabold uppercase">{event.title}</span>

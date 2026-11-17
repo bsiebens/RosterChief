@@ -1570,3 +1570,10 @@ textarea[name="note"] {
 .phone-top.coach .phone-dot { border-color: #171a20; }
 
 .phone-title.long { white-space: normal; font-size: 1.5rem; line-height: 1.05; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+
+/* The left bar of an event card follows the kind of event, as the colours elsewhere in the portal do. */
+.portal-event-banner[data-kind='training'] { border-inline-start-color: var(--color-ice); }
+.portal-event-banner[data-kind='tournament'] { border-inline-start-color: var(--color-warn); }
+.portal-event-banner[data-kind='meeting'] { border-inline-start-color: var(--color-primary); }
+.portal-event-banner[data-kind='social'] { border-inline-start-color: var(--color-ok); }
+.portal-event-banner[data-kind='other'] { border-inline-start-color: var(--color-dim); }
