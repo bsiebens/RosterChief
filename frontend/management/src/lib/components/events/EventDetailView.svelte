@@ -157,6 +157,44 @@
             </div>
 {/snippet}
 
+{#snippet mobileInfo()}
+    <section class="card min-w-0 overflow-hidden border-l-4 {style.bar}">
+        <div class="grid min-w-0 gap-2.5 p-4">
+            <dl class="grid min-w-0 gap-1.5 text-sm">
+                    {#if ev.location}
+                        <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><MapPin size={15} aria-label={t('events.location')}/></dt><dd class="min-w-0 break-words"><a class="link font-semibold" href={mapsLink} target="_blank" rel="noreferrer">{ev.location.name}{ev.location.city ? `, ${ev.location.city}` : ''}</a></dd></div>
+                    {/if}
+                    <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><Users size={15} aria-label={t('events.audience')}/></dt>
+                        <dd class="flex min-w-0 flex-wrap gap-x-2 gap-y-0.5">
+                            {#if ev.club_wide}<span class="font-semibold">{t('events.whole_club')}</span>{/if}
+                            {#each ev.teams as team (team.id)}<a class="link font-semibold" href="/coach/teams/{team.id}">{team.name}</a>{/each}
+                            {#each ev.groups as g (g.id)}<span class="font-semibold">{g.name}</span>{/each}
+                            {#if !ev.club_wide && !ev.teams.length && !ev.groups.length}<span class="text-muted">{ev.invited_members.length ? t('events.only_invited') : '—'}</span>{/if}
+                        </dd></div>
+                    {#if ev.deadline}
+                        <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><Flag size={15} aria-label={t('events.deadline')}/></dt><dd class="min-w-0 break-words"><span class="text-muted">{t('events.deadline')}</span> <span class="font-semibold">{formatDateTime(ev.deadline)}</span></dd></div>
+                    {/if}
+                    {#if ev.series}
+                        <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><Repeat size={15} aria-hidden="true"/></dt><dd class="min-w-0 break-words text-slate">{series}{#if ev.detached} · <span class="text-muted">{t('events.detached')}</span>{/if}</dd></div>
+                    {/if}
+            </dl>
+                {#if ev.notes}<p class="border-t border-line pt-2.5 text-sm break-words whitespace-pre-line text-slate">{ev.notes}</p>{/if}
+                {#if ev.opponent}
+                    <div class="flex min-w-0 items-center gap-3 border-t border-line pt-2.5">
+                        {#if ev.opponent.logo_url}<img src={ev.opponent.logo_url} alt="" class="h-10 w-10 shrink-0 object-contain"/>{:else}<ClubCrest name={ev.opponent.name} size={40}/>{/if}
+                        <div class="min-w-0"><span class="block font-display text-[11px] font-bold tracking-[.08em] text-muted uppercase">{t('events.opponent')}</span><span class="block truncate font-display text-lg font-extrabold text-ink uppercase">{ev.opponent.name}</span></div>
+                    </div>
+                {/if}
+                {#if ev.referees.length || ev.officials.length}
+                    <dl class="grid gap-1.5 border-t border-line pt-2.5 text-sm">
+                        {@render officiating('referee', ev.referees)}
+                        {@render officiating('official', ev.officials)}
+                    </dl>
+                {/if}
+        </div>
+    </section>
+{/snippet}
+
 {#snippet mobileTop()}
     <div class="grid min-w-0 gap-3 md:hidden">
         <div class="flex items-center justify-end gap-2">
@@ -165,7 +203,6 @@
                 <button type="button" class="btn btn-outline btn-square min-h-11" aria-label={t('coach.ev_actions')} onclick={() => (menuOpen = true)}><Ellipsis size={20} aria-hidden="true"/></button>
             </div>
         </div>
-        {#if shownTab === 'overview'}
         <section class="card min-w-0 overflow-hidden border-l-4 {style.bar}">
             <div class="grid min-w-0 gap-2.5 p-4">
                 <div class="flex flex-wrap items-center gap-1.5">
@@ -185,39 +222,9 @@
                     {#if ev.gathering}
                         <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><Clock size={15} aria-label={t('events.gathering')}/></dt><dd class="min-w-0 break-words"><span class="text-muted">{t('events.gathering')}</span> <span class="font-semibold">{formatDateTime(ev.gathering)}</span></dd></div>
                     {/if}
-                    {#if ev.location}
-                        <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><MapPin size={15} aria-label={t('events.location')}/></dt><dd class="min-w-0 break-words"><a class="link font-semibold" href={mapsLink} target="_blank" rel="noreferrer">{ev.location.name}{ev.location.city ? `, ${ev.location.city}` : ''}</a></dd></div>
-                    {/if}
-                    <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><Users size={15} aria-label={t('events.audience')}/></dt>
-                        <dd class="flex min-w-0 flex-wrap gap-x-2 gap-y-0.5">
-                            {#if ev.club_wide}<span class="font-semibold">{t('events.whole_club')}</span>{/if}
-                            {#each ev.teams as team (team.id)}<a class="link font-semibold" href="/coach/teams/{team.id}">{team.name}</a>{/each}
-                            {#each ev.groups as g (g.id)}<span class="font-semibold">{g.name}</span>{/each}
-                            {#if !ev.club_wide && !ev.teams.length && !ev.groups.length}<span class="text-muted">{ev.invited_members.length ? t('events.only_invited') : '—'}</span>{/if}
-                        </dd></div>
-                    {#if ev.deadline}
-                        <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><Flag size={15} aria-label={t('events.deadline')}/></dt><dd class="min-w-0 break-words"><span class="text-muted">{t('events.deadline')}</span> <span class="font-semibold">{formatDateTime(ev.deadline)}</span></dd></div>
-                    {/if}
-                    {#if ev.series}
-                        <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><Repeat size={15} aria-hidden="true"/></dt><dd class="min-w-0 break-words text-slate">{series}{#if ev.detached} · <span class="text-muted">{t('events.detached')}</span>{/if}</dd></div>
-                    {/if}
                 </dl>
-                {#if ev.notes}<p class="border-t border-line pt-2.5 text-sm break-words whitespace-pre-line text-slate">{ev.notes}</p>{/if}
-                {#if ev.opponent}
-                    <div class="flex min-w-0 items-center gap-3 border-t border-line pt-2.5">
-                        {#if ev.opponent.logo_url}<img src={ev.opponent.logo_url} alt="" class="h-10 w-10 shrink-0 object-contain"/>{:else}<ClubCrest name={ev.opponent.name} size={40}/>{/if}
-                        <div class="min-w-0"><span class="block font-display text-[11px] font-bold tracking-[.08em] text-muted uppercase">{t('events.opponent')}</span><span class="block truncate font-display text-lg font-extrabold text-ink uppercase">{ev.opponent.name}</span></div>
-                    </div>
-                {/if}
-                {#if ev.referees.length || ev.officials.length}
-                    <dl class="grid gap-1.5 border-t border-line pt-2.5 text-sm">
-                        {@render officiating('referee', ev.referees)}
-                        {@render officiating('official', ev.officials)}
-                    </dl>
-                {/if}
             </div>
         </section>
-        {/if}
         <nav class="card min-w-0" aria-label={t('events.tabs')}>
             <div class="grid px-1" style="grid-template-columns: repeat({phoneTabs.length}, minmax(0, 1fr))">
                 {#each phoneTabs as item (item.key)}
@@ -342,6 +349,7 @@
 
     {#if phone && shownTab === 'overview'}
         <div class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4">
+            {@render mobileInfo()}
             {@render details()}
             {#if data.attachments}
                 <EventAttachments eventId={ev.id} initial={data.attachments}/>

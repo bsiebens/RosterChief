@@ -57,7 +57,7 @@
 			{#if list.can_manage}<p class="text-xs text-muted">{t('events.files.limits')}</p>{/if}
 		</div>
 		{#if list.can_manage}
-			<label class="btn btn-primary btn-sm cursor-pointer gap-2 {busy ? 'pointer-events-none opacity-60' : ''}">
+			<label class="btn btn-primary btn-sm min-h-11 w-full cursor-pointer gap-2 md:min-h-0 md:w-auto {busy ? 'pointer-events-none opacity-60' : ''}">
 				<Upload size={14} aria-hidden="true" />
 				{busy ? t('events.files.uploading') : t('events.files.upload')}
 				<input bind:this={input} type="file" multiple class="sr-only" onchange={upload} disabled={busy} />
