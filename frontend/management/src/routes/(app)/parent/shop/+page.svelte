@@ -350,6 +350,10 @@
 	</div>
 </div>
 
+{#if cart.length}
+	<a class="btn btn-primary sticky bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-10 mt-3 min-h-12 justify-between shadow-md md:hidden" href="#cart"><span>{t('portal.shop.view_basket')} · {itemsText(cart.reduce((sum, line) => sum + line.quantity, 0))}</span><span>{money(String(subtotal))}</span></a>
+{/if}
+
 <dialog bind:this={optionsDialog} class="portal-modal" aria-label={choosing?.name ?? t('portal.shop.options')} onclose={() => (choosing = null)} onclick={(e) => { if (e.target === optionsDialog) optionsDialog?.close(); }}>
 	{#if choosing}
 		{@const product = choosing}

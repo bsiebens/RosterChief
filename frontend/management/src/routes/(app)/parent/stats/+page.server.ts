@@ -1,6 +1,6 @@
 import { error } from '@sveltejs/kit';
 import { api } from '#lib/management-api.ts';
-import type { StatsPeople } from '#lib/portal.ts';
+import type { FollowedGame, StatsPeople } from '#lib/portal.ts';
 import type { MemberGameStats } from '#lib/analytics.ts';
 import type { AttendanceStats, GoalieStats, OfficiatingStats, PlayerStats } from '#lib/member-stats.ts';
 import type { PageServerLoad } from './$types';
@@ -14,5 +14,6 @@ export const load: PageServerLoad = async ({ fetch, url }) => {
 	const asked = url.searchParams.get('who');
 	const who = list.find((person) => person.id === asked)?.id ?? list.find((person) => person.is_self)?.id ?? list[0]?.id ?? '';
 	const stats = who ? await api<MyStats>('GET', `/portal/me/stats/${who}`, { f: fetch }) : null;
-	return { people: list, available: people.data.available, who, stats: stats?.ok ? (stats.data ?? null) : null };
+	const followed = await api<FollowedGame[]>('GET', '/portal/followed', { f: fetch });
+	return { people: list, available: people.data.available, who, stats: stats?.ok ? (stats.data ?? null) : null, followed: followed.ok ? (followed.data ?? []) : [] };
 };

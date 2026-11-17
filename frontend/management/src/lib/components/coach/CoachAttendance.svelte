@@ -138,7 +138,6 @@
 						<button type="button" class="portal-person compact text shrink-0 !px-3" aria-pressed={filter === key} onclick={() => (filter = key)}>{key === 'unknown' ? '?' : t(label)} {counts[key]}</button>
 					{/each}
 				</div>
-				{#if mode === 'answers' && upcoming}<button type="button" class="btn btn-primary btn-sm min-h-9 shrink-0" disabled={busy === 'remind' || counts.unknown === 0} onclick={nudge}>{t('coach.remind')}</button>{/if}
 			</div>
 		</div>
 		<div class="border-b border-line px-3.5 py-2">
@@ -178,7 +177,8 @@
 	</section>
 
 	<div class="sticky bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-10 flex items-center gap-2 rounded-box border border-line bg-(--portal-panel) p-2.5 shadow-sm md:bottom-2">
-		<button type="button" class="btn btn-primary min-h-12 flex-1" disabled={saving || !pending} onclick={save}>{t('coach.save_attendance')}{#if pending} ({pending}){/if}</button>
+		{#if mode === 'answers' && upcoming}<button type="button" class="btn btn-primary min-h-12 flex-1" disabled={busy === 'remind' || counts.unknown === 0} onclick={nudge}>{t('coach.remind_n', { n: counts.unknown })}</button>{/if}
+		<button type="button" class="btn {mode === 'answers' && upcoming ? 'btn-outline' : 'btn-primary'} min-h-12 flex-1" disabled={saving || !pending} onclick={save}>{t('coach.save_attendance')}{#if pending} ({pending}){/if}</button>
 	</div>
 </div>
 

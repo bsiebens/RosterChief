@@ -54,7 +54,7 @@
 				<label class="relative block min-w-0 flex-1"><span class="sr-only">{t('coach.search_squad')}</span><Search size={14} class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim" aria-hidden="true" /><input class="input w-full pl-9" type="search" placeholder={t('coach.search_squad')} bind:value={query} /></label>
 				{#if canManage}<button type="button" class="btn btn-primary btn-sm min-h-10 shrink-0 gap-1.5" onclick={() => openPlayer(null)}><Plus size={16} aria-hidden="true" />{t('coach.add_player')}</button>{/if}
 			</div>
-			<div class="grid gap-1 text-xs text-muted">
+			<div class="hidden gap-1 text-xs text-muted md:grid">
 				<ul class="flex flex-nowrap items-center gap-x-3" aria-label={t('coach.rate_overall')}>
 					{#each LEGEND as [tone, key] (key)}<li class="inline-flex items-center gap-1.5"><span class="size-2.5 rounded-full {TONE[tone].bar}"></span>{t(key)}</li>{/each}
 				</ul>
@@ -70,7 +70,11 @@
 								<b class="block truncate text-sm text-ink">{player.last_name}, {player.first_name}</b>
 								<span class="block truncate text-xs text-muted">{#if player.jersey_number !== null}#{player.jersey_number}{/if}{#if role(player)}{player.jersey_number !== null ? ' · ' : ''}{role(player)}{/if}</span>
 							</span>
-							<span class="flex shrink-0 flex-col items-end gap-1" title={t('coach.attendance_pct', { n: player.attendance_rate ?? 0 })}>
+							<span class="flex w-14 shrink-0 flex-col items-end gap-1 md:hidden" title={t('coach.attendance_pct', { n: player.attendance_rate ?? 0 })}>
+								<b class="text-sm text-ink tabular-nums">{formatRate(player.attendance_rate)}</b>
+								<span class="h-2 w-full overflow-hidden rounded-full bg-subhead"><i class="block h-full rounded-full {TONE[rateTone(player.attendance_rate)].bar}" style:width="{Math.min(100, Math.max(0, Number(player.attendance_rate ?? 0)))}%"></i></span>
+							</span>
+							<span class="hidden shrink-0 flex-col items-end gap-1 md:flex" title={t('coach.attendance_pct', { n: player.attendance_rate ?? 0 })}>
 								<span class={pill(player.attendance_rate)}>{formatRate(player.attendance_rate)}</span>
 								<span class="flex gap-1 font-mono text-[10px] text-muted">
 									<span class="rounded px-1 {TONE[rateTone(player.games_rate)].pill} border">{t('coach.rate_g')} {formatRate(player.games_rate)}</span>

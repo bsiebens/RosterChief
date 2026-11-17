@@ -27,6 +27,7 @@
 	import PortalAgenda from '#lib/components/portal/PortalAgenda.svelte';
 	import MobileHome from '#lib/components/mobile/MobileHome.svelte';
 	import MeHub from '#lib/components/mobile/MeHub.svelte';
+	import MobilePayments from '#lib/components/mobile/MobilePayments.svelte';
 	import PortalWeekGrid from '#lib/components/portal/PortalWeekGrid.svelte';
 	import Sheet from '#lib/components/portal/Sheet.svelte';
 
@@ -162,6 +163,9 @@
 		return [...grouped.values()].sort((a, b) => Date.parse(a.event.start) - Date.parse(b.event.start));
 	}
 	const calendar = $derived(calendarEntries(events, offers));
+	// The phone list can be narrowed to games, practices or the duties the family was asked to do.
+	let kindFilter = $state('all');
+	const listEntries = $derived(calendar.filter(({ event, officiating }) => kindFilter === 'all' || (kindFilter === 'crew' ? officiating.length > 0 : event.kind === kindFilter)));
 	const eventDays = $derived.by(() => {
 		const days = new Map<string, string[]>();
 		for (const { event } of calendar) {
@@ -623,7 +627,12 @@
 			</div>
 		</section>
 	{:else}
-		<PortalAgenda entries={calendar} href={eventLink} replies={replyStack} score={scoreMark} />
+		<div class="flex gap-2 overflow-x-auto md:hidden" role="group" aria-label={t('portal.filter_kind')}>
+			{#each [['all', 'portal.kind_all'], ['game', 'portal.kind_games'], ['training', 'portal.kind_training'], ['crew', 'portal.kind_crew']] as [key, label] (key)}
+				<button type="button" class="portal-person text compact shrink-0" aria-pressed={kindFilter === key} onclick={() => (kindFilter = key)}>{t(label)}</button>
+			{/each}
+		</div>
+		<PortalAgenda entries={listEntries} href={eventLink} replies={replyStack} score={scoreMark} />
 	{/if}
 {:else if tab === 'news'}
 	<News articles={data.home.news} />
@@ -633,12 +642,15 @@
 	{@render peoplePicker()}
 	{#if data.overview}<RequirementsCard memberships={data.overview.memberships.filter((row) => !selected || row.member_id === selected)} {people} />{/if}
 {:else if tab === 'payments'}
+	<div class="md:hidden"><MobilePayments home={data.home} {people} bind:selected {memberName} /></div>
+	<div class="hidden md:contents">
 	{@render peoplePicker()}
 	<div class="grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
 		<div class="grid min-w-0 content-start gap-4">{@render payments()}</div>
 		<div class="hidden min-w-0 content-start gap-4 md:grid">
 			{#if data.overview}<RequirementsCard memberships={data.overview.memberships.filter((row) => !selected || row.member_id === selected)} {people} />{/if}
 		</div>
+	</div>
 	</div>
 {:else}
 	<div class="md:hidden">

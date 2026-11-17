@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { Activity, ChartColumn, Flag, ListChecks } from '@lucide/svelte';
 	import PersonFilter from '#lib/components/PersonFilter.svelte';
 	import GameStatsCard from '#lib/components/members/detail/GameStatsCard.svelte';
@@ -8,7 +9,9 @@
 	import OfficiatingStats from '#lib/components/members/stats/OfficiatingStats.svelte';
 	import PlayerStats from '#lib/components/members/stats/PlayerStats.svelte';
 	import PlayerTiles from '#lib/components/members/stats/PlayerTiles.svelte';
+	import FollowedGames from '#lib/components/portal/FollowedGames.svelte';
 	import StatsShare from '#lib/components/portal/StatsShare.svelte';
+	import { ChevronRight, Shirt } from '@lucide/svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { api } from '#lib/management-api.ts';
@@ -42,6 +45,10 @@
 {/snippet}
 
 <div class="grid min-w-0 gap-4">
+	<section class="grid gap-2" aria-label={t('portal.following')}>
+		<FollowedGames games={data.followed} crest={page.data.branding?.logo_url} clubName={page.data.branding?.name ?? ''} background={null} />
+		<a class="card flex min-h-14 items-center gap-3 px-4" href="/parent/profile#follow"><span class="grid size-10 shrink-0 place-items-center rounded-box bg-subhead text-ink"><Shirt size={18} aria-hidden="true" /></span><b class="min-w-0 flex-1 text-ink">{t('portal.follow_title')}</b><ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" /></a>
+	</section>
 	<PersonFilter people={data.people} bind:selected={who} all={false} viewer={data.people.find((p) => p.is_self)?.id ?? ''} />
 	{#if data.available && person}<StatsShare {person} banner />{/if}
 	{#if empty}
