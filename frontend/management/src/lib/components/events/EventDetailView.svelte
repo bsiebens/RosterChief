@@ -70,8 +70,8 @@
         };
     };
 
-    // On a coach phone the header is the board's: what you are looking at (Replies, Line-up, or the event itself) with the kind or opponent, day and time above it.
-    const phoneTitle = $derived(shownTab === 'attendance' ? t('coach.mode_replies') : shownTab === 'lineup' ? t('events.tab.lineup') : ev.title);
+    // On a coach phone the header is the kind of event (Training, Game ...) on every tab, with the day and start time above it; the title and the rest are below.
+    const phoneTitle = $derived(t(kindLabelKey(ev.kind)));
     const phoneContext = $derived(`${new Intl.DateTimeFormat(getLang(), {weekday: 'short', day: 'numeric', month: 'short'}).format(new Date(ev.start))} · ${formatTime(ev.start)}`);
     usePageHeader(() => ({title: phone ? phoneTitle : ev.title, context: phone ? phoneContext : `${t(kindLabelKey(ev.kind))} · ${formatDay(ev.start)}`, badge, actions}));
     const whereWhen = $derived([formatRange(ev.start, ev.end), ev.location ? [ev.location.name, ev.location.city].filter(Boolean).join(', ') : ''].filter(Boolean).join(' · '));
