@@ -48,8 +48,8 @@
 	const timeLine = (event: PortalEventDisplay) => (event.gathering ? `${t('portal.meet_time', { time: formatTime(event.gathering) })} · ${t('portal.start_time', { time: formatTime(event.start) })}` : formatTime(event.start));
 	const when = (event: PortalEventDisplay) => `${formatDay(event.start)} · ${formatTime(event.start)}`;
 	const weekday = (iso: string) => new Date(iso).toLocaleDateString(getLang(), { weekday: 'short' });
-	// One row per child and event (the child's name after the title when the family has several), each with its status pill.
-	const weekRows = $derived(weekItems.slice(0, 6).flatMap((item) => item.badges.map((b, i) => ({ key: `${item.key}-${i}`, event: item.event, who: people.length > 1 ? b.who : '', pill: statusPill(b.status) }))).slice(0, 5));
+	// One row per event; the family's children answer on it together, each with their first name in full and status.
+	const weekRows = $derived(weekItems.slice(0, 5).map((item) => ({ key: item.key, event: item.event, who: item.badges.map((b) => ({ name: b.who, pill: statusPill(b.status) })) })));
 	const translation = (article: PortalArticle) => article.translations[getLang() === 'nl' ? 'nl' : 'en'];
 </script>
 
@@ -119,8 +119,14 @@
 				{#each weekRows as row (row.key)}
 					<a class="flex min-h-15 items-center gap-3 px-3.5 py-2.5" href={eventLink(row.event.event_id)} data-sveltekit-reset="false">
 						<span class="w-12 shrink-0 text-center leading-none"><b class="block font-display text-[1.625rem] font-extrabold text-ink">{new Date(row.event.start).getDate()}</b><span class="font-mono text-[11px] tracking-[.06em] text-muted uppercase">{weekday(row.event.start)}</span></span>
-						<span class="min-w-0 flex-1"><b class="block truncate text-base font-semibold text-ink">{row.event.title}{row.who ? ` · ${row.who}` : ''}</b><span class="block truncate text-sm text-muted">{timeLine(row.event)}</span></span>
-						<span class={row.pill.cls}>{row.pill.text}</span>
+						<span class="min-w-0 flex-1">
+							<b class="block text-base leading-snug font-semibold text-ink">{row.event.title}</b>
+							<span class="block text-sm text-muted">{timeLine(row.event)}</span>
+							{#if people.length > 1 && row.who.length}
+								<span class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1.5">{#each row.who as w (w.name)}<span class="inline-flex items-center gap-1.5 text-sm font-semibold text-ink">{w.name}<span class={w.pill.cls}>{w.pill.text}</span></span>{/each}</span>
+							{/if}
+						</span>
+						{#if people.length <= 1 && row.who.length}<span class={row.who[0].pill.cls}>{row.who[0].pill.text}</span>{/if}
 					</a>
 				{/each}
 			</div>

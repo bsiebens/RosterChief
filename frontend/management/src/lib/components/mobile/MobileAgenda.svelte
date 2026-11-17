@@ -30,18 +30,24 @@
 	const key = (date: Date) => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
 	const todayKey = key(new Date());
 
-	type Row = { id: string; start: string; title: string; kind: string; line: string; going: number | null | undefined; tile: string; pill: { cls: string; text: string }; eventId: string; cancelled: boolean };
+	// One row per event: everyone in the family who is part of it answers on the same row, each with their own first name in full and status.
+	type Who = { name: string; pill: { cls: string; text: string } };
+	type Row = { id: string; start: string; title: string; kind: string; line: string; going: number | null | undefined; who: Who[]; eventId: string; cancelled: boolean };
 	const rows = $derived.by(() => {
-		const out: Row[] = [];
+		const byKey = new Map<string, Row>();
+		const add = (rowKey: string, base: Omit<Row, 'id' | 'who'>, who: Who) => {
+			const found = byKey.get(rowKey);
+			if (found) found.who.push(who);
+			else byKey.set(rowKey, { ...base, id: rowKey, who: [who] });
+		};
 		for (const { event, attendance, officiating } of entries) {
 			if (key(new Date(event.start)) < todayKey) continue;
 			const meet = event.gathering ? t('portal.meet_time', { time: formatTime(event.gathering) }) : '';
-			const line = [meet, event.location].filter(Boolean).join(' · ');
-			const base = { start: event.start, title: event.title, kind: event.kind, line, eventId: event.event_id, cancelled: event.cancelled };
-			for (const row of attendance) out.push({ ...base, id: row.id, going: row.going_count, tile: people.length > 1 ? firstName(row.member_id) : '', pill: statusPill(row.status) });
-			for (const offer of officiating) out.push({ ...base, id: `${event.event_id}-${offer.role}-${offer.member_id}`, going: undefined, tile: people.length > 1 ? firstName(offer.member_id) : '', pill: statusPill(offer.status === 'invited' ? 'no_response' : 'duty'), kind: 'crew', title: `${event.title} · ${t(`portal.crew_${offer.role}`)}` });
+			const base = { start: event.start, title: event.title, kind: event.kind, line: [meet, event.location].filter(Boolean).join(' · '), going: undefined as number | null | undefined, eventId: event.event_id, cancelled: event.cancelled };
+			for (const row of attendance) add(event.event_id, { ...base, going: row.going_count }, { name: firstName(row.member_id), pill: statusPill(row.status) });
+			for (const offer of officiating) add(`${event.event_id}-official`, { ...base, kind: 'crew', title: `${event.title} · ${t(`portal.crew_${offer.role}`)}` }, { name: firstName(offer.member_id), pill: statusPill(offer.status === 'invited' ? 'no_response' : 'duty') });
 		}
-		return out.filter((row) => kind === 'all' || row.kind === kind).sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+		return [...byKey.values()].filter((row) => kind === 'all' || row.kind === kind).sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
 	});
 	const groups = $derived.by(() => {
 		const map = new Map<string, Row[]>();
@@ -66,13 +72,18 @@
 			<div class="card divide-y divide-rule overflow-hidden">
 				{#each list as row (row.id)}
 					<a class="flex min-h-17 items-center gap-3 px-3.5 py-2.5 {row.cancelled ? 'opacity-60' : ''}" href={href(row.eventId)} data-sveltekit-reset="false">
-						<span class="w-14 shrink-0 text-center leading-none"><b class="block font-display text-[1.625rem] font-extrabold text-ink">{formatTime(row.start)}</b>{#if row.tile}<span class="block truncate font-mono text-[11px] tracking-[.06em] text-muted uppercase">{row.tile}</span>{/if}</span>
+						<b class="w-14 shrink-0 text-center font-display text-[1.625rem] leading-none font-extrabold text-ink">{formatTime(row.start)}</b>
 						<span class="min-w-0 flex-1">
-							<b class="block truncate text-base font-semibold text-ink {row.cancelled ? 'line-through' : ''}">{row.title}</b>
-							{#if row.line}<span class="block truncate text-sm text-muted">{row.line}</span>{/if}
-							{#if row.going != null}<span class="block truncate text-sm text-muted">{t('portal.n_going', { n: row.going })}</span>{/if}
+							<b class="block text-base leading-snug font-semibold text-ink {row.cancelled ? 'line-through' : ''}">{row.title}</b>
+							{#if row.line}<span class="block text-sm text-muted">{row.line}</span>{/if}
+							{#if row.going != null}<span class="block text-sm text-muted">{t('portal.n_going', { n: row.going })}</span>{/if}
+							{#if row.who.length > 1 || (people.length > 1 && row.who.length)}
+								<span class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1.5">
+									{#each row.who as w (w.name)}<span class="inline-flex items-center gap-1.5 text-sm font-semibold text-ink">{w.name}<span class={w.pill.cls}>{w.pill.text}</span></span>{/each}
+								</span>
+							{/if}
 						</span>
-						<span class={row.pill.cls}>{row.pill.text}</span>
+						{#if row.who.length === 1 && people.length <= 1}<span class={row.who[0].pill.cls}>{row.who[0].pill.text}</span>{/if}
 					</a>
 				{/each}
 			</div>
