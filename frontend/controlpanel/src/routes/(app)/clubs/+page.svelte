@@ -86,7 +86,7 @@
 		<div class="flex-1"></div>
 		<div class="flex gap-1" role="group" aria-label="Status">
 			{#each STATUSES as [value, label] (value)}
-				<a class="btn btn-xs {data.query.status === value ? '' : 'btn-outline'}" href={href({ status: value, page: 1 })} aria-current={data.query.status === value ? 'true' : undefined}>{label}</a>
+				<a class="btn btn-xs {data.query.status === value ? '' : 'btn-outline'}" href={href({ status: value, page: 1 })} aria-current={data.query.status === value ? 'true' : undefined}>{label}{#if data.counts}<span class="ml-1 font-mono tabular-nums opacity-80" aria-label="{data.counts[value]} clubs">{data.counts[value]}</span>{/if}</a>
 			{/each}
 		</div>
 	</div>
