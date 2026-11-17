@@ -5,7 +5,7 @@
 	import { activePortalKey, ME_PAGES, ME_PHONE_PAGES, portalItems, portalPhoneItems, type PortalMode } from '#lib/portal-nav.ts';
 
 	let { mode, compact = false, shopEnabled = false }: { mode: PortalMode; compact?: boolean; shopEnabled?: boolean } = $props();
-	const items = $derived(compact ? portalPhoneItems(mode) : portalItems(mode, shopEnabled));
+	const items = $derived(compact ? portalPhoneItems(mode, shopEnabled) : portalItems(mode, shopEnabled));
 	const active = $derived(activePortalKey(page.url));
 	const meActive = $derived((compact ? ME_PHONE_PAGES : ME_PAGES).includes(active));
 	// A dot on Me when a form or a payment is waiting for the family (members only; the numbers come from the Home data when it is loaded).

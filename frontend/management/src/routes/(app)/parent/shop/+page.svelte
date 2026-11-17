@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Truck, Wallet, ChevronDown, Clock, Download, Paperclip, Package, ReceiptText, Search, ShoppingBag, ShoppingCart, Trash2 } from '@lucide/svelte';
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
 	import Alert from '#lib/components/Alert.svelte';
 	import { formatDay, parseIsoDate } from '#lib/events/types.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
@@ -29,7 +30,8 @@
 	// A product with nothing to choose goes straight into the cart; otherwise "Choose" opens its options in a dialog.
 	const needsOptions = (product: ShopProduct) => product.variants.length > 1 || (product.variants.length === 1 && !product.variants[0].in_stock) || product.personalization_enabled || catalog.people.length > 1;
 	let busy = $state(false);
-	let view = $state<'shop' | 'orders'>('shop');
+	// Me > Shop orders opens this page on the orders (`?view=orders`); on a phone that is the only way in, so the switch button is for larger screens.
+	let view = $state<'shop' | 'orders'>(page.url.searchParams.get('view') === 'orders' ? 'orders' : 'shop');
 	let choosing = $state<ShopProduct | null>(null);
 	let draft = $state<Draft>({ variant: '', beneficiary: '', quantity: 1, name: '', number: '' });
 	let optionsDialog = $state<HTMLDialogElement>();
@@ -189,11 +191,11 @@
 		loadingOrders = false;
 	}
 
-	usePageHeader(() => ({ title: t('portal.shop'), actions }));
+	usePageHeader(() => ({ title: t(view === 'orders' ? 'portal.shop.orders' : 'portal.shop'), actions }));
 </script>
 
 {#snippet actions()}
-	<button class="btn btn-outline gap-2" type="button" aria-pressed={view === 'orders'} onclick={() => (view = view === 'orders' ? 'shop' : 'orders')}><ReceiptText size={16} aria-hidden="true" /> {view === 'orders' ? t('portal.shop.products') : t('portal.shop.orders')}</button>
+	<button class="btn btn-outline hidden gap-2 md:inline-flex" type="button" aria-pressed={view === 'orders'} onclick={() => (view = view === 'orders' ? 'shop' : 'orders')}><ReceiptText size={16} aria-hidden="true" /> {view === 'orders' ? t('portal.shop.products') : t('portal.shop.orders')}</button>
 {/snippet}
 
 <svelte:head><title>{pageTitle(t('portal.shop'))}</title></svelte:head>

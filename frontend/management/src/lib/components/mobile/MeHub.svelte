@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Bell, ChartColumn, ChevronRight, ClipboardList, FileText, KeyRound, Shirt, ShoppingBag, UserRound, UsersRound, Wallet, Whistle } from '@lucide/svelte';
+	import { Bell, ChartColumn, ChevronRight, ClipboardList, FileText, KeyRound, Shirt, UserRound, UsersRound, Wallet, Whistle, ReceiptText } from '@lucide/svelte';
 	import AccountMenu from '#lib/components/AccountMenu.svelte';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import InstallPush from '#lib/components/InstallPush.svelte';
@@ -36,7 +36,7 @@
 		{ key: 'forms', href: '/parent/forms', icon: ClipboardList, label: t('portal.forms_evaluations'), n: counts.forms, tone: 'bg-danger-bg text-danger', hint: counts.forms ? t('portal.me_forms_open', { n: counts.forms }) : t('portal.me_all_good') }
 	]);
 	const club = $derived([
-		...(shop ? [{ key: 'shop', href: '/parent/shop', icon: ShoppingBag, label: t('shop.nav'), hint: '' }] : []),
+		...(shop ? [{ key: 'orders', href: '/parent/shop?view=orders', icon: ReceiptText, label: t('portal.shop.orders'), hint: '' }] : []),
 		{ key: 'follow', href: '/parent/stats', icon: ChartColumn, label: t('portal.follow_stats'), hint: '' },
 		{ key: 'teams', href: '/parent/profile#follow', icon: Shirt, label: t('portal.follow_title'), hint: '' }
 	]);

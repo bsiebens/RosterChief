@@ -25,6 +25,7 @@
 		const tab = page.url.searchParams.get('tab');
 		if (mode === 'parent') {
 			if (path.startsWith('/parent/notifications')) return tab === null && page.url.searchParams.get('view') !== 'settings' ? '/parent' : '/parent?tab=me';
+			if (path.startsWith('/parent/shop')) return tab === null && page.url.searchParams.get('view') === 'orders' ? '/parent?tab=me' : null;
 			if (path !== '/parent') return '/parent?tab=me';
 			return tab === 'payments' || tab === 'documents' ? '/parent?tab=me' : null;
 		}

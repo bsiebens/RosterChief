@@ -23,15 +23,16 @@ export function portalItems(mode: PortalMode, shopEnabled: boolean): PortalItem[
 }
 
 /**
- * The phone tab bar: four entries only. Members get Home, Agenda, News and Me (Shop, Forms, Documents and Payments live behind Me);
- * coaches keep their four. Tablets and desktops use the longer `portalItems` list.
+ * The phone tab bar: members get Home, Agenda, News, Shop (only while the shop is open) and Me (Forms, Documents, Payments and the
+ * shop orders live behind Me); coaches keep their four. Tablets and desktops use the longer `portalItems` list.
  */
-export function portalPhoneItems(mode: PortalMode): PortalItem[] {
+export function portalPhoneItems(mode: PortalMode, shopEnabled = false): PortalItem[] {
 	if (mode === 'coach') return portalItems('coach', false);
 	return [
 		{ key: 'home', href: '/parent', label: 'portal.home', icon: House },
 		{ key: 'calendar', href: '/parent?tab=calendar', label: 'portal.agenda', icon: CalendarDays },
 		{ key: 'news', href: '/parent?tab=news', label: 'shell.nav.news', icon: Newspaper },
+		...(shopEnabled ? [{ key: 'shop', href: '/parent/shop', label: 'shop.nav', icon: ShoppingBag }] : []),
 		{ key: 'me', href: '/parent?tab=me', label: 'portal.me', icon: UserRound }
 	];
 }
@@ -53,4 +54,4 @@ export function activePortalKey(url: { pathname: string; hash: string; searchPar
 /** The Me entry stays selected on its sub pages. */
 export const ME_PAGES = ['me', 'payments', 'documents', 'profile', 'stats', 'notifications'];
 /** On a phone these also sit behind Me. */
-export const ME_PHONE_PAGES = [...ME_PAGES, 'forms', 'shop'];
+export const ME_PHONE_PAGES = [...ME_PAGES, 'forms'];
