@@ -2,6 +2,7 @@
 export default {
 	en: {
 		'portal.theme': 'Appearance',
+		"portal.download_pdf": "Download PDF",
 		"portal.cant_make_it_after_all": "Can't make it after all",
 		"portal.pill_going": "Going",
 		"portal.pill_selected": "Selected",
@@ -86,6 +87,7 @@ export default {
 	},
 	nl: {
 		'portal.theme': 'Weergave',
+		"portal.download_pdf": "PDF downloaden",
 		"portal.cant_make_it_after_all": "Toch niet kunnen komen",
 		"portal.pill_going": "Komt",
 		"portal.pill_selected": "Geselecteerd",
@@ -170,6 +172,7 @@ export default {
 	},
 	fr: {
 		'portal.theme': 'Apparence',
+		"portal.download_pdf": "Télécharger le PDF",
 		"portal.cant_make_it_after_all": "Finalement empêché",
 		"portal.pill_going": "Vient",
 		"portal.pill_selected": "Sélectionné",

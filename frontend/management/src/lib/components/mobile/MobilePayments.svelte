@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Check, ChevronRight, FileText } from '@lucide/svelte';
+	import { Check, ChevronRight, Download, FileText } from '@lucide/svelte';
 	import { formatDateTime } from '#lib/events/types.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import type { ParentHome } from '#lib/portal.ts';
@@ -80,7 +80,7 @@
 			<h2 class="font-display text-lg font-extrabold tracking-[.02em] text-ink uppercase">{t('portal.charges')}</h2>
 			<div class="card divide-y divide-rule overflow-hidden">
 				{#each charges as charge (charge.id)}
-					<a class="flex min-h-14 items-center gap-3 px-4 py-2" href="/api/v1/portal/charges/{charge.id}.pdf" download="{charge.number}.pdf" target="_blank" rel="noreferrer"><span class="min-w-0 flex-1"><b class="block truncate text-ink">{charge.summary}</b><span class="block text-sm {charge.status === 'overdue' ? 'font-semibold text-danger' : 'text-muted'}">{charge.number}{charge.due_date ? ` · ${t('portal.due_by', { when: day(charge.due_date) })}` : ''}</span></span><b class="tabular-nums">{money(charge.due)}</b></a>
+					<a class="flex min-h-14 items-center gap-3 px-4 py-2" href="/api/v1/portal/charges/{charge.id}.pdf" download="{charge.number}.pdf" target="_blank" rel="noreferrer"><span class="min-w-0 flex-1"><b class="block truncate text-ink">{charge.summary}</b><span class="block text-sm {charge.status === 'overdue' ? 'font-semibold text-danger' : 'text-muted'}">{charge.number}{charge.due_date ? ` · ${t('portal.due_by', { when: day(charge.due_date) })}` : ''}</span></span><b class="tabular-nums">{money(charge.due)}</b><span class="grid size-10 shrink-0 place-items-center rounded-full border border-line text-ink" aria-label={t('portal.download_pdf')}><Download size={18} aria-hidden="true" /></span></a>
 				{/each}
 			</div>
 		</section>
@@ -91,7 +91,7 @@
 			<h2 class="font-display text-lg font-extrabold tracking-[.02em] text-ink uppercase">{t('portal.pay_invoices')}</h2>
 			<div class="card divide-y divide-rule overflow-hidden">
 				{#each home.invoices as invoice (invoice.id)}
-					<a class="flex min-h-14 items-center gap-3 px-4" href="/api/v1/portal/invoices/{invoice.id}.pdf" download="{invoice.number}.pdf" target="_blank" rel="noreferrer"><span class="grid size-10 shrink-0 place-items-center rounded-box bg-subhead text-ink"><FileText size={18} aria-hidden="true" /></span><span class="min-w-0 flex-1"><b class="block text-ink">{t('portal.invoice', { number: invoice.number })}</b>{#if invoice.due}<span class="block text-sm text-muted">{t('portal.due_by', { when: day(invoice.due) })}</span>{/if}</span><span class="btn btn-outline btn-sm">PDF</span></a>
+					<a class="flex min-h-14 items-center gap-3 px-4" href="/api/v1/portal/invoices/{invoice.id}.pdf" download="{invoice.number}.pdf" target="_blank" rel="noreferrer"><span class="grid size-10 shrink-0 place-items-center rounded-box bg-subhead text-ink"><FileText size={18} aria-hidden="true" /></span><span class="min-w-0 flex-1"><b class="block text-ink">{t('portal.invoice', { number: invoice.number })}</b>{#if invoice.due}<span class="block text-sm text-muted">{t('portal.due_by', { when: day(invoice.due) })}</span>{/if}</span><span class="btn btn-outline btn-sm gap-1.5"><Download size={14} aria-hidden="true" />PDF</span></a>
 				{/each}
 			</div>
 		</section>
