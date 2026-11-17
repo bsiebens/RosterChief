@@ -304,8 +304,8 @@
 	<PersonFilter {people} bind:selected viewer={data.home.viewer} />
 {/snippet}
 
-{#snippet rsvp(event: PortalEvent, quick = false, dark = false)}
-	<ReplyRow {event} name={memberName(event.member_id)} photo={people.find((person) => person.id === event.member_id)?.photo_url} canReply={canReply(event)} {quick} {dark} busy={busy === event.id} error={errors[event.id] ?? ''} onreply={(status, note) => reply(event, status, note)} />
+{#snippet rsvp(event: PortalEvent, quick = false, dark = false, seg = false)}
+	<ReplyRow {event} name={seg && people.length > 1 ? firstName(event.member_id) : memberName(event.member_id)} photo={people.find((person) => person.id === event.member_id)?.photo_url} canReply={canReply(event)} {quick} {dark} {seg} busy={busy === event.id} error={errors[event.id] ?? ''} onreply={(status, note) => reply(event, status, note)} />
 {/snippet}
 
 {#snippet officiating(offer: OfficiatingOpportunity)}
@@ -737,7 +737,7 @@
 			{#if audience}
 				<section class="card card-body">
 					<h2 class="card-title"><UserRound size={16} aria-hidden="true" />{t('portal.reply')}</h2>
-					<div class="divide-y divide-rule">{#each detail.attendance as row (row.id)}{@render rsvp(row)}{/each}</div>
+					<div class="divide-y divide-rule">{#each detail.attendance as row (row.id)}{@render rsvp(row, false, false, phone)}{/each}</div>
 				</section>
 			{/if}
 			{#if detail.officiating.length}

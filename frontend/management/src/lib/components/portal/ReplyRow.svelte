@@ -10,13 +10,15 @@
 	 * (so rows in a list end on the same edge), and the optional reason form underneath. `quick` is the short form (Going / Can't, no Maybe)
 	 * used on the home hero; `dark` is for the dark hero panel. `onreply` resolves to whether it worked, which closes the reason form.
 	 */
-	let { event, name, photo = null, canReply, quick = false, dark = false, busy = false, error = '', onreply }: {
+	let { event, name, photo = null, canReply, quick = false, dark = false, seg = false, busy = false, error = '', onreply }: {
 		event: PortalEvent;
 		name: string;
 		photo?: string | null;
 		canReply: boolean;
 		quick?: boolean;
 		dark?: boolean;
+		/** The event sheet layout: a three-way Going / Maybe / Can't switch, the reason when it is a no, and a Send button. */
+		seg?: boolean;
 		busy?: boolean;
 		error?: string;
 		onreply: (status: string, note: string) => Promise<boolean>;
@@ -55,14 +57,64 @@
 	const lateInstalment = $derived(event.blocked === 'late_installment' && !going);
 	const settled = $derived(event.cancelled || !canReply || going);
 
+	// The staged choice of the switch layout: nothing is sent until "Send reply".
+	const current = $derived<'' | 'present' | 'maybe' | 'absent'>(going ? 'present' : shown === 'maybe' ? 'maybe' : ['absent', 'excused', 'dropout'].includes(shown) ? 'absent' : '');
+	let choice = $state<'' | 'present' | 'maybe' | 'absent' | null>(null);
+	const picked = $derived(choice ?? current);
+	const switchable = $derived(seg && canReply && !noInvite && !lateInstalment && !event.cancelled);
+	const changed = $derived(picked !== '' && (picked !== current || (picked === 'absent' && note.trim() !== '' && note.trim() !== event.note)));
+	const SWITCH = [
+		{ key: 'present', label: 'portal.going', on: 'bg-ok text-white' },
+		{ key: 'maybe', label: 'portal.maybe', on: 'bg-warn-bg text-warn-text ring-2 ring-warn-border' },
+		{ key: 'absent', label: 'portal.cant_short', on: 'bg-club text-club-content' }
+	] as const;
+	function send() {
+		if (picked === 'absent') return submitReason();
+		if (picked) void answer(picked);
+	}
+
 	async function answer(status: string, reason?: string) {
 		pending = status;
 		const ok = await onreply(status, reason ?? event.note);
 		pending = null;
-		if (ok) open = false;
+		if (ok) {
+			open = false;
+			choice = null;
+		}
 	}
 </script>
 
+{#if switchable}
+	<div class="grid min-w-0 gap-2.5 py-2">
+		<div class="flex items-center gap-3">
+			<ClubCrest {name} logoUrl={photo} size={32} />
+			<div class="min-w-0 flex-1">
+				<p class="truncate font-semibold text-ink">{t('portal.is_coming', { name })}</p>
+				{#if event.deadline && !going}<p class="text-xs text-muted">{t('portal.reply_by', { when: formatDateTime(event.deadline) })}</p>{/if}
+			</div>
+		</div>
+		<div class="grid grid-cols-3 gap-1 rounded-box bg-subhead p-1" role="group" aria-label={t('portal.reply')}>
+			{#each SWITCH as option (option.key)}
+				<button type="button" class="min-h-13 rounded-box text-base font-semibold {picked === option.key ? option.on : 'text-muted'}" aria-pressed={picked === option.key} disabled={busy} onclick={() => (choice = option.key)}>{t(option.label)}</button>
+			{/each}
+		</div>
+		{#if picked === 'absent'}
+			<div class="grid gap-2">
+				<p class="text-sm font-semibold text-ink">{t('portal.reason_title')}</p>
+				<div class="grid grid-cols-4 gap-1.5">
+					{#each REASONS as key (key)}
+						<button type="button" class="portal-person compact text min-w-0 justify-center !px-1" aria-pressed={note === t(key)} onclick={() => (note = note === t(key) ? '' : t(key))}>{t(key)}</button>
+					{/each}
+				</div>
+				<textarea id="reason-{event.id}" class="textarea textarea-bordered w-full text-ink {reasonError ? 'border-danger! ring-2 ring-danger/40' : ''}" rows="2" maxlength="2000" aria-label={t('portal.reason')} bind:value={note} placeholder={event.note || t('portal.reason_help')}></textarea>
+				{#if reasonError}<p class="text-sm font-semibold text-danger" role="alert">{reasonError}</p>{/if}
+			</div>
+		{/if}
+		<button type="button" class="btn btn-primary min-h-12 w-full" disabled={busy || !changed} onclick={send}>{t('portal.send_reply')}</button>
+		<p class="text-xs text-muted">{t('portal.reply_change_help')}</p>
+		{#if error && picked !== 'absent'}<p class="text-sm text-error" role="alert">{error}</p>{/if}
+	</div>
+{:else}
 <div class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 py-1.5">
 	<div class="flex items-center gap-3">
 		<ClubCrest {name} logoUrl={photo} size={32} bg={dark ? 'var(--color-club)' : undefined} />
@@ -111,3 +163,4 @@
 	{/if}
 	{#if error && !(canReply && open && !noInvite)}<p class="text-sm {dark ? 'text-sidebar-fg' : 'text-error'}" role="alert">{error}</p>{/if}
 </div>
+{/if}
