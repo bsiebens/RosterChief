@@ -597,7 +597,8 @@
 				<MonthPicker bind:month bind:selected={pickedDay} events={eventDays} />
 				<p class="flex flex-wrap gap-x-4 gap-y-1 px-1 text-xs text-muted">{#each kindsPresent as kind (kind)}<span class="inline-flex items-center gap-1.5"><span class="size-2 rounded-full {kindStyle(kind).dot}"></span>{t(kindLabelKey(kind))}</span>{/each}</p>
 			</div>
-			<section class="card card-body min-w-0">
+			<div class="md:hidden"><MobileAgenda entries={agenda} href={eventLink} {people} {firstName} kind="all" switchHref={viewLink('list')} switchMonth={false} chips={false} past /></div>
+			<section class="card card-body hidden min-w-0 md:block">
 				<h2 class="card-title"><CalendarDays size={16} aria-hidden="true" />{pickedDay ? formatLongDay(new Date(`${pickedDay}T12:00:00`)) : t('portal.schedule')}</h2>
 				<div class="divide-y divide-rule">
 					{#each agenda as entry (entry.event.event_id)}{@render eventRow(entry)}{:else}<p class="py-2 text-sm text-muted">{t('portal.no_events')}</p>{/each}

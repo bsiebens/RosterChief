@@ -10,7 +10,7 @@
 	 * row per child and event (start time and child in a tile, title, meet-up time and place, how many are going) with the status pill, and a
 	 * button above the tab bar for the month view. Tapping a row opens the event, where the answer is given.
 	 */
-	let { entries, href, people, firstName, kind = $bindable('all'), switchHref, switchMonth = true }: {
+	let { entries, href, people, firstName, kind = $bindable('all'), switchHref, switchMonth = true, chips = true, past = false }: {
 		entries: CalendarEntry[];
 		href: (eventId: string) => string;
 		people: { id: string }[];
@@ -19,6 +19,10 @@
 		/** Where the button at the bottom leads (month view, or back to the list). */
 		switchHref: string;
 		switchMonth?: boolean;
+		/** The kind chips (the list view); the month view has its own legend. */
+		chips?: boolean;
+		/** Also show days before today (a month or a picked day). */
+		past?: boolean;
 	} = $props();
 
 	const KINDS = [
@@ -41,7 +45,7 @@
 			else byKey.set(rowKey, { ...base, id: rowKey, who: [who] });
 		};
 		for (const { event, attendance, officiating } of entries) {
-			if (key(new Date(event.start)) < todayKey) continue;
+			if (!past && key(new Date(event.start)) < todayKey) continue;
 			const meet = event.gathering ? t('portal.meet_time', { time: formatTime(event.gathering) }) : '';
 			const base = { start: event.start, title: event.title, kind: event.kind, line: [meet, event.location].filter(Boolean).join(' · '), going: undefined as number | null | undefined, eventId: event.event_id, cancelled: event.cancelled };
 			for (const row of attendance) add(event.event_id, { ...base, going: row.going_count }, { name: firstName(row.member_id), pill: statusPill(row.status) });
@@ -58,11 +62,11 @@
 </script>
 
 <div class="grid min-w-0 gap-4">
-	<div class="flex gap-2 overflow-x-auto" role="group" aria-label={t('portal.filter_kind')}>
+	{#if chips}<div class="flex gap-2 overflow-x-auto" role="group" aria-label={t('portal.filter_kind')}>
 		{#each KINDS as [value, label] (value)}
 			<button type="button" class="inline-flex h-[38px] shrink-0 items-center rounded-full border px-3.5 text-[15px] font-semibold {kind === value ? 'border-ink bg-ink text-paper' : 'border-line bg-(--portal-panel) text-ink'}" aria-pressed={kind === value} onclick={() => (kind = value)}>{t(label)}</button>
 		{/each}
-	</div>
+	</div>{/if}
 
 	{#each groups as [day, list] (day)}
 		<section class="grid gap-2">
