@@ -55,10 +55,9 @@
 
 {#snippet pageActions()}
 	{#if teams.length > 1 && tab !== 'news'}<div class="md:hidden"><HeaderChip options={teamOptions} bind:value={() => activeTeam?.id ?? '', (id) => (selected = id)} /></div>{/if}
-	{#if tab === 'calendar' && data.coach.can_create_events}{@render addEvent()}{:else if tab === 'news' && data.coach.can_add_news}{@render addPost()}{/if}
+	{#if tab === 'news' && data.coach.can_add_news}{@render addPost()}{/if}
 {/snippet}
 
-{#snippet addEvent()}<a class="btn btn-primary btn-square" href="/calendar/events/new?view=coach" aria-label={t('coach.add_event')}><Plus size={18} aria-hidden="true" /></a>{/snippet}
 {#snippet addPost()}<a class="btn btn-primary btn-square" href="/coach/news/new" aria-label={t('coach.add_post')}><Plus size={18} aria-hidden="true" /></a>{/snippet}
 
 {#if teams.length > 1 && tab !== 'news'}
