@@ -45,10 +45,10 @@
 			</div>
 			<input type="checkbox" class="toggle order-2 shrink-0 sm:order-3" aria-labelledby="stats-share-title" checked={!!person.share_token} disabled={busy} onchange={(e) => set(e.currentTarget.checked)} />
 			{#if person.share_token}
-				<div class="order-last flex w-full min-w-0 flex-wrap items-center gap-2 sm:order-2 sm:w-auto sm:flex-1 sm:flex-nowrap">
-					<div class="input flex min-w-0 flex-1 basis-48 items-center gap-2 bg-subhead text-sm"><span class="truncate" title={url}>{url}</span></div>
-					<button class="btn btn-outline btn-sm gap-1.5" type="button" onclick={copy}>{#if copied}<Check size={14} aria-hidden="true" />{t('portal.stats_copied')}{:else}<Copy size={14} aria-hidden="true" />{t('portal.stats_copy')}{/if}</button>
-					<button class="btn btn-outline btn-sm gap-1.5" type="button" disabled={busy} onclick={() => set(true, true)}><RefreshCw size={13} aria-hidden="true" />{t('portal.stats_replace_short')}</button>
+				<div class="order-last grid w-full min-w-0 grid-cols-2 gap-2 sm:order-2 sm:flex sm:w-auto sm:flex-1 sm:flex-nowrap sm:items-center">
+					<div class="input col-span-2 flex min-w-0 items-center gap-2 bg-subhead text-sm sm:flex-1 sm:basis-48"><span class="truncate" title={url}>{url}</span></div>
+					<button class="btn btn-outline btn-sm w-full gap-1.5 sm:w-auto" type="button" onclick={copy}>{#if copied}<Check size={14} aria-hidden="true" />{t('portal.stats_copied')}{:else}<Copy size={14} aria-hidden="true" />{t('portal.stats_copy')}{/if}</button>
+					<button class="btn btn-outline btn-sm w-full gap-1.5 sm:w-auto" type="button" disabled={busy} onclick={() => set(true, true)}><RefreshCw size={13} aria-hidden="true" />{t('portal.stats_replace_short')}</button>
 				</div>
 			{/if}
 		</div>
