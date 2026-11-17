@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { CalendarDays, List } from '@lucide/svelte';
-	import { formatTime } from '#lib/events/types.ts';
+	import { formatTime, kindStyle } from '#lib/events/types.ts';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import type { CalendarEntry } from '#lib/portal.ts';
 	import { statusPill } from './pills.ts';
@@ -75,7 +75,7 @@
 			</h2>
 			<div class="card divide-y divide-rule overflow-hidden">
 				{#each list as row (row.id)}
-					<a class="flex min-h-17 items-start gap-3 px-3.5 py-2.5 {row.cancelled ? 'opacity-60' : ''}" href={href(row.eventId)} data-sveltekit-reset="false">
+					<a class="flex min-h-17 items-start gap-3 border-l-[3px] px-3.5 py-2.5 {kindStyle(row.kind).bar} {row.cancelled ? 'opacity-60' : ''}" href={href(row.eventId)} data-sveltekit-reset="false">
 						<b class="w-14 shrink-0 self-center text-center font-display text-[1.625rem] leading-none font-extrabold text-ink">{formatTime(row.start)}</b>
 						<span class="min-w-0 flex-1">
 							<span class="flex items-start justify-between gap-3">
