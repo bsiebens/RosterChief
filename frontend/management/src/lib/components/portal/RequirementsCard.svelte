@@ -47,11 +47,11 @@
 	}
 </script>
 
-<section class="card" aria-labelledby="req-title">
-	<div class="card-h"><ShieldCheck size={17} aria-hidden="true" /><h2 id="req-title">{t('portal.req_title')}</h2></div>
+<section class="card req-card" aria-labelledby="req-title">
+	<div class="card-h max-md:hidden"><ShieldCheck size={17} aria-hidden="true" /><h2 id="req-title">{t('portal.req_title')}</h2></div>
 	{#each memberships as row (row.member_id + row.season)}
 		{@const who = person(row.member_id)}
-		<div class="border-b border-line last:border-b-0">
+		<div class="border-b border-line last:border-b-0 req-member">
 			<div class="flex items-center gap-3 bg-subhead px-5 py-3">
 				<ClubCrest name={who?.name ?? ''} logoUrl={who?.photo_url} size={32} />
 				<div class="min-w-0 flex-1"><b class="block text-ink">{who?.name}</b><span class="text-xs text-muted">{row.season}</span></div>
