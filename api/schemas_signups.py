@@ -4,6 +4,8 @@ from decimal import Decimal
 
 from ninja import Schema
 
+from api.schemas_requirements import OverdueOut
+
 
 class SignupMember(Schema):
     id: uuid.UUID
@@ -48,6 +50,8 @@ class SignupOut(Schema):
     signed_up_at: datetime.date | None = None
     #: Names of the active requirements not yet completed or bypassed.
     open_requirements: list[str]
+    #: A late instalment of this sign-up's registration, or null.
+    overdue: OverdueOut | None = None
     #: Fee paid or waived and no open requirement: can be approved right away.
     clean: bool
     teams: list[SignupTeam]

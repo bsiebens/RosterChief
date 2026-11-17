@@ -153,8 +153,8 @@
 								</td>
 								<td>
 									<button class="group grid justify-items-start gap-1 text-left" type="button" onclick={() => ((reqTarget = r), (reqOpen = true))} aria-label={t('signups.open_documents', { name: r.member.name })}>
-										{#if r.open_requirements.length}
-											<span class="flex flex-wrap gap-1">{#each r.open_requirements as name (name)}<span class="badge badge-sm badge-warning">{name}</span>{/each}</span>
+										{#if r.open_requirements.length || r.overdue}
+											<span class="flex flex-wrap gap-1">{#each r.open_requirements as name (name)}<span class="badge badge-sm badge-warning">{name}</span>{/each}{#if r.overdue}<span class="badge badge-sm badge-error">{t('signups.overdue')}</span>{/if}</span>
 										{:else}
 											<span class="badge badge-sm badge-success gap-1"><Check size={11} aria-hidden="true" /> {t('signups.req_in_order')}</span>
 										{/if}

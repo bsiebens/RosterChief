@@ -149,6 +149,18 @@ class ItemOut(Schema):
         return list(obj.status.events.all()) if obj.status else []
 
 
+class OverdueOut(Schema):
+    """A late instalment of the membership (the oldest overdue part and everything overdue), shown to staff like a missing requirement."""
+
+    due_date: datetime.date
+    remaining: Decimal
+    #: The last day of the grace period; after it the member cannot sign up for the event types in ``block_kinds``.
+    grace_until: datetime.date
+    #: Past the grace period and the club blocks some event types: the member is blocked right now.
+    blocking: bool
+    block_kinds: list[str] = Field(default_factory=list)
+
+
 class SeasonRef(Schema):
     id: UUID
     name: str
@@ -165,6 +177,8 @@ class ChecklistOut(Schema):
     """A member's documents for one season. ``membership`` is null when they have none that season (then ``items`` is empty)."""
 
     membership: MembershipRef | None = None
+    #: A late instalment of this membership, or null.
+    overdue: OverdueOut | None = None
     items: list[ItemOut]
     total: int
     done: int

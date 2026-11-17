@@ -65,7 +65,10 @@ export type ChecklistItem = {
 	submitted_at: string | null;
 	history: RequirementEvent[];
 };
+/** A late instalment, shown to staff like a missing requirement. */
+export type Overdue = { due_date: string; remaining: string; grace_until: string; /** Past the grace period: blocked from `block_kinds` now. */ blocking: boolean; block_kinds: string[] };
 export type Checklist = {
+	overdue: Overdue | null;
 	membership: { id: string; season: { id: string; name: string }; status: string; fee_status: string } | null;
 	items: ChecklistItem[];
 	total: number;

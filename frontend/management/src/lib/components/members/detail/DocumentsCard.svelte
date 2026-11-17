@@ -47,6 +47,10 @@
 		return t('req.doc.d.missing');
 	};
 
+	const od = $derived(checklist?.overdue ?? null);
+	const odKinds = (kinds: string[]) => kinds.map((k) => t(`eventform.kind.${k}`)).join(', ');
+	const money = (v: string) => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'EUR' }).format(Number(v));
+
 	let completeFor = $state<ChecklistItem | null>(null);
 	let completeOpen = $state(false);
 	let bypassFor = $state<ChecklistItem | null>(null);
@@ -94,6 +98,16 @@
 	{#if saved}<Alert kind="success">{t('req.doc.saved')}</Alert>{/if}
 	{#if errText && !completeOpen && !bypassOpen && !answerOpen && !noteOpen && !sendOpen}<Alert kind="error" title={t('req.doc.failed')}>{errText}</Alert>{/if}
 
+	{#if od}
+		<div class="mt-3 flex items-start gap-3 rounded-lg border border-error bg-danger-bg/40 p-3.5" role="alert">
+			<span class="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-surface text-danger"><CircleAlert size={18} aria-hidden="true" /></span>
+			<div class="min-w-0 flex-1">
+				<p class="font-semibold text-ink">{t('req.doc.overdue_title')}</p>
+				<p class="text-xs text-muted">{t('req.doc.overdue_body', { amount: money(od.remaining), date: formatDate(od.due_date) })}</p>
+				<p class="mt-1 text-xs {od.blocking ? 'font-semibold text-danger' : 'text-muted'}">{od.block_kinds.length ? t(od.blocking ? 'req.doc.overdue_blocking' : 'req.doc.overdue_grace', { date: formatDate(od.grace_until), kinds: odKinds(od.block_kinds) }) : t('req.doc.overdue_no_block')}</p>
+			</div>
+		</div>
+	{/if}
 	{#if !membership}
 		<p class="mt-3 text-sm text-muted">{t('req.doc.no_membership')}</p>
 	{:else if !items.length}

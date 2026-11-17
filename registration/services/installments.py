@@ -119,6 +119,20 @@ def allocate(batch, people, balances: dict, amount: Decimal, *, today: datetime.
     return {pk: share for pk, share in allocations.items() if share > 0}
 
 
+def overdue(membership, *, today: datetime.date | None = None) -> dict | None:
+    """What staff should see about a late instalment of this membership: the oldest overdue ``due_date``, the ``remaining`` amount overdue, the day
+    the ``grace_until`` period ends and whether it is ``blocking`` event sign-ups now (past the grace period, for the event types the club chose in
+    ``block_kinds``). ``None`` when nothing is overdue."""
+    today = today or timezone.localdate()
+    late = [row for row in membership_schedule(membership, today=today) if row["late"]]
+    if not late:
+        return None
+    policy = RegistrationSettings.objects.first()
+    grace_until = late[0]["due_date"] + datetime.timedelta(days=policy.installment_grace_days if policy else 0)
+    kinds = list(policy.installment_block_kinds) if policy else []
+    return {"due_date": late[0]["due_date"], "remaining": sum((row["remaining"] for row in late), ZERO), "grace_until": grace_until, "blocking": bool(kinds) and grace_until < today, "block_kinds": kinds}
+
+
 def blocked_for_event(event, member, season, *, today: datetime.date | None = None) -> bool:
     if season is None:
         return False

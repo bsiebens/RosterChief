@@ -12,7 +12,8 @@ from events.models import Attendance, Event
 from events.services import attendance
 from members.models import ClubMembership, OnboardingRequirement
 from members.services.errors import Invalid, NotAllowed
-from registration.services import config, installments
+from notifications.models import InboxNotification
+from registration.services import config, installments, payment_reminders
 
 
 class InstallmentScheduleMathTests(SimpleTestCase):
@@ -79,6 +80,47 @@ class RegistrationInstallmentTests(RegistrationMixin, TestCase):
         self.assertEqual(sum(Decimal(row["amount"]) for row in body["installments"]), Decimal(body["amount_due"]))
         cleared = self.staff("put", url, {"offsets": []})
         self.assertEqual((cleared.json()["installment_offsets"], cleared.json()["installments"]), ([], []))
+
+    def test_finance_managers_hear_10_and_5_days_before_a_payment_falls_due(self):
+        today = timezone.localdate()
+        batch = self.batch()
+        self.assertEqual(self.staff("post", f"/registrations/{batch.pk}/confirm", {"due_date": str(today + datetime.timedelta(days=10)), "send": False}).status_code, 200)
+        inbox = InboxNotification.objects.filter(user=self.owner)
+        self.assertEqual(payment_reminders.send_due(today)["notices"], 1)
+        notice = inbox.get()
+        self.assertEqual((notice.href, "10" in notice.title), ("/finance?payment=open", True))
+        payment_reminders.send_due(today)  # a second run on the same day says nothing new
+        self.assertEqual(inbox.count(), 1)
+        self.assertEqual(payment_reminders.send_due(today + datetime.timedelta(days=1))["notices"], 0)  # 9 days left: not a lead time
+        self.assertEqual(payment_reminders.send_due(today + datetime.timedelta(days=5))["notices"], 1)  # 5 days left
+        self.assertEqual(inbox.count(), 2)
+        self.assertEqual(self.staff("post", f"/registrations/{batch.pk}/mark-paid", {"method": "cash"}).status_code, 200)
+        self.assertEqual(payment_reminders.send_due(today)["notices"], 0)  # nothing open: nothing to check
+
+    def test_staff_see_a_late_instalment_on_the_checklist_and_in_signups(self):
+        config.update_settings(self.owner, installment_offsets=[30], installment_grace_days=2, installment_block_kinds=["training"])
+        batch = self.batch(use_installments=True)
+        detail = batch.details.get()
+        first_due = timezone.localdate() - datetime.timedelta(days=5)
+        self.assertEqual(self.staff("post", f"/registrations/{batch.pk}/confirm", {"due_date": str(first_due), "send": False}).status_code, 200)
+        checklist = self.staff("get", f"/requirements/members/{detail.member_id}/checklist?season_id={detail.membership.season_id}").json()
+        self.assertEqual((checklist["overdue"]["due_date"], checklist["overdue"]["blocking"], checklist["overdue"]["block_kinds"]), (str(first_due), True, ["training"]))
+        row = next(r for r in self.staff("get", "/signups").json()["results"] if r["membership_id"] == str(detail.membership_id))
+        self.assertEqual(row["overdue"]["remaining"], checklist["overdue"]["remaining"])
+        config.update_settings(self.owner, installment_grace_days=10)
+        checklist = self.staff("get", f"/requirements/members/{detail.member_id}/checklist?season_id={detail.membership.season_id}").json()
+        self.assertEqual((checklist["overdue"] is not None, checklist["overdue"]["blocking"]), (True, False))  # late, still inside the grace period
+        self.assertEqual(self.staff("post", f"/registrations/{batch.pk}/mark-paid", {"method": "cash"}).status_code, 200)
+        checklist = self.staff("get", f"/requirements/members/{detail.member_id}/checklist?season_id={detail.membership.season_id}").json()
+        self.assertIsNone(checklist["overdue"])
+
+    def test_an_instalment_plan_reminds_per_instalment(self):
+        today = timezone.localdate()
+        batch = self.batch()
+        self.assertEqual(self.staff("post", f"/registrations/{batch.pk}/confirm", {"due_date": str(today - datetime.timedelta(days=20)), "send": False}).status_code, 200)
+        self.assertEqual(self.staff("put", f"/registrations/{batch.pk}/installments", {"offsets": [30]}).status_code, 200)  # second part due in 10 days
+        self.assertEqual(payment_reminders.send_due(today)["notices"], 1)
+        self.assertEqual(InboxNotification.objects.filter(user=self.owner).count(), 1)
 
     def test_late_installment_blocks_guardian_and_clears_after_recorded_payment(self):
         config.update_settings(self.owner, installment_offsets=[30], installment_grace_days=2, installment_block_kinds=["training"])
