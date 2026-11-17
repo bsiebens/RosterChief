@@ -5,7 +5,6 @@
 	import { ArrowRightLeft, Bell, ChartColumn, ChevronRight, IdCard, Ticket, ClipboardList, FileText, KeyRound, Shirt, UserRound, UsersRound, Wallet, Whistle, ReceiptText } from '@lucide/svelte';
 	import AccountMenu from '#lib/components/AccountMenu.svelte';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
-	import InstallPush from '#lib/components/InstallPush.svelte';
 	import ThemeSwitch from '#lib/components/portal/ThemeSwitch.svelte';
 	import { rememberApp } from '#lib/landing.ts';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -113,5 +112,4 @@
 		</div>
 	</section>
 
-	<InstallPush />
 </div>

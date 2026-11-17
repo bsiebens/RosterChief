@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { Bell, CheckCheck, ChevronRight, Trash2 } from '@lucide/svelte';
+	import InstallPush from '#lib/components/InstallPush.svelte';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import { notificationHref, notifications, type AppNotification } from '#lib/notifications.svelte.ts';
 
@@ -49,6 +50,7 @@
 {/snippet}
 
 <div class="grid gap-4 md:hidden">
+	<InstallPush hideWhenOn />
 	{#if notifications.items.length}
 		<div class="flex flex-wrap justify-end gap-2">
 			<button type="button" class="btn btn-outline btn-sm min-h-10 gap-1.5" disabled={notifications.unread === 0} onclick={() => notifications.markAllRead()}><CheckCheck size={14} aria-hidden="true" />{t('portal.mark_all_read')}</button>
