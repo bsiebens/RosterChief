@@ -53,14 +53,14 @@
 					{@const outside = day.getMonth() !== month.getMonth()}
 					<button
 						type="button"
-						class="relative grid h-9 place-items-center rounded-lg text-[13px] font-semibold {key === todayKey ? 'bg-ink text-(--color-white)' : picked === key ? 'bg-subhead ring-2 ring-club' : 'text-ink hover:bg-subhead'} {outside ? 'opacity-40' : ''}"
+						class="relative grid h-11 place-items-center rounded-lg pb-1.5 text-[13px] font-semibold {key === todayKey ? 'bg-ink text-(--color-white)' : picked === key ? 'bg-subhead ring-2 ring-club' : 'text-ink hover:bg-subhead'} {outside ? 'opacity-40' : ''}"
 						disabled={!dayEvents.length}
 						aria-pressed={picked === key}
 						aria-label={dayEvents.length ? `${day.getDate()} · ${dayEvents.map((event) => event.title).join(', ')}` : String(day.getDate())}
 						onclick={() => (picked = picked === key ? '' : key)}
 					>
 						{day.getDate()}
-						{#if dayEvents.length}<span class="absolute bottom-0.5 size-1.5 rounded-full {dayEvents.some(isGame) ? 'bg-club' : 'bg-info-text'}"></span>{/if}
+						{#if dayEvents.length}<span class="absolute bottom-1.5 size-1.5 rounded-full {dayEvents.some(isGame) ? 'bg-club' : 'bg-info-text'}"></span>{/if}
 					</button>
 				{/each}
 			</div>

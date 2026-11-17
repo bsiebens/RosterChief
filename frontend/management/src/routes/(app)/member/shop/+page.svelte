@@ -359,8 +359,8 @@
 </div>
 
 {#if cart.length && view === 'shop'}
-	<button type="button" class="btn btn-primary fixed inset-x-3 bottom-[calc(3.5rem+env(safe-area-inset-bottom)+0.5rem)] z-20 mx-auto min-h-12 max-w-2xl justify-between shadow-lg md:hidden" onclick={() => (cartOpen = true)}><span>{t('portal.shop.view_basket')} · {itemsText(cart.reduce((sum, line) => sum + line.quantity, 0))}</span><span>{money(String(subtotal))}</span></button>
-	<div class="h-16 md:hidden" aria-hidden="true"></div>
+	<div class="action-dock md:hidden"><button type="button" class="btn btn-primary min-h-12 justify-between" onclick={() => (cartOpen = true)}><span>{t('portal.shop.view_basket')} · {itemsText(cart.reduce((sum, line) => sum + line.quantity, 0))}</span><span>{money(String(subtotal))}</span></button></div>
+	<div class="h-[4.75rem] md:hidden" aria-hidden="true"></div>
 {/if}
 
 <!-- On a phone the basket slides up from the bottom instead of sitting at the end of the page. -->

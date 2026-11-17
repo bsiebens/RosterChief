@@ -58,8 +58,8 @@
 {/snippet}
 
 {#snippet addButton(href: string, label: string)}
-	<!-- On a phone the button stays fixed above the tab bar while the list scrolls behind it. -->
-	<a class="btn btn-primary min-h-12 gap-2 max-md:fixed max-md:inset-x-3 max-md:bottom-[calc(3.5rem+env(safe-area-inset-bottom)+0.5rem)] max-md:z-20 max-md:mx-auto max-md:max-w-2xl max-md:shadow-lg md:mb-3 md:min-h-11 md:w-auto" {href}><Plus size={18} aria-hidden="true" />{label}</a>
+	<!-- On a phone the button sits in a band above the tab bar; the list scrolls above it. -->
+	<div class="action-dock"><a class="btn btn-primary min-h-12 gap-2 md:mb-3 md:min-h-11 md:w-auto" {href}><Plus size={18} aria-hidden="true" />{label}</a></div>
 {/snippet}
 
 
@@ -74,13 +74,13 @@
 {#if tab === 'news'}
 	{#if data.coach.can_add_news}{@render addButton('/coach/news/new', t('coach.add_post'))}{/if}
 	<CoachNews items={newsItems} articles={data.coach.news} mine={page.url.searchParams.get('mine') === '1'} canFilter={data.coach.can_add_news} />
-	{#if data.coach.can_add_news}<div class="h-16 md:hidden" aria-hidden="true"></div>{/if}
+	{#if data.coach.can_add_news}<div class="h-[4.75rem] md:hidden" aria-hidden="true"></div>{/if}
 {:else if tab === 'teams'}
 	<CoachSquad team={roster} positions={data.positions} />
 {:else if tab === 'calendar'}
 	{#if data.coach.can_create_events}{@render addButton('/calendar/events/new?view=coach', t('coach.add_event'))}{/if}
 	<CoachEvents {events} />
-	{#if data.coach.can_create_events}<div class="h-16 md:hidden" aria-hidden="true"></div>{/if}
+	{#if data.coach.can_create_events}<div class="h-[4.75rem] md:hidden" aria-hidden="true"></div>{/if}
 {:else}
 	<CoachToday {events} background={data.coach.event_background} crest={data.branding?.logo_url} />
 {/if}
