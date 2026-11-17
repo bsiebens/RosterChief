@@ -14,14 +14,15 @@
 	// `?team=` may list several teams (the teams of the event the coach is coming back from): the first one this coach is staff of is shown.
 	const preferred = (page.url.searchParams.get('team') ?? '').split(',').filter(Boolean);
 	let selected = $state('');
-	const teams = $derived(data.coach.teams);
+	// The header outlives this page for a moment while another page loads, so what it reads must survive `data` no longer being the coach data.
+	const teams = $derived(data.coach?.teams ?? []);
 	const activeTeam = $derived(teams.find((team) => team.id === selected) ?? teams.find((team) => preferred.includes(team.id)) ?? teams[0]);
-	const events = $derived(data.coach.events.filter((event) => !activeTeam || event.team_ids.includes(activeTeam.id)));
-	const roster = $derived(data.rosters.find((team) => team.id === activeTeam?.id) ?? null);
+	const events = $derived((data.coach?.events ?? []).filter((event) => !activeTeam || event.team_ids.includes(activeTeam.id)));
+	const roster = $derived((data.rosters ?? []).find((team) => team.id === activeTeam?.id) ?? null);
 	// Coaches see their own drafts and published items; the list the API gives (null when it failed) falls back to the published items of the home payload.
 	const newsItems = $derived(
 		data.newsItems ??
-			data.coach.news.map((article) => ({ id: article.id, title: article.translations.en.title || article.translations.nl.title, slug: '', status: 'published' as const, visibility: 'internal' as const, published_at: article.published_at, is_scheduled: false, created: article.published_at, created_by: null, team_ids: [], teams: article.teams.map((name) => ({ id: name, name })), main_photo_url: article.photos.find((photo) => photo.is_main)?.url ?? article.photos[0]?.url ?? null, can_edit: false }))
+			(data.coach?.news ?? []).map((article) => ({ id: article.id, title: article.translations.en.title || article.translations.nl.title, slug: '', status: 'published' as const, visibility: 'internal' as const, published_at: article.published_at, is_scheduled: false, created: article.published_at, created_by: null, team_ids: [], teams: article.teams.map((name) => ({ id: name, name })), main_photo_url: article.photos.find((photo) => photo.is_main)?.url ?? article.photos[0]?.url ?? null, can_edit: false }))
 	);
 	const tab = $derived(page.url.searchParams.get('tab') || page.url.hash.slice(1) || 'home');
 	const labels: Record<string, string> = { home: 'portal.today', calendar: 'shell.nav.events', teams: 'portal.squad', news: 'shell.nav.news' };
