@@ -12,6 +12,11 @@ def get_settings() -> RegistrationSettings:
     return obj or RegistrationSettings.objects.create()
 
 
+def valid_offsets(offsets) -> bool:
+    """Days after the first due date for each later instalment: up to 11, ascending, 1 to 365 (an empty list means paying in one go)."""
+    return len(offsets) <= 11 and sorted(set(offsets)) == list(offsets) and all(isinstance(days, int) and 1 <= days <= 365 for days in offsets)
+
+
 def update_settings(actor, **values) -> RegistrationSettings:
     access.require_admin(actor)
     from events.models import Event
@@ -23,7 +28,7 @@ def update_settings(actor, **values) -> RegistrationSettings:
         if days is not None and not 0 <= days <= 365:
             errors[field] = ["Between 0 and 365."]
     offsets = values.get("installment_offsets")
-    if offsets is not None and (len(offsets) > 11 or sorted(set(offsets)) != offsets or any(not 1 <= days <= 365 for days in offsets)):
+    if offsets is not None and not valid_offsets(offsets):
         errors["installment_offsets"] = ["Enter up to 11 distinct day offsets in ascending order, from 1 to 365."]
     kinds = values.get("installment_block_kinds")
     if kinds is not None and (len(kinds) != len(set(kinds)) or any(kind not in Event.EventKind.values for kind in kinds)):

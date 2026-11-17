@@ -63,6 +63,23 @@ class RegistrationInstallmentTests(RegistrationMixin, TestCase):
         tasks.sync_club_wide_events()
         self.assertTrue(Attendance.objects.filter(event=event, member=member).exists())
 
+    def test_staff_set_and_clear_a_plan_on_a_confirmed_invoice(self):
+        batch = self.batch()
+        url = f"/registrations/{batch.pk}/installments"
+        early = self.staff("put", url, {"offsets": [30]})
+        self.assertEqual((early.status_code, early.json()["code"]), (422, "not_confirmed"))
+        self.assertEqual(self.staff("post", f"/registrations/{batch.pk}/confirm", {"send": False}).status_code, 200)
+        bad = self.staff("put", url, {"offsets": [60, 30]})
+        self.assertEqual(bad.status_code, 422, bad.content)
+        planned = self.staff("put", url, {"offsets": [30, 60]})
+        self.assertEqual(planned.status_code, 200, planned.content)
+        body = planned.json()
+        self.assertEqual(body["installment_offsets"], [30, 60])
+        self.assertEqual(len(body["installments"]), 3)
+        self.assertEqual(sum(Decimal(row["amount"]) for row in body["installments"]), Decimal(body["amount_due"]))
+        cleared = self.staff("put", url, {"offsets": []})
+        self.assertEqual((cleared.json()["installment_offsets"], cleared.json()["installments"]), ([], []))
+
     def test_late_installment_blocks_guardian_and_clears_after_recorded_payment(self):
         config.update_settings(self.owner, installment_offsets=[30], installment_grace_days=2, installment_block_kinds=["training"])
         batch = self.batch(entries=[self.entry("First"), self.entry("Second")], use_installments=True)

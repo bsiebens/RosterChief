@@ -194,6 +194,11 @@ class AllocationIn(Schema):
     amount: Decimal = Field(..., max_digits=10, decimal_places=2)
 
 
+class InstallmentPlanIn(Schema):
+    #: Days after the first due date for each later payment, ascending (e.g. ``[30, 60]`` = three equal payments). ``[]`` = pay in one go.
+    offsets: list[int] = Field(default_factory=list)
+
+
 class InvoicePaymentIn(Schema):
     amount: Decimal = Field(..., max_digits=10, decimal_places=2)
     #: bank_transfer | cash | card | voucher | other

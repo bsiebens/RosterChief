@@ -52,7 +52,7 @@
 	{:else if loading || !checklist}
 		<p class="text-sm text-muted">{t('common.loading')}</p>
 	{:else}
-		<DocumentsCard {checklist} canManage form={shown} actionBase="?" />
+		<DocumentsCard {checklist} canManage single form={shown} actionBase="?" />
 	{/if}
 	<div class="modal-action mt-4 flex justify-end">
 		<button class="btn btn-outline" type="button" onclick={() => (open = false)}>{t('common.close')}</button>

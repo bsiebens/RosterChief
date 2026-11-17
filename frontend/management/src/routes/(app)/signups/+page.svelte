@@ -128,52 +128,59 @@
 					<thead><tr><th>{t('signups.col.person')}</th><th>{t('signups.col.signed_up')}</th><th>{t('signups.col.fee')}</th><th>{t('signups.col.open')}</th><th>{t('signups.col.teams')}</th><th><span class="sr-only">{t('signups.col.actions')}</span></th></tr></thead>
 					<tbody>
 						{#each data.rows as r (r.membership_id)}
-							<tr class="hover:bg-surface">
+							<tr class="align-top hover:bg-surface">
 								<td>
-									<div class="flex items-center gap-3">
-										<Avatar first_name={r.member.name.split(' ')[0]} last_name={r.member.name.split(' ').slice(1).join(' ')} size="h-8 w-8" text="text-xs" />
-										<a class="link font-semibold" href="/members/{r.member.id}">{r.member.name}</a>
+									<div class="flex items-start gap-3">
+										<Avatar first_name={r.member.name.split(' ')[0]} last_name={r.member.name.split(' ').slice(1).join(' ')} size="h-9 w-9" text="text-xs" />
+										<div class="min-w-0">
+											<p class="flex flex-wrap items-center gap-x-2"><a class="link font-semibold" href="/members/{r.member.id}">{r.member.name}</a>{#if r.clean}<span class="badge badge-sm badge-success">{t('signups.ready')}</span>{/if}</p>
+											<p class="text-xs text-muted">{r.member.email || t('signups.no_email')}</p>
+											{#if r.registration}
+												<p class="mt-1.5 flex flex-wrap items-center gap-x-1.5 text-xs text-muted">
+													{#if r.registration.product}<span class="text-ink">{r.registration.product}</span>{/if}
+													{#if r.registration.contact_name}<span>· {t('signups.by', { name: r.registration.contact_name })}</span>{/if}
+													{#if r.registration.invoice_number}<a class="link inline-flex items-center gap-1" href="/registrations/{r.registration.registration_id}"><Receipt size={11} aria-hidden="true" /> {r.registration.invoice_number}</a>{:else}<a class="link" href="/registrations/{r.registration.registration_id}">{t('signups.open_registration')}</a>{/if}
+												</p>
+												{#if r.registration.number_state === 'dropped'}<p class="mt-0.5 text-xs font-semibold text-warn-text">{t('signups.number_dropped', { n: r.registration.requested_jersey_number ?? '' })}</p>{/if}
+											{/if}
+										</div>
 									</div>
-									{#if r.clean}<span class="badge badge-sm badge-success ml-2">{t('signups.ready')}</span>{/if}
-									<p class="text-xs text-muted">{r.member.email || t('signups.no_email')}</p>
-									{#if r.registration}
-										<p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted">
-											<span class="badge badge-xs badge-outline">{t('signups.from_registration')}</span>
-											{#if r.registration.contact_name}<span>{t('signups.by', { name: r.registration.contact_name })}</span>{/if}
-											{#if r.registration.product}<span>· {r.registration.product}</span>{/if}
-											{#if r.registration.invoice_number}<a class="link inline-flex items-center gap-1" href="/registrations/{r.registration.registration_id}"><Receipt size={11} aria-hidden="true" /> {r.registration.invoice_number}</a>{:else}<a class="link" href="/registrations/{r.registration.registration_id}">{t('signups.open_registration')}</a>{/if}
-										</p>
-										{#if r.registration.requested_team_name || r.registration.requested_position_name || r.registration.requested_jersey_number !== null}
-											<p class="text-xs text-muted">{t('signups.wants')} {[r.registration.requested_team_name, r.registration.requested_position_name, r.registration.requested_jersey_number !== null ? `#${r.registration.requested_jersey_number}` : ''].filter(Boolean).join(' · ')}</p>
-										{/if}
-										{#if r.registration.number_state === 'dropped'}<p class="mt-0.5 text-xs font-semibold text-warn-text">{t('signups.number_dropped', { n: r.registration.requested_jersey_number ?? '' })}</p>{/if}
-									{/if}
 								</td>
 								<td class="font-mono text-xs whitespace-nowrap text-muted">{r.signed_up_at ? formatDate(r.signed_up_at) : '–'}</td>
-								<td>
+								<td class="whitespace-nowrap">
 									<span class="badge badge-sm {feeBadge(r.fee_status)}">{t(`signups.fee.${r.fee_status}`)}</span>
-									{#if Number(r.remaining_balance) > 0}<p class="mt-0.5 font-mono text-xs text-muted">{t('signups.fee_due', { amount: r.remaining_balance })}</p>{/if}
+									{#if Number(r.remaining_balance) > 0}<p class="mt-1 font-mono text-xs text-muted">{t('signups.fee_due', { amount: r.remaining_balance })}</p>{/if}
 								</td>
 								<td>
-									<div class="grid justify-items-start gap-1.5">
-										<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => ((reqTarget = r), (reqOpen = true))} aria-label={t('signups.open_documents', { name: r.member.name })}>
-											<FileText size={13} aria-hidden="true" /> {t('signups.req_open')}{#if r.open_requirements.length}<span class="badge badge-warning badge-xs">{r.open_requirements.length}</span>{/if}
-										</button>
+									<button class="group grid justify-items-start gap-1 text-left" type="button" onclick={() => ((reqTarget = r), (reqOpen = true))} aria-label={t('signups.open_documents', { name: r.member.name })}>
 										{#if r.open_requirements.length}
-											<div class="flex flex-wrap gap-1">{#each r.open_requirements as name (name)}<span class="badge badge-sm badge-warning">{name}</span>{/each}</div>
+											<span class="flex flex-wrap gap-1">{#each r.open_requirements as name (name)}<span class="badge badge-sm badge-warning">{name}</span>{/each}</span>
+										{:else}
+											<span class="badge badge-sm badge-success gap-1"><Check size={11} aria-hidden="true" /> {t('signups.req_in_order')}</span>
 										{/if}
-									</div>
+										<span class="inline-flex items-center gap-1 text-xs font-semibold text-club group-hover:underline"><FileText size={12} aria-hidden="true" /> {t('signups.req_open')}</span>
+									</button>
 								</td>
-								<td class="text-sm">{r.teams.length ? r.teams.map((x) => x.name).join(', ') : '–'}</td>
+								<td class="text-sm">
+									{#if r.teams.length}
+										{r.teams.map((x) => x.name).join(', ')}
+									{:else if r.registration && (r.registration.requested_team_name || r.registration.requested_position_name || r.registration.requested_jersey_number !== null)}
+										<span class="text-xs text-muted">{t('signups.wants')} {[r.registration.requested_team_name, r.registration.requested_position_name, r.registration.requested_jersey_number !== null ? `#${r.registration.requested_jersey_number}` : ''].filter(Boolean).join(' · ')}</span>
+									{:else}<span class="text-muted">–</span>{/if}
+								</td>
 								<td class="text-right whitespace-nowrap">
-									<div class="flex justify-end gap-1">
-										<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => ((target = r), (placeOpen = true))}><Shirt size={13} /> {t('signups.place')}</button>
-										{#if r.registration}<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => askLink(r)}><Link2 size={13} /> {t('signups.link')}</button>{/if}
-										<form method="POST" action="?/approve" use:enhance={run()}>
-											<input type="hidden" name="id" value={r.membership_id} />
-											<button class="btn btn-primary btn-xs gap-1" type="submit" disabled={busy || !r.clean} title={r.clean ? '' : t('signups.approve_blocked')}><Check size={13} /> {t('signups.approve')}</button>
-										</form>
-										<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('signups.cancel_named', { name: r.member.name })} onclick={() => ((target = r), (cancelOpen = true))}><Ban size={13} /></button>
+									<div class="grid justify-items-end gap-2">
+										<div class="flex justify-end gap-1.5">
+											<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => ((target = r), (placeOpen = true))}><Shirt size={13} /> {t('signups.place')}</button>
+											<form method="POST" action="?/approve" use:enhance={run()}>
+												<input type="hidden" name="id" value={r.membership_id} />
+												<button class="btn btn-primary btn-xs gap-1" type="submit" disabled={busy || !r.clean} title={r.clean ? '' : t('signups.approve_blocked')}><Check size={13} /> {t('signups.approve')}</button>
+											</form>
+										</div>
+										<div class="flex justify-end gap-3 text-xs">
+											{#if r.registration}<button class="link inline-flex items-center gap-1" type="button" onclick={() => askLink(r)}><Link2 size={12} aria-hidden="true" /> {t('signups.link')}</button>{/if}
+											<button class="inline-flex items-center gap-1 font-semibold text-danger hover:underline" type="button" aria-label={t('signups.cancel_named', { name: r.member.name })} onclick={() => ((target = r), (cancelOpen = true))}><Ban size={12} aria-hidden="true" /> {t('signups.cancel_short')}</button>
+										</div>
 									</div>
 								</td>
 							</tr>

@@ -30,6 +30,15 @@ export const actions: Actions = {
 		const res = await api<RegistrationDetail>('DELETE', `/registrations/${params.id}/payments/${id}`, { f: fetch });
 		return res.ok ? { done: 'deletePayment' } : failed('deletePayment', res);
 	},
+	/** The fixed instalment plan: `count` payments in all, `every` days apart (1 payment = pay in one go). */
+	plan: async ({ request, params, fetch }) => {
+		const f = await request.formData();
+		const count = Math.min(12, Math.max(1, Math.trunc(Number(f.get('count'))) || 1));
+		const every = Math.trunc(Number(f.get('every'))) || 0;
+		const offsets = Array.from({ length: count - 1 }, (_, i) => every * (i + 1));
+		const res = await api<RegistrationDetail>('PUT', `/registrations/${params.id}/installments`, { body: { offsets }, f: fetch });
+		return res.ok ? { done: 'plan' } : failed('plan', res);
+	},
 	resendInvoice: async ({ params, fetch }) => {
 		const res = await api<{ sent: boolean }>('POST', `/registrations/${params.id}/resend-invoice`, { f: fetch });
 		return res.ok ? { done: 'resendInvoice', sent: !!res.data?.sent } : failed('resendInvoice', res);

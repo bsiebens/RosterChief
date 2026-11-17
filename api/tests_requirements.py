@@ -358,6 +358,25 @@ class RequirementsApiTests(TestCase):
         self.assertEqual(locked.status_code, 422)  # approved: no changes
         self.assertEqual(self.call("post", f"/memberships/{self.alice_ms.pk}/{req['id']}/sent-file", {"document": SimpleUploadedFile("b.pdf", b"%PDF x")}, multipart=True).status_code, 422)
 
+    def test_member_cannot_hand_in_until_the_club_sent_its_file(self):
+        from members.services.errors import Invalid
+
+        req = self.requirement(needs_staff_file=True, member_instructions="Take the form to your doctor.")
+        self.assertEqual((req["needs_staff_file"], req["member_instructions"]), (True, "Take the form to your doctor."))
+        self.assertTrue(self.item(req)["awaiting_file"])
+        with self.assertRaises(Invalid) as caught:
+            self.submit(req)
+        self.assertEqual(caught.exception.code, "awaiting_file")
+        sent = self.call("post", f"/memberships/{self.alice_ms.pk}/{req['id']}/sent-file", {"document": SimpleUploadedFile("form.pdf", b"%PDF-1.4 form", "application/pdf")}, multipart=True)
+        self.assertEqual(sent.status_code, 200, sent.content)
+        self.assertFalse(self.item(req)["awaiting_file"])
+        self.submit(req)
+        self.assertEqual(self.item(req)["display"], "pending")
+
+    def test_a_question_never_waits_for_a_staff_file(self):
+        req = self.requirement(name="Allergies", kind="question", question_type="text", needs_staff_file=True)
+        self.assertFalse(req["needs_staff_file"])
+
     def test_remove_the_sent_document_before_approval(self):
         req = self.requirement()
         self.call("post", f"/memberships/{self.alice_ms.pk}/{req['id']}/sent-file", {"document": SimpleUploadedFile("a.pdf", b"%PDF x")}, multipart=True)

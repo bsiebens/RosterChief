@@ -21,6 +21,10 @@ export type Requirement = QuestionShape & {
 	description: string;
 	kind: RequirementKind;
 	requires_document: boolean;
+	/** Staff must send the member a file before the member can hand anything in. */
+	needs_staff_file: boolean;
+	/** What the person completing it has to do, shown to the member and guardians. */
+	member_instructions: string;
 	blocked_event_kinds: string[];
 	is_active: boolean;
 	/** Months a completion stays valid; null = never expires. */
@@ -54,6 +58,8 @@ export type ChecklistItem = {
 	review_note: string;
 	/** A personalised file the club sent this member, with the note that came with it. */
 	has_sent_file: boolean;
+	/** Open, and the club still has to send its document before the member can hand anything in. */
+	awaiting_file: boolean;
 	sent_at: string | null;
 	sent_note: string;
 	submitted_at: string | null;

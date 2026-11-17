@@ -167,6 +167,11 @@ export type RequirementItem = {
 	review_note: string;
 	/** A personalised file the club sent for this person (download through `sentFileHref`). */
 	has_sent_file: boolean;
+	/** The club has to send its document first; until then the member cannot hand anything in. */
+	awaiting_file: boolean;
+	needs_staff_file: boolean;
+	/** What the person completing it has to do. */
+	member_instructions: string;
 	sent_at: string | null;
 	sent_note: string;
 	/** What the member may read of the history: decisions and messages from the club. */

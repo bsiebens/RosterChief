@@ -39,7 +39,7 @@ from . import audit
 from .access import require_admin
 from .errors import Invalid
 
-REQUIREMENT_FIELDS = ("name", "description", "kind", "question_type", "options", "min_value", "max_value", "requires_document", "blocked_event_kinds", "is_active", "valid_for_months", "reminder_days_before")
+REQUIREMENT_FIELDS = ("name", "description", "kind", "question_type", "options", "min_value", "max_value", "requires_document", "needs_staff_file", "member_instructions", "blocked_event_kinds", "is_active", "valid_for_months", "reminder_days_before")
 MAX_VALID_MONTHS = 120
 MAX_REMINDER_DAYS = 365
 Kind = OnboardingRequirement.Kind
@@ -62,6 +62,11 @@ class ChecklistItem:
     @property
     def resolved(self) -> bool:
         return self.state != "open"
+
+    @property
+    def awaiting_file(self) -> bool:
+        """The club still has to send its document before this can be completed by the member (staff can always mark it received)."""
+        return self.requirement.needs_staff_file and self.state == "open" and not (self.status and self.status.sent_file)
 
     @property
     def valid_until(self) -> datetime.date | None:
@@ -138,6 +143,7 @@ def _normalise_kind(current: dict, values: dict) -> dict:
     if qtype not in QuestionType.values:
         raise Invalid("Choose what kind of question this is.", {"question_type": ["Required."]})
     values["requires_document"] = False  # a question never has a file
+    values["needs_staff_file"] = False
     if qtype in CHOICE_TYPES:
         if not merged.get("options"):
             raise Invalid("A choice needs options.", {"options": ["Add at least one option."]})
@@ -163,14 +169,14 @@ def _name_free(name: str, exclude=None) -> None:
 @transaction.atomic
 def create_requirement(
     actor, *, name: str, description: str = "", requires_document: bool = False, blocked_event_kinds=(), is_active: bool = True, valid_for_months: int | None = None, reminder_days_before: int = 30,
-    kind: str = Kind.DOCUMENT, question_type: str = "", options=None, min_value=None, max_value=None,
+    needs_staff_file: bool = False, member_instructions: str = "", kind: str = Kind.DOCUMENT, question_type: str = "", options=None, min_value=None, max_value=None,
 ) -> OnboardingRequirement:  # fmt: skip
     """Define a requirement. ``blocked_event_kinds`` must be ``Event.EventKind`` values. A question needs ``question_type`` (and ``options`` for a choice)."""
     require_admin(actor)
     values = _validated(
         {
             "name": name, "description": description, "requires_document": requires_document, "blocked_event_kinds": blocked_event_kinds, "is_active": is_active,
-            "valid_for_months": valid_for_months, "reminder_days_before": reminder_days_before, "kind": kind, "question_type": question_type, "options": options,
+            "valid_for_months": valid_for_months, "reminder_days_before": reminder_days_before, "needs_staff_file": needs_staff_file, "member_instructions": member_instructions, "kind": kind, "question_type": question_type, "options": options,
             "min_value": min_value, "max_value": max_value,
         }
     )  # fmt: skip
@@ -187,8 +193,9 @@ def update_requirement(actor, requirement: OnboardingRequirement, **values) -> O
     values = _validated(values)
     if "name" in values:
         _name_free(values["name"], exclude=requirement)
-    current = {f: getattr(requirement, f) for f in ("kind", "question_type", "options", "min_value", "max_value", "requires_document")}
-    if {"kind", "question_type", "options", "min_value", "max_value", "requires_document"} & set(values):
+    keys = ("kind", "question_type", "options", "min_value", "max_value", "requires_document", "needs_staff_file")
+    current = {f: getattr(requirement, f) for f in keys}
+    if set(keys) & set(values):
         values = _normalise_kind(current, values)
         if values.get("kind", requirement.kind) != requirement.kind and requirement.statuses.exists():
             raise Invalid("A requirement in use cannot change kind. Add a new one instead.", {"kind": ["Already in use."]}, code="in_use")
@@ -378,6 +385,8 @@ def submit_as(actor, membership: ClubMembership, requirement: OnboardingRequirem
     item = item_for(requirement, status)
     if item.display in ("complete", "bypassed"):
         raise Invalid("This has been approved and can only be changed through the club.", code="locked")
+    if requirement.needs_staff_file and not status.sent_file:
+        raise Invalid("The club has to send you a document first.", {"document": ["Waiting for the club."]}, code="awaiting_file")
     today = timezone.localdate()
     renewal = item.state == "complete"  # a valid completion stays in force
     if requirement.kind == Kind.QUESTION:

@@ -210,6 +210,7 @@ def _requirement_item(item):
     return {
         "id": requirement.pk, "name": requirement.name, "description": requirement.description, "kind": requirement.kind,
         "question_type": requirement.question_type, "options": requirement.options, "requires_document": requirement.requires_document,
+        "needs_staff_file": requirement.needs_staff_file, "member_instructions": requirement.member_instructions, "awaiting_file": item.awaiting_file,
         "valid_for_months": requirement.valid_for_months,
         "state": item.display, "valid_until": item.valid_until, "answer": item.answer,
         "has_document": bool(status and status.document), "completed_at": status.completed_at if status else None,
