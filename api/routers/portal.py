@@ -117,9 +117,23 @@ def _event_display(event):
     }
 
 
-def _attendance(row, blocked=None):
+def _going_counts(event_ids) -> dict:
+    """How many of the invited are going, and how many are invited, per event (one query), for the agenda rows. Counts only: no names, no reasons."""
+    out: dict = {}
+    rows = Attendance.objects.filter(event_id__in=list(event_ids)).values("event_id", "status", "status_before_lineup").annotate(n=Count("pk"))
+    for row in rows:
+        answer = row["status_before_lineup"] if row["status"] in ("selected", "not_selected") and row["status_before_lineup"] else row["status"]
+        entry = out.setdefault(row["event_id"], {"going": 0, "invited": 0})
+        entry["invited"] += row["n"]
+        if answer in ("present", "selected"):
+            entry["going"] += row["n"]
+    return out
+
+
+def _attendance(row, blocked=None, counts=None):
     code, detail = blocked if blocked else (None, None)
-    return {**_event_display(row.event), "id": row.pk, "member_id": row.member_id, "status": row.status, "note": row.note, "blocked": code, "blocked_detail": detail}
+    entry = (counts or {}).get(row.event_id, {})
+    return {**_event_display(row.event), "id": row.pk, "member_id": row.member_id, "status": row.status, "note": row.note, "blocked": code, "blocked_detail": detail, "going_count": entry.get("going"), "invited_count": entry.get("invited")}
 
 
 def _requirement_rows(people, rows, now):
@@ -203,6 +217,7 @@ def portal_home(request):
         .order_by("event__start", "member_id", "id")
     )
     blockers = _blockers(events, now)
+    counts = _going_counts({row.event_id for row in events})
     fees = ClubMembership.objects.filter(member_id__in=people).select_related("season", "registration_details__batch").prefetch_related("payments")
     invoices = invoice_access.downloadable_invoices(viewer)
     sends = list(
@@ -217,7 +232,7 @@ def portal_home(request):
         "shop_enabled": _shop_visible(request),
         "people": [{"id": member.pk, "name": str(member), "first_name": member.first_name, "photo_url": member.photo_url} for member in people.values()],
         "events": sorted(
-            [_attendance(row, blockers.get(row.pk)) for row in events] + _requirement_rows(people, events, now),
+            [_attendance(row, blockers.get(row.pk), counts) for row in events] + _requirement_rows(people, events, now),
             key=lambda row: (row["start"], str(row["member_id"])),
         ),
         "tasks": _open_tasks(viewer, people, events, now),

@@ -706,6 +706,14 @@
 				{#if event.score_for != null && event.score_against != null}<p class="font-display text-2xl font-extrabold">{event.score_for}–{event.score_against}</p>{/if}
 				{#if event.notes}<p class="mt-1 border-t border-line pt-2 text-sm whitespace-pre-line text-slate">{event.notes}</p>{/if}
 			</div>
+			{#if audience && extras?.roster?.length}
+				{@const counted = extras.roster}
+				<a class="card flex min-h-14 items-center gap-3 px-4 py-2" href="#who-going">
+					<span class="grid size-10 shrink-0 place-items-center rounded-box bg-ok-bg text-ok-text"><Users size={18} aria-hidden="true" /></span>
+					<span class="min-w-0 flex-1"><b class="block text-ink">{t('portal.who_going')}</b><span class="block truncate text-sm text-muted">{t('portal.going_summary', { going: counted.filter((p) => p.state === 'going').length, out: counted.filter((p) => p.state === 'out').length, waiting: counted.filter((p) => p.state === 'waiting' || p.state === 'maybe').length })}</span></span>
+					<ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" />
+				</a>
+			{/if}
 			{#if event.kind === 'game' && extras?.follow}
 				<div class="flex items-center gap-3 rounded-box border border-line px-4 py-2.5">
 					<span class="min-w-0 flex-1 text-sm"><b class="text-ink">{extras.follow.directly ? t('portal.following_game') : extras.follow.via_team ? t('portal.following_team') : t('portal.follow_game')}</b><span class="block text-xs text-muted">{t('portal.follow_help')}</span></span>
@@ -728,8 +736,8 @@
 			<!-- A request to referee or officiate is only that: line-up, tasks and files are for the people invited to play. -->
 			{#if audience && extras?.roster?.length}
 				{@const roster = extras.roster}
-				<section class="card card-body">
-					<h2 class="card-title"><Users size={16} aria-hidden="true" />{t('portal.roster_title')}</h2>
+				<section class="card card-body" id="who-going">
+					<h2 class="card-title"><Users size={16} aria-hidden="true" />{t('portal.who_going')}</h2>
 					<div class="grid gap-4">
 						{#each rosterGroups as group (group.key)}
 							<div>
@@ -740,6 +748,7 @@
 										<li class="flex min-h-10 items-center gap-2 border-b border-rule py-1.5">
 											<span class="w-7 shrink-0 text-right font-mono text-xs text-muted">{player.number !== null ? `#${player.number}` : ''}</span>
 											<span class="min-w-0 flex-1 leading-tight {player.mine ? 'font-semibold text-club-dark' : 'text-ink'}">{player.name}{#if player.extra && player.position}<span class="block text-xs font-normal text-muted">{player.team ? t('portal.roster_extra_from', { team: player.team }) : t('portal.roster_extra')}</span>{/if}</span>
+											{#if player.selected === true}<span class="badge badge-xs badge-success">{t('portal.picked')}</span>{:else if player.selected === false}<span class="badge badge-xs badge-ghost">{t('portal.not_picked')}</span>{/if}
 											<span class="grid size-6 shrink-0 place-items-center rounded-full border {statusStyle(status.code)}" title={t(statusLabelKey(status.code))} role="img" aria-label={t(statusLabelKey(status.code))}><status.icon size={13} aria-hidden="true" /></span>
 										</li>
 									{/each}

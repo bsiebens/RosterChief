@@ -2,6 +2,11 @@
 export default {
 	en: {
 		'portal.theme': 'Appearance',
+		"portal.who_going": "Who's going",
+		"portal.going_summary": "{going} going · {out} can't · {waiting} no answer yet",
+		"portal.picked": "Picked",
+		"portal.not_picked": "Not picked",
+		'portal.n_going': "{n} going",
 		"portal.me_docs_open": "{n} to hand in or answer",
 		"portal.me_all_good": "All in order",
 		"portal.me_pay_open": "{n} open",
@@ -29,6 +34,11 @@ export default {
 	},
 	nl: {
 		'portal.theme': 'Weergave',
+		"portal.who_going": "Wie komt er",
+		"portal.going_summary": "{going} komen · {out} kunnen niet · {waiting} nog geen antwoord",
+		"portal.picked": "Geselecteerd",
+		"portal.not_picked": "Niet geselecteerd",
+		'portal.n_going': "{n} komen",
 		"portal.me_docs_open": "{n} in te dienen of te beantwoorden",
 		"portal.me_all_good": "Alles in orde",
 		"portal.me_pay_open": "{n} openstaand",
@@ -56,6 +66,11 @@ export default {
 	},
 	fr: {
 		'portal.theme': 'Apparence',
+		"portal.who_going": "Qui vient",
+		"portal.going_summary": "{going} viennent · {out} ne peuvent pas · {waiting} sans réponse",
+		"portal.picked": "Sélectionné",
+		"portal.not_picked": "Non sélectionné",
+		'portal.n_going': "{n} viennent",
 		"portal.me_docs_open": "{n} à remettre ou à répondre",
 		"portal.me_all_good": "Tout est en ordre",
 		"portal.me_pay_open": "{n} ouvert(s)",

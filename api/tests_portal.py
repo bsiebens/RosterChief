@@ -280,6 +280,15 @@ class PortalProfileTests(ParentPortalTests):
         self.assertEqual(sorted(row["selected"] for row in after), [False, True])
         self.assertNotIn("slot", str(after))
 
+    def test_home_rows_carry_how_many_are_going_but_no_names(self):
+        token = self.token()
+        with schema_context(self.club.schema_name):
+            event = self.child_reply.event
+            Attendance.objects.filter(pk=self.child_reply.pk).update(status="present")
+            Attendance.objects.filter(pk=self.other_reply.pk).update(status="absent", note="Sick")
+        row = next(r for r in self.call("get", "/portal/home", token).json()["events"] if r["event_id"] == str(event.pk))
+        self.assertEqual((row["going_count"], row["invited_count"]), (1, 2))
+
     def test_events_carry_the_exact_address_and_map_pin(self):
         from events.models import Location
 

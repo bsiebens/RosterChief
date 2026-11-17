@@ -28,6 +28,9 @@ export type PortalEvent = PortalEventDisplay & {
 	note: string;
 	/** Why this person cannot sign up right now, so the app says so instead of offering buttons: not invited any more, or an overdue instalment (they can still decline). */
 	blocked?: 'not_invited' | 'late_installment' | null;
+	/** How many invited people are going (counts only), for the agenda rows. */
+	going_count?: number | null;
+	invited_count?: number | null;
 	/** For not_invited: an open requirement blocks this kind of event (with its names), an exclusion, or the person left the event's team or group. */
 	blocked_detail?: { reason: 'requirements' | 'excluded' | 'not_in_audience'; requirements: string[] } | null;
 };
@@ -116,7 +119,7 @@ export type EventExtras = {
 	/** The game as the competition's page captured it (played games only): lineup and timeline by period. */
 	game: GameSheet | null;
 	/** Everyone invited and whether they come. Never a reason or note; those are for the coaching app. */
-	roster?: { id: string; name: string; number: number | null; position: string | null; extra: boolean; team: string | null; state: 'going' | 'out' | 'maybe' | 'waiting'; mine: boolean }[] | null;
+	roster?: { id: string; name: string; number: number | null; position: string | null; extra: boolean; team: string | null; state: 'going' | 'out' | 'maybe' | 'waiting'; /** Once the line-up is published: picked or not (never the lines). */ selected?: boolean | null; mine: boolean }[] | null;
 	/** Whole-club events only: the counts instead of a list of names (too many people). */
 	totals?: { going: number; maybe: number; waiting: number; out: number; total: number } | null;
 	tasks: PortalTask[];
