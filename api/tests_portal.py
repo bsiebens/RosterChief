@@ -259,12 +259,38 @@ class PortalProfileTests(ParentPortalTests):
         extras = self.call("get", f"/portal/events/{event.pk}", token).json()
         roster = extras["roster"]
         self.assertEqual([(row["state"], row["mine"]) for row in roster], [("going", True), ("out", False)])  # coming first, then the others
-        self.assertEqual(set(roster[0]), {"id", "name", "number", "position", "position_order", "extra", "team", "state", "mine"})  # no note, reason or status detail
+        self.assertEqual(set(roster[0]), {"id", "name", "number", "position", "position_order", "extra", "team", "state", "selected", "mine"})  # no note, reason or status detail
         for secret in ("Dentist", "Sick with flu", "Private"):
             self.assertNotIn(secret, str(extras))
         with schema_context(self.club.schema_name):
             Event.objects.filter(pk=event.pk).update(kind=Event.EventKind.TRAINING)
         self.assertEqual(len(self.call("get", f"/portal/events/{event.pk}", token).json()["roster"]), 2)  # every kind of event, not only games
+
+    def test_everyone_sees_who_was_picked_once_the_lineup_is_published_but_no_lines(self):
+        token = self.token()
+        with schema_context(self.club.schema_name):
+            event = self.child_reply.event
+            Event.objects.filter(pk=event.pk).update(kind=Event.EventKind.GAME)
+        before = self.call("get", f"/portal/events/{event.pk}", token).json()["roster"]
+        self.assertEqual({row["selected"] for row in before}, {None})  # nothing is decided before publishing
+        with schema_context(self.club.schema_name):
+            Attendance.objects.filter(pk=self.child_reply.pk).update(status="selected", status_before_lineup="present")
+            Attendance.objects.filter(pk=self.other_reply.pk).update(status="not_selected", status_before_lineup="present")
+        after = self.call("get", f"/portal/events/{event.pk}", token).json()["roster"]
+        self.assertEqual(sorted(row["selected"] for row in after), [False, True])
+        self.assertNotIn("slot", str(after))
+
+    def test_events_carry_the_exact_address_and_map_pin(self):
+        from events.models import Location
+
+        token = self.token()
+        with schema_context(self.club.schema_name):
+            event = self.child_reply.event
+            event.location = Location.objects.create(name="Eagles Arena", address="Stationsstraat 12", zip_code="2800", city="Mechelen", latitude=51.0259, longitude=4.4776)
+            event.save(update_fields=["location"])
+        rows = [row for row in self.call("get", "/portal/home", token).json()["events"] if row["event_id"] == str(event.pk)]
+        self.assertEqual(rows[0]["location_detail"], {"name": "Eagles Arena", "address": "Stationsstraat 12", "zip_code": "2800", "city": "Mechelen", "latitude": 51.0259, "longitude": 4.4776})
+        self.assertEqual(rows[0]["location"], "Eagles Arena")
 
     def test_roster_follows_the_audience_extras_included_and_dropped_players_gone(self):
         from events.models import Season

@@ -88,6 +88,14 @@ def _charge(order, today):
     }  # fmt: skip
 
 
+def _location_detail(event) -> dict | None:
+    """Where exactly: the venue's name, street address, postcode, town and map pin, so a phone can open the address itself and not just the town."""
+    loc = event.location
+    if loc is None:
+        return None
+    return {"name": loc.name, "address": loc.address, "zip_code": loc.zip_code, "city": loc.city, "latitude": loc.latitude, "longitude": loc.longitude}
+
+
 def _event_display(event):
     return {
         "event_id": event.pk,
@@ -98,6 +106,7 @@ def _event_display(event):
         "gathering": event.gathering,
         "deadline": event.deadline,
         "location": event.location.name if event.location else "",
+        "location_detail": _location_detail(event),
         "opponent": event.opponent.name if event.opponent else "",
         "opponent_logo": event.opponent.logo.url if event.opponent and event.opponent.logo else None,
         "is_home": event.is_home_game,
@@ -489,6 +498,8 @@ def _roster(event, people):
                 "extra": regular is None,
                 "team": guest.team.name if guest else None,
                 "state": states.get(answer, "waiting"),
+                #: Once the line-up is published: picked or not. Everyone in the audience sees this (never the lines), null before that.
+                "selected": True if row.status == "selected" else False if row.status == "not_selected" else None,
                 "mine": row.member_id in people,
             }
         )
@@ -640,7 +651,7 @@ def coach_home(request):
         "news": [public_news_item(request, item) for item in news],
         "events": [
             {
-                "id": event.pk, "title": event.title, "start": event.start, "location": event.location.name if event.location else "",
+                "id": event.pk, "title": event.title, "start": event.start, "location": event.location.name if event.location else "", "location_detail": _location_detail(event),
                 "kind": event.kind, "deadline": event.deadline, "team_ids": [team.pk for team in event.teams.all()],
                 "opponent_logo": event.opponent.logo.url if event.opponent and event.opponent.logo else None, "is_home": event.is_home_game,
                 "end": event.end, "gathering": event.gathering, "opponent": event.opponent.name if event.opponent else "", "notes": event.notes,

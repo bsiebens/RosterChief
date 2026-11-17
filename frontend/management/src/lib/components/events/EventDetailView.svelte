@@ -19,7 +19,7 @@
     import EventTasks from '#lib/components/events/EventTasks.svelte';
     import {usePageHeader} from '#lib/header.svelte.ts';
     import {t} from '#lib/i18n.svelte.ts';
-    import {describeRecurrence, eventEditHref, formatDateTime, formatDay, formatRange, kindLabelKey, kindStyle, statusLabelKey, statusStyle} from '#lib/events/types.ts';
+    import {describeRecurrence, eventEditHref, formatDateTime, formatDay, formatRange, kindLabelKey, kindStyle, mapsHref, statusLabelKey, statusStyle} from '#lib/events/types.ts';
 
     import type {ActionData, PageData} from '../../../routes/(app)/calendar/events/[id]/$types';
 
@@ -28,7 +28,7 @@
     const style = $derived(kindStyle(ev.kind));
     const past = $derived(new Date(ev.start).getTime() < Date.now());
     const series = $derived(ev.series ? describeRecurrence(ev.series.recurrence, ev.series.description) : '');
-    const mapsHref = $derived(ev.location ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([ev.location.name, ev.location.city].filter(Boolean).join(', '))}` : '');
+    const mapsLink = $derived(ev.location ? mapsHref(ev.location) : '');
     // Phones in the coach app get their own layouts (hero card, tab strip, attendance cards, line-up editor).
     const narrow = new MediaQuery('max-width: 767px', false);
     const phone = $derived(data.coachView && narrow.current);
@@ -183,7 +183,7 @@
                         <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><Clock size={15} aria-label={t('events.gathering')}/></dt><dd class="min-w-0 break-words"><span class="text-muted">{t('events.gathering')}</span> <span class="font-semibold">{formatDateTime(ev.gathering)}</span></dd></div>
                     {/if}
                     {#if ev.location}
-                        <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><MapPin size={15} aria-label={t('events.location')}/></dt><dd class="min-w-0 break-words"><a class="link font-semibold" href={mapsHref} target="_blank" rel="noreferrer">{ev.location.name}{ev.location.city ? `, ${ev.location.city}` : ''}</a></dd></div>
+                        <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><MapPin size={15} aria-label={t('events.location')}/></dt><dd class="min-w-0 break-words"><a class="link font-semibold" href={mapsLink} target="_blank" rel="noreferrer">{ev.location.name}{ev.location.city ? `, ${ev.location.city}` : ''}</a></dd></div>
                     {/if}
                     <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><Users size={15} aria-label={t('events.audience')}/></dt>
                         <dd class="flex min-w-0 flex-wrap gap-x-2 gap-y-0.5">
@@ -279,7 +279,7 @@
                         <div class="flex items-center gap-2">
                             <dt class="flex items-center gap-1.5 text-muted">
                                 <MapPin size={14} aria-hidden="true"/> {t('events.location')}</dt>
-                            <dd><a class="link font-semibold" href={mapsHref} target="_blank" rel="noreferrer" title={t('events.open_map')}>{ev.location.name}{ev.location.city ? `, ${ev.location.city}` : ''}</a></dd>
+                            <dd><a class="link font-semibold" href={mapsLink} target="_blank" rel="noreferrer" title={t('events.open_map')}>{ev.location.name}{ev.location.city ? `, ${ev.location.city}` : ''}</a></dd>
                         </div>
                     {/if}
                         {@render officiating('referee', ev.referees)}

@@ -1,3 +1,4 @@
+export type LocationDetail = { name: string; address: string; zip_code: string; city: string; latitude: number | null; longitude: number | null };
 export type PortalEventDisplay = {
 	event_id: string;
 	title: string;
@@ -7,6 +8,8 @@ export type PortalEventDisplay = {
 	gathering: string | null;
 	deadline: string | null;
 	location: string;
+	/** Where exactly: street address and map pin, so maps opens the address itself and not the town. */
+	location_detail?: LocationDetail | null;
 	/** The other team's name, for the initials crest when it has no logo. */
 	opponent?: string;
 	opponent_logo: string | null;
@@ -69,7 +72,7 @@ export type ParentHome = {
 };
 
 export type CoachEvent = {
-	id: string; title: string; start: string; end: string | null; gathering: string | null; location: string; kind: string; deadline: string | null;
+	id: string; title: string; start: string; end: string | null; gathering: string | null; location: string; location_detail?: LocationDetail | null; kind: string; deadline: string | null;
 	team_ids: string[]; opponent: string; opponent_logo: string | null; is_home: boolean; notes?: string;
 	going: number; out: number; unanswered: number; maybe: number; invited: number;
 	cancelled: boolean; lineup: boolean; lineup_published: boolean; has_game_sheet: boolean; can_manage_attendance: boolean;

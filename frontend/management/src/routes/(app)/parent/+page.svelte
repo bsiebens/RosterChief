@@ -3,7 +3,7 @@
 	import { ArrowLeft, Bell, CalendarDays, ChartColumn, Check, CircleQuestionMark, Clock, X, Shirt, Info, ListChecks, MapPin, Users, ChevronRight, CircleCheck, ClipboardList, FileText, Handshake, KeyRound, List, UserRound, UsersRound, Wallet, Whistle } from '@lucide/svelte';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
-	import { formatDateTime, formatLongDay, formatTime, kindLabelKey, kindStyle, statusLabelKey, statusStyle } from '#lib/events/types.ts';
+	import { addressLine, formatDateTime, formatLongDay, formatTime, kindLabelKey, kindStyle, mapsHref, statusLabelKey, statusStyle } from '#lib/events/types.ts';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { api } from '#lib/management-api.ts';
@@ -711,8 +711,8 @@
 				{#if event.location}
 					<div class="mt-1 flex items-center gap-3">
 						<MapPin size={18} class="shrink-0 text-muted" aria-hidden="true" />
-						<span class="min-w-0 flex-1 font-semibold text-ink">{event.location}</span>
-						<a class="btn btn-outline btn-sm md:h-8" href="https://www.google.com/maps/search/?api=1&query={encodeURIComponent(event.location)}" target="_blank" rel="noopener noreferrer">{t('portal.open_maps')}</a>
+						<span class="min-w-0 flex-1"><span class="block font-semibold text-ink">{event.location}</span>{#if addressLine(event.location_detail)}<span class="block text-sm text-muted">{addressLine(event.location_detail)}</span>{/if}</span>
+						<a class="btn btn-outline btn-sm md:h-8" href={mapsHref(event.location_detail, event.location)} target="_blank" rel="noopener noreferrer">{t('portal.open_maps')}</a>
 					</div>
 				{/if}
 				{#if event.score_for != null && event.score_against != null}<p class="font-display text-2xl font-extrabold">{event.score_for}–{event.score_against}</p>{/if}
