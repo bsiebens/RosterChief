@@ -315,7 +315,7 @@
 {#snippet pageActions()}
 	{#if tab === 'home' && people.length > 1}{@render headerPeople()}{/if}
 	{#if tab === 'calendar'}{@render calendarActions()}{/if}
-	{#if people.length > 1 && ['home', 'calendar', 'payments'].includes(tab)}<div class="md:hidden"><HeaderChip options={chipOptions} bind:value={selected} allLabel={t('portal.everyone')} /></div>{/if}
+	{#if people.length > 1 && ['home', 'calendar'].includes(tab)}<div class="md:hidden"><HeaderChip options={chipOptions} bind:value={selected} allLabel={t('portal.everyone')} /></div>{/if}
 {/snippet}
 
 {#snippet rsvp(event: PortalEvent, quick = false, dark = false, seg = false)}
@@ -642,7 +642,7 @@
 	{@render peoplePicker()}
 	{#if data.overview}<RequirementsCard memberships={data.overview.memberships.filter((row) => phone || !selected || row.member_id === selected)} {people} />{/if}
 {:else if tab === 'payments'}
-	<div class="md:hidden"><MobilePayments home={data.home} {people} bind:selected {memberName} /></div>
+	<div class="md:hidden"><MobilePayments home={data.home} {people} {memberName} /></div>
 	<div class="hidden md:contents">
 	{@render peoplePicker()}
 	<div class="grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">

@@ -9,10 +9,10 @@
 	 * Payments on a phone: the next payment first (what, how much, by when, and how to pay), then one card per child with how much of the fee is
 	 * paid and a short timeline (payments received, the next one due), then the invoices and receipts. A late instalment says what it blocks.
 	 */
-	let { home, people, selected = $bindable(''), memberName }: { home: ParentHome; people: ParentHome['people']; selected: string; memberName: (id: string) => string } = $props();
+	let { home, people, memberName }: { home: ParentHome; people: ParentHome['people']; memberName: (id: string) => string } = $props();
 
-	const fees = $derived(home.fees.filter((fee) => !selected || fee.member_id === selected));
-	const charges = $derived((home.charges ?? []).filter((charge) => charge.status !== 'paid' && (!selected || charge.member_id === selected)));
+	const fees = $derived(home.fees);
+	const charges = $derived((home.charges ?? []).filter((charge) => charge.status !== 'paid'));
 	const received = (memberId: string, season: string) => (home.payments ?? []).filter((payment) => payment.member_id === memberId && payment.season === season).sort((a, b) => a.paid_at.localeCompare(b.paid_at));
 	const next = $derived(
 		fees
@@ -53,9 +53,10 @@
 		{@const paid = Number(fee.paid)}
 		{@const total = paid + Number(fee.balance)}
 		<section class="grid gap-2">
-			<h2 class="flex items-baseline gap-2 font-display text-lg font-extrabold tracking-[.02em] text-ink uppercase">{people.length > 1 ? `${memberName(fee.member_id)} · ` : ''}{fee.season}<span class="ml-auto font-mono text-[11px] font-normal tracking-normal text-muted normal-case">{t('portal.pay_of', { paid: money(fee.paid), total: money(String(total)) })}</span></h2>
+			<h2 class="flex items-baseline gap-2 font-display text-lg font-extrabold tracking-[.02em] text-ink uppercase">{people.length > 1 ? `${memberName(fee.member_id)} · ` : ''}{fee.season}</h2>
 			<div class="card grid gap-3 p-4">
 				<div class="h-2 overflow-hidden rounded-full bg-subhead" role="progressbar" aria-valuenow={total > 0 ? Math.round((paid / total) * 100) : 100} aria-valuemin="0" aria-valuemax="100"><div class="h-full rounded-full bg-ok" style="width: {total > 0 ? Math.min(100, (paid / total) * 100) : 100}%"></div></div>
+				<p class="-mt-1 text-right font-mono text-xs text-muted">{t('portal.pay_of', { paid: money(fee.paid), total: money(String(total)) })}</p>
 				<ul class="grid gap-2.5">
 					{#each received(fee.member_id, fee.season) as payment (payment.id)}
 						<li class="flex items-center gap-3"><span class="grid size-7 shrink-0 place-items-center rounded-full bg-ok text-white"><Check size={15} aria-hidden="true" /></span><span class="min-w-0 flex-1"><b class="text-ink">{money(payment.amount)}</b> <span class="text-sm text-muted">· {formatDateTime(payment.paid_at)}</span></span><span class="badge badge-sm badge-success">{t('portal.charge_paid')}</span></li>
