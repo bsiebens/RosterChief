@@ -1599,3 +1599,8 @@ textarea[name="note"] {
 .pill-muted { background: #e3e6ec; color: #333c4b; }
 :root:not([data-theme='light']) .portal-ui .pill-muted { background: #262e3d; color: #b6bfce; }
 :root[data-theme='dark'] .portal-ui .pill-muted { background: #262e3d; color: #b6bfce; }
+
+/* On a phone the product options open as a card from the bottom, like the other sheets. */
+@media (max-width: 47.99rem) {
+    .portal-modal-sheet { inset: auto 0 0; margin: 0 auto; width: 100%; max-width: 42rem; max-height: 92dvh; border-radius: var(--radius-box) var(--radius-box) 0 0; padding-bottom: env(safe-area-inset-bottom); }
+}

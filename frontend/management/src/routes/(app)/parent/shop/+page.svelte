@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import Alert from '#lib/components/Alert.svelte';
+	import Sheet from '#lib/components/portal/Sheet.svelte';
 	import { formatDay, parseIsoDate } from '#lib/events/types.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -35,6 +36,7 @@
 	let choosing = $state<ShopProduct | null>(null);
 	let draft = $state<Draft>({ variant: '', beneficiary: '', quantity: 1, name: '', number: '' });
 	let optionsDialog = $state<HTMLDialogElement>();
+	let cartOpen = $state(false);
 	const chosenVariant = $derived(choosing?.variants.find((item) => item.id === draft.variant));
 	const canAdd = $derived(!!choosing && !busy && choosing.in_stock && (!choosing.variants.length || !!chosenVariant?.in_stock) && Number.isInteger(draft.quantity) && draft.quantity >= 1 && draft.quantity <= 999);
 	function choose(product: ShopProduct) {
@@ -194,6 +196,53 @@
 	usePageHeader(() => ({ title: t(view === 'orders' ? 'portal.shop.orders' : 'portal.shop'), actions }));
 </script>
 
+{#snippet cartPanel()}
+				<div class="card-h"><ShoppingBag size={17} aria-hidden="true" /><h2>{t('portal.shop.cart')}</h2>{#if cart.length}<span class="badge badge-sm badge-outline ml-auto">{itemsText(cart.reduce((sum, line) => sum + line.quantity, 0))}</span>{/if}</div>
+				{#if cartError}<div class="p-4 pb-0"><Alert kind="error">{cartError}</Alert></div>{/if}
+				{#if cart.length}
+					<form onsubmit={checkout}>
+						<ul class="divide-y divide-rule">
+							{#each cart as line (line.id)}
+								{@const image = productById.get(line.product_id)?.image_url}
+								<li class="flex items-start gap-3 px-4 py-3">
+									{#if image}<img class="size-14 shrink-0 rounded object-cover" src={image} alt="" />{:else}<div class="grid size-14 shrink-0 place-items-center rounded bg-subhead text-dim"><Package size={20} aria-hidden="true" /></div>{/if}
+									<div class="min-w-0 flex-1">
+										<p class="font-semibold text-ink">{line.name}</p>
+										<p class="text-xs text-muted">{[line.variant, buyerName(line.beneficiary_id), [line.personalization_number && '#' + line.personalization_number, line.personalization_name].filter(Boolean).join(' ')].filter(Boolean).join(' · ')}</p>
+										{#if catalog.open && !currentLine(line)}<p class="text-xs text-danger">{t('portal.shop.line_unavailable')}</p>{/if}
+										<div class="mt-1.5 flex items-center gap-3">
+											<span class="inline-flex items-center overflow-hidden rounded-full border border-line text-sm">
+												<button type="button" class="grid size-7 place-items-center hover:bg-subhead disabled:opacity-40" disabled={busy || line.quantity <= 1} aria-label={t('portal.shop.quantity_for', { name: label(line) })} onclick={() => updateCart(cart.map((item) => item.id === line.id ? { ...item, quantity: item.quantity - 1 } : item))}>−</button>
+												<span class="min-w-6 text-center font-semibold tabular-nums">{line.quantity}</span>
+												<button type="button" class="grid size-7 place-items-center hover:bg-subhead disabled:opacity-40" disabled={busy || line.quantity >= 999} aria-label={t('portal.shop.quantity_for', { name: label(line) })} onclick={() => updateCart(cart.map((item) => item.id === line.id ? { ...item, quantity: item.quantity + 1 } : item))}>+</button>
+											</span>
+											<button type="button" class="link text-xs" disabled={busy} aria-label={t('portal.shop.remove', { name: label(line) })} onclick={() => updateCart(cart.filter((item) => item.id !== line.id))}>{t('portal.shop.remove_short')}</button>
+										</div>
+									</div>
+									<b class="font-mono text-ink tabular-nums">{money(Number(line.unit_price) * line.quantity)}</b>
+								</li>
+							{/each}
+						</ul>
+						<div class="grid gap-3 border-t border-line p-4">
+							{#if stale}
+								<Alert kind="warning">{t('portal.shop.changed')}</Alert>
+								<button class="btn btn-outline" type="button" onclick={() => updateCart(cart.map((item) => currentLine(item) ?? item))}>{t('portal.shop.update')}</button>
+							{/if}
+							{#if catalog.open}
+								<label class="flex items-center gap-2"><span class="sr-only">{t('shop.orders.new.discount_code')}</span>
+									<input class="input w-full" placeholder={t('shop.orders.new.discount_code')} disabled={busy} maxlength="255" value={discount} oninput={(e) => { discount = e.currentTarget.value; checkoutId = ''; }} />
+								</label>
+							{/if}
+							<div class="flex justify-between text-sm"><span class="text-muted">{t('portal.shop.estimate')}</span><b class="font-mono text-ink tabular-nums">{money(subtotal)}</b></div>
+							<button class="btn btn-primary w-full" type="submit" disabled={busy || !restored || !catalog.open || stale || unavailable}>{t('portal.shop.place')}</button>
+							<p class="text-xs text-muted">{t('portal.shop.invoice_note')}</p>
+						</div>
+					</form>
+				{:else}
+					<p class="p-4 text-sm text-muted">{t('portal.shop.empty')}</p>
+				{/if}
+{/snippet}
+
 {#snippet actions()}
 	<button class="btn btn-outline hidden gap-2 md:inline-flex" type="button" aria-pressed={view === 'orders'} onclick={() => (view = view === 'orders' ? 'shop' : 'orders')}><ReceiptText size={16} aria-hidden="true" /> {view === 'orders' ? t('portal.shop.products') : t('portal.shop.orders')}</button>
 {/snippet}
@@ -301,62 +350,23 @@
 			{/if}
 		</div>
 
-		{#if catalog.open || cart.length}
-			<section class="card scroll-mt-44 xl:sticky xl:top-20 xl:scroll-mt-20" id="cart" aria-live="polite">
-				<div class="card-h"><ShoppingBag size={17} aria-hidden="true" /><h2>{t('portal.shop.cart')}</h2>{#if cart.length}<span class="badge badge-sm badge-outline ml-auto">{itemsText(cart.reduce((sum, line) => sum + line.quantity, 0))}</span>{/if}</div>
-				{#if cartError}<div class="p-4 pb-0"><Alert kind="error">{cartError}</Alert></div>{/if}
-				{#if cart.length}
-					<form onsubmit={checkout}>
-						<ul class="divide-y divide-rule">
-							{#each cart as line (line.id)}
-								{@const image = productById.get(line.product_id)?.image_url}
-								<li class="flex items-start gap-3 px-4 py-3">
-									{#if image}<img class="size-14 shrink-0 rounded object-cover" src={image} alt="" />{:else}<div class="grid size-14 shrink-0 place-items-center rounded bg-subhead text-dim"><Package size={20} aria-hidden="true" /></div>{/if}
-									<div class="min-w-0 flex-1">
-										<p class="font-semibold text-ink">{line.name}</p>
-										<p class="text-xs text-muted">{[line.variant, buyerName(line.beneficiary_id), [line.personalization_number && '#' + line.personalization_number, line.personalization_name].filter(Boolean).join(' ')].filter(Boolean).join(' · ')}</p>
-										{#if catalog.open && !currentLine(line)}<p class="text-xs text-danger">{t('portal.shop.line_unavailable')}</p>{/if}
-										<div class="mt-1.5 flex items-center gap-3">
-											<span class="inline-flex items-center overflow-hidden rounded-full border border-line text-sm">
-												<button type="button" class="grid size-7 place-items-center hover:bg-subhead disabled:opacity-40" disabled={busy || line.quantity <= 1} aria-label={t('portal.shop.quantity_for', { name: label(line) })} onclick={() => updateCart(cart.map((item) => item.id === line.id ? { ...item, quantity: item.quantity - 1 } : item))}>−</button>
-												<span class="min-w-6 text-center font-semibold tabular-nums">{line.quantity}</span>
-												<button type="button" class="grid size-7 place-items-center hover:bg-subhead disabled:opacity-40" disabled={busy || line.quantity >= 999} aria-label={t('portal.shop.quantity_for', { name: label(line) })} onclick={() => updateCart(cart.map((item) => item.id === line.id ? { ...item, quantity: item.quantity + 1 } : item))}>+</button>
-											</span>
-											<button type="button" class="link text-xs" disabled={busy} aria-label={t('portal.shop.remove', { name: label(line) })} onclick={() => updateCart(cart.filter((item) => item.id !== line.id))}>{t('portal.shop.remove_short')}</button>
-										</div>
-									</div>
-									<b class="font-mono text-ink tabular-nums">{money(Number(line.unit_price) * line.quantity)}</b>
-								</li>
-							{/each}
-						</ul>
-						<div class="grid gap-3 border-t border-line p-4">
-							{#if stale}
-								<Alert kind="warning">{t('portal.shop.changed')}</Alert>
-								<button class="btn btn-outline" type="button" onclick={() => updateCart(cart.map((item) => currentLine(item) ?? item))}>{t('portal.shop.update')}</button>
-							{/if}
-							{#if catalog.open}
-								<label class="flex items-center gap-2"><span class="sr-only">{t('shop.orders.new.discount_code')}</span>
-									<input class="input w-full" placeholder={t('shop.orders.new.discount_code')} disabled={busy} maxlength="255" value={discount} oninput={(e) => { discount = e.currentTarget.value; checkoutId = ''; }} />
-								</label>
-							{/if}
-							<div class="flex justify-between text-sm"><span class="text-muted">{t('portal.shop.estimate')}</span><b class="font-mono text-ink tabular-nums">{money(subtotal)}</b></div>
-							<button class="btn btn-primary w-full" type="submit" disabled={busy || !restored || !catalog.open || stale || unavailable}>{t('portal.shop.place')}</button>
-							<p class="text-xs text-muted">{t('portal.shop.invoice_note')}</p>
-						</div>
-					</form>
-				{:else}
-					<p class="p-4 text-sm text-muted">{t('portal.shop.empty')}</p>
-				{/if}
+		{#if (catalog.open || cart.length) && view === 'shop'}
+			<section class="card hidden scroll-mt-44 md:block xl:sticky xl:top-20 xl:scroll-mt-20" id="cart" aria-live="polite">
+				{@render cartPanel()}
 			</section>
 		{/if}
 	</div>
 </div>
 
-{#if cart.length}
-	<a class="btn btn-primary sticky bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-10 mt-3 min-h-12 justify-between shadow-md md:hidden" href="#cart"><span>{t('portal.shop.view_basket')} · {itemsText(cart.reduce((sum, line) => sum + line.quantity, 0))}</span><span>{money(String(subtotal))}</span></a>
+{#if cart.length && view === 'shop'}
+	<button type="button" class="btn btn-primary fixed inset-x-3 bottom-[calc(3.5rem+env(safe-area-inset-bottom)+0.5rem)] z-20 mx-auto min-h-12 max-w-2xl justify-between shadow-lg md:hidden" onclick={() => (cartOpen = true)}><span>{t('portal.shop.view_basket')} · {itemsText(cart.reduce((sum, line) => sum + line.quantity, 0))}</span><span>{money(String(subtotal))}</span></button>
+	<div class="h-16 md:hidden" aria-hidden="true"></div>
 {/if}
 
-<dialog bind:this={optionsDialog} class="portal-modal" aria-label={choosing?.name ?? t('portal.shop.options')} onclose={() => (choosing = null)} onclick={(e) => { if (e.target === optionsDialog) optionsDialog?.close(); }}>
+<!-- On a phone the basket slides up from the bottom instead of sitting at the end of the page. -->
+<div class="md:hidden"><Sheet open={cartOpen && cart.length > 0} title={t('portal.shop.cart')} onclose={() => (cartOpen = false)}><div class="card mx-3 mb-3" aria-live="polite">{@render cartPanel()}</div></Sheet></div>
+
+<dialog bind:this={optionsDialog} class="portal-modal portal-modal-sheet" aria-label={choosing?.name ?? t('portal.shop.options')} onclose={() => (choosing = null)} onclick={(e) => { if (e.target === optionsDialog) optionsDialog?.close(); }}>
 	{#if choosing}
 		{@const product = choosing}
 		<form class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 p-4 sm:p-5" onsubmit={(e) => { e.preventDefault(); addChosen(); }}>
