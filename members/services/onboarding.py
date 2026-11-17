@@ -480,7 +480,7 @@ def _tell_member(actor, membership: ClubMembership, requirement: OnboardingRequi
             texts = _MESSAGES.get(code, _MESSAGES["nl"])
             title, body = texts[kind]
             fmt = {"name": requirement.name, "who": texts["who_self"] if child is None else child.first_name, "note": note}
-            inbox.notify(user, club, title=title.format(**fmt), body=body.format(**fmt).strip(), kind=inbox.Kind.INFO if kind == "approved" else inbox.Kind.WARNING, href="/parent?tab=payments", push=True, category="form")
+            inbox.notify(user, club, title=title.format(**fmt), body=body.format(**fmt).strip(), kind=inbox.Kind.INFO if kind == "approved" else inbox.Kind.WARNING, href="/member?tab=payments", push=True, category="form")
     except Exception:
         logging.getLogger(__name__).exception("onboarding.notify_member_failed")
 

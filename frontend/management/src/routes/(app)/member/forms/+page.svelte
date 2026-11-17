@@ -37,7 +37,7 @@
 	}
 	const closeForm = () => {
 		filling = null;
-		if (page.url.searchParams.has('fill')) void goto('/parent/forms', { replaceState: true });
+		if (page.url.searchParams.has('fill')) void goto('/member/forms', { replaceState: true });
 	};
 	// Done: let the thank-you show for a moment, then close and refresh the list.
 	function filled() {

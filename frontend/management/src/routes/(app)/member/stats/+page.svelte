@@ -27,7 +27,7 @@
 	const person = $derived(data.people.find((candidate) => candidate.id === data.who));
 	const s = $derived(data.stats);
 	$effect(() => {
-		if (who && who !== data.who) void goto(`/parent/stats?who=${who}`, { replaceState: true });
+		if (who && who !== data.who) void goto(`/member/stats?who=${who}`, { replaceState: true });
 	});
 	const loadSeason = async (seasonId: string) => (await api<MyStats>('GET', `/portal/me/stats/${data.who}`, { query: { season: seasonId } })).data?.game_stats ?? null;
 	const referee = $derived(s?.officiating?.referee ?? null);

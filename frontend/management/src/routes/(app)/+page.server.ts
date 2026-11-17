@@ -22,7 +22,7 @@ export const load: PageServerLoad = async ({ locals, url, fetch, parent, cookies
 	const arriving = url.searchParams.has('landing') || request.headers.get('sec-fetch-site') === 'none';
 	if (arriving) {
 		const lastApp = cookies.get(APP_COOKIE);
-		if (me?.has_member_portal_role && lastApp === 'member') redirect(303, '/parent');
+		if (me?.has_member_portal_role && lastApp === 'member') redirect(303, '/member');
 		if (url.searchParams.get('landing') === 'phone' && me?.member_id) redirect(303, '/coach');
 	}
 	// The shop numbers: only with the shop feature and some shop permission.

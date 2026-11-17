@@ -107,7 +107,7 @@ def send(kind: str, order, extra: dict | None = None) -> int:
                 body = f"{body}\n\n{PAYMENT_LABEL[_lang(own or language)]}\n{how_to_pay}"
         if child is not None:
             title = recipients.on_behalf_title(title, child)
-        href = "/parent?tab=payments" if kind in CHARGE_KINDS else f"/shop/orders/{order.pk}"
+        href = "/member?tab=payments" if kind in CHARGE_KINDS else f"/shop/orders/{order.pk}"
         inbox.notify(user, club, title=title, body=body, href=href, push=True, category=CATEGORY)
         mail_to.append((user, child, _lang(own or language)))
         told += 1

@@ -77,6 +77,11 @@ async function resolveAuth(event: Event, mode: HostMode): Promise<{ auth: AuthSt
 export const handle: Handle = async ({ event, resolve }) => {
 	if (isProxied(event.url.pathname)) return proxy(event);
 
+	// The member app used to live under /parent: old bookmarks, installed apps and stored notification links keep working.
+	if (event.url.pathname === '/parent' || event.url.pathname.startsWith('/parent/')) {
+		return new Response(null, { status: 301, headers: { location: `/member${event.url.pathname.slice('/parent'.length)}${event.url.search}` } });
+	}
+
 	// Language: ?lang= (remembered), else the rc_lang cookie, else Accept-Language.
 	const queryLang = event.url.searchParams.get('lang');
 	const cookieLang = event.cookies.get(LANG_COOKIE);

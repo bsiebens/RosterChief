@@ -9,7 +9,7 @@
 	import type { PortalArticle } from '#lib/portal.ts';
 	import Sheet from './Sheet.svelte';
 
-	let { articles, home = false, path = '/parent' }: { articles: PortalArticle[]; home?: boolean; path?: string } = $props();
+	let { articles, home = false, path = '/member' }: { articles: PortalArticle[]; home?: boolean; path?: string } = $props();
 	// From tablet width an article opens in the reading drawer; on a phone it takes the whole page (the back button returns to the list).
 	let desktop = $state(false);
 	onMount(() => {

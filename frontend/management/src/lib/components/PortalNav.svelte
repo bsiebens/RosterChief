@@ -32,10 +32,10 @@
 			{#if compact && item.key === 'me' && todo > 0}<span class="portal-tab-badge" aria-label={t('portal.todo_count', { n: todo })}>{todo}</span>{/if}
 		</a>
 		{#if !compact && item.key === 'me' && meActive}
-			<a class="nav-subitem {active === 'profile' ? 'active' : ''}" href="/parent/profile"><UserRound size={14} aria-hidden="true" /> {t('portal.profile')}</a>
-			<a class="nav-subitem {active === 'stats' ? 'active' : ''}" href="/parent/stats"><ChartColumn size={14} aria-hidden="true" /> {t('portal.stats_page')}</a>
-			<a class="nav-subitem {active === 'notifications' ? 'active' : ''}" href="/parent/notifications"><Bell size={14} aria-hidden="true" /> {t('portal.notifications')}</a>
-			<a class="nav-subitem {active === 'payments' ? 'active' : ''}" href="/parent?tab=payments"><Wallet size={14} aria-hidden="true" /> {t('portal.payments')}</a>
+			<a class="nav-subitem {active === 'profile' ? 'active' : ''}" href="/member/profile"><UserRound size={14} aria-hidden="true" /> {t('portal.profile')}</a>
+			<a class="nav-subitem {active === 'stats' ? 'active' : ''}" href="/member/stats"><ChartColumn size={14} aria-hidden="true" /> {t('portal.stats_page')}</a>
+			<a class="nav-subitem {active === 'notifications' ? 'active' : ''}" href="/member/notifications"><Bell size={14} aria-hidden="true" /> {t('portal.notifications')}</a>
+			<a class="nav-subitem {active === 'payments' ? 'active' : ''}" href="/member?tab=payments"><Wallet size={14} aria-hidden="true" /> {t('portal.payments')}</a>
 		{/if}
 	{/each}
 </nav>

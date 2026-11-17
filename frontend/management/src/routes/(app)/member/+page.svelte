@@ -221,8 +221,8 @@
 	);
 	// From tablet width the Me tab is the profile page with the notification settings beside it; on a phone it stays the short list of links.
 	$effect(() => {
-		if (tab === 'forms') void goto('/parent/forms', { replaceState: true });
-		if (tab === 'me' && typeof matchMedia === 'function' && matchMedia('(min-width: 48rem)').matches) void goto('/parent/profile', { replaceState: true });
+		if (tab === 'forms') void goto('/member/forms', { replaceState: true });
+		if (tab === 'me' && typeof matchMedia === 'function' && matchMedia('(min-width: 48rem)').matches) void goto('/member/profile', { replaceState: true });
 	});
 	const openTasks = $derived<OpenTask[]>(data.home?.tasks ?? []);
 	const hasAttention = $derived(!!(needsReply.length || filteredForms.length || officiatingInvites.length || openTasks.length));
@@ -234,9 +234,9 @@
 		payments: openFees.length + openCharges.length,
 		forms: filteredForms.length
 	});
-	const viewLink = (v: string) => `/parent?tab=calendar&view=${v}`;
-	const calendarLink = $derived(crewOnly ? '/parent?tab=calendar&crew=1' : viewLink(view));
-	const eventLink = (id: string) => tab === 'calendar' ? `${calendarLink}&event=${id}` : `/parent?event=${id}`;
+	const viewLink = (v: string) => `/member?tab=calendar&view=${v}`;
+	const calendarLink = $derived(crewOnly ? '/member?tab=calendar&crew=1' : viewLink(view));
+	const eventLink = (id: string) => tab === 'calendar' ? `${calendarLink}&event=${id}` : `/member?event=${id}`;
 
 	// The event drawer's line-up, tasks and attachments: read when it opens.
 	let extras = $state<EventExtras | null>(null);
@@ -445,7 +445,7 @@
 {#snippet week()}
 	{#if weekItems.length}
 		<section class="card card-body" aria-label={t('portal.next_fourteen_days')}>
-			<h2 class="card-title"><CalendarDays size={16} aria-hidden="true" />{t('portal.next_fourteen_days')}<a class="link ml-auto text-sm font-semibold" href="/parent?tab=calendar">{calendarLabel} →</a></h2>
+			<h2 class="card-title"><CalendarDays size={16} aria-hidden="true" />{t('portal.next_fourteen_days')}<a class="link ml-auto text-sm font-semibold" href="/member?tab=calendar">{calendarLabel} →</a></h2>
 			<div class="divide-y divide-rule">
 				{#each weekItems as { key, event, badges } (key)}
 					<a class="flex items-center gap-3 border-l-4 py-2 pr-1 pl-3 hover:bg-subhead {kindStyle(event.kind).bar}" href={eventLink(event.event_id)} data-sveltekit-reset="false">
@@ -479,14 +479,14 @@
 				</div>
 			{/each}
 			{#each openFees as fee (`${fee.member_id}-${fee.season}`)}
-				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href="/parent?tab=payments">
+				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href="/member?tab=payments">
 					<Wallet size={18} class="shrink-0 text-muted" aria-hidden="true" />
 					<span class="min-w-0 flex-1"><span class="block font-semibold">{t(fee.next_installment ? 'portal.membership_installment' : 'portal.payments')}</span><span class="block text-xs {fee.next_installment?.late ? 'text-danger' : 'text-muted'}">{memberName(fee.member_id)}{fee.next_installment ? ' · ' + t('portal.due_by', { when: day(fee.next_installment.due_date) }) : ' · ' + fee.season}</span></span>
 					<span class="shrink-0 font-semibold">{money(fee.next_installment?.remaining ?? fee.balance)}</span>
 				</a>
 			{/each}
 		</div>
-		<a class="link-more self-end" href="/parent?tab=payments">{t('portal.pay_how')} →</a>
+		<a class="link-more self-end" href="/member?tab=payments">{t('portal.pay_how')} →</a>
 	</section>
 {/snippet}
 
@@ -517,7 +517,7 @@
 			{/each}
 			
 			{#each filteredForms as form (`${form.id}-${form.member_id}`)}
-				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href="/parent/forms?fill={form.id}.{form.member_id}">
+				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href="/member/forms?fill={form.id}.{form.member_id}">
 					<ClipboardList size={18} class="shrink-0 text-muted" aria-hidden="true" />
 					<span class="min-w-0 flex-1"><span class="block font-semibold">{form.title}</span><span class="block text-xs text-muted">{memberName(form.member_id)}{form.closes_at ? ' · ' + t('pubform.closes', { date: formatDateTime(form.closes_at) }) : ''}</span></span>
 					<span class="badge badge-warn">{t('portal.forms')}</span>
@@ -526,8 +526,8 @@
 		</div>
 		{#if officiatingInvites.length > 4 || needsReply.length > 4}
 			<div class="flex flex-wrap justify-end gap-x-4 border-t border-rule pt-1">
-				{#if officiatingInvites.length > 4}<a class="link-more" href="/parent?tab=calendar&view=list">{t('portal.crew_title')} →</a>{/if}
-				{#if needsReply.length > 4}<a class="link-more" href="/parent?tab=calendar">{calendarLabel} →</a>{/if}
+				{#if officiatingInvites.length > 4}<a class="link-more" href="/member?tab=calendar&view=list">{t('portal.crew_title')} →</a>{/if}
+				{#if needsReply.length > 4}<a class="link-more" href="/member?tab=calendar">{calendarLabel} →</a>{/if}
 			</div>
 		{/if}
 	</section>
@@ -536,7 +536,7 @@
 {#snippet family()}
 	{#if people.length > 1}
 		<section class="card card-body">
-			<h2 class="card-title"><UsersRound size={16} aria-hidden="true" />{t('portal.family')}<a class="link ml-auto text-sm font-semibold" href="/parent/profile">{t('portal.profile')} →</a></h2>
+			<h2 class="card-title"><UsersRound size={16} aria-hidden="true" />{t('portal.family')}<a class="link ml-auto text-sm font-semibold" href="/member/profile">{t('portal.profile')} →</a></h2>
 			<ul class="grid gap-3">
 				{#each people.filter((person) => person.id !== data.home.viewer) as person (person.id)}
 					{@const open = data.home.fees.filter((fee) => fee.member_id === person.id).reduce((sum, fee) => sum + Number(fee.balance), 0)}
@@ -697,7 +697,7 @@
 	</div>
 {/if}
 
-<Sheet open={!!detail} title={detail?.event.title ?? calendarLabel} onclose={() => void goto(tab === 'calendar' ? calendarLink : '/parent', { reset: false, replace: true })}>
+<Sheet open={!!detail} title={detail?.event.title ?? calendarLabel} onclose={() => void goto(tab === 'calendar' ? calendarLink : '/member', { reset: false, replace: true })}>
 	{#if detail}
 		{@const event = detail.event}
 		{@const audience = detail.attendance.length > 0}

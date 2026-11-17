@@ -40,10 +40,10 @@
 
 	const open = $derived(counts.replies + counts.documents + counts.payments + counts.forms);
 	const tiles = $derived([
-		{ key: 'replies', href: '/parent?tab=calendar', label: t('portal.tile_replies'), n: counts.replies, icon: CalendarDays, tone: 'bg-danger-bg text-danger' },
-		{ key: 'documents', href: '/parent?tab=documents', label: t('portal.tile_documents'), n: counts.documents, icon: FileText, tone: 'bg-warn-bg text-warn-text' },
-		{ key: 'payments', href: '/parent?tab=payments', label: t('portal.tile_payments'), n: counts.payments, icon: Wallet, tone: 'bg-info-bg text-info-text' },
-		{ key: 'more', href: '/parent?tab=me', label: t('portal.tile_more'), n: counts.forms, icon: Ellipsis, tone: 'bg-subhead text-ink' }
+		{ key: 'replies', href: '/member?tab=calendar', label: t('portal.tile_replies'), n: counts.replies, icon: CalendarDays, tone: 'bg-danger-bg text-danger' },
+		{ key: 'documents', href: '/member?tab=documents', label: t('portal.tile_documents'), n: counts.documents, icon: FileText, tone: 'bg-warn-bg text-warn-text' },
+		{ key: 'payments', href: '/member?tab=payments', label: t('portal.tile_payments'), n: counts.payments, icon: Wallet, tone: 'bg-info-bg text-info-text' },
+		{ key: 'more', href: '/member?tab=me', label: t('portal.tile_more'), n: counts.forms, icon: Ellipsis, tone: 'bg-subhead text-ink' }
 	]);
 	const timeLine = (event: PortalEventDisplay) => (event.gathering ? `${t('portal.meet_time', { time: formatTime(event.gathering) })} · ${t('portal.start_time', { time: formatTime(event.start) })}` : formatTime(event.start));
 	const when = (event: PortalEventDisplay) => `${formatDay(event.start)} · ${formatTime(event.start)}`;
@@ -114,7 +114,7 @@
 
 	{#if weekRows.length}
 		<section class="grid gap-2" aria-label={t('portal.next_fourteen_days')}>
-			{@render heading(t('portal.this_week'), { href: '/parent?tab=calendar', text: t('portal.agenda') })}
+			{@render heading(t('portal.this_week'), { href: '/member?tab=calendar', text: t('portal.agenda') })}
 			<div class="card divide-y divide-rule overflow-hidden">
 				{#each weekRows as row (row.key)}
 					<a class="flex min-h-15 items-center gap-3 px-3.5 py-2.5" href={eventLink(row.event.event_id)} data-sveltekit-reset="false">
@@ -138,8 +138,8 @@
 	{#if news.length}
 		{@const article = news[0]}
 		<section class="grid gap-2" aria-label={t('portal.news')}>
-			{@render heading(t('portal.latest_news'), { href: '/parent?tab=news', text: t('portal.all_news') })}
-			<a class="card flex items-start gap-3 p-3.5" href={`/parent?tab=news&article=${article.id}`} data-sveltekit-reset="false">
+			{@render heading(t('portal.latest_news'), { href: '/member?tab=news', text: t('portal.all_news') })}
+			<a class="card flex items-start gap-3 p-3.5" href={`/member?tab=news&article=${article.id}`} data-sveltekit-reset="false">
 				<span class="flex min-w-0 flex-1 flex-col gap-0.5">
 					<span class="font-mono text-[11px] tracking-[.04em] text-muted uppercase">{(article.teams ?? []).join(', ') || t('portal.news')}{article.published_at ? ` · ${formatDay(article.published_at)}` : ''}</span>
 					<b class="mt-0.5 text-lg leading-tight font-semibold text-ink">{translation(article).title}</b>

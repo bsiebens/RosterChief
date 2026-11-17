@@ -23,12 +23,12 @@
 	const email = $derived(a.status === 'anonymous' || a.status === 'mfa_pending' ? '' : a.user.email);
 	// The full club shell needs the /me payload; pickers, no-access and MFA enrolment get the plain top bar only.
 	const club = $derived(data.mode === 'club' && a.status === 'authenticated' ? data.branding : null);
-	const parent = $derived(page.url.pathname === '/parent' || page.url.pathname.startsWith('/parent/'));
+	const parent = $derived(page.url.pathname === '/member' || page.url.pathname.startsWith('/member/'));
 	const coach = $derived(page.url.pathname === '/coach' || page.url.pathname.startsWith('/coach/') || page.url.searchParams.get('view') === 'coach');
 	const portal = $derived(parent ? 'parent' : coach ? 'coach' : null);
 	const clubShell = $derived(club && (data.me || portal));
 	const management = $derived(clubShell && !portal);
-	const home = $derived(parent ? '/parent' : coach ? '/coach' : '/');
+	const home = $derived(parent ? '/member' : coach ? '/coach' : '/');
 	const season = $derived(parent ? page.data.home?.season : page.data.coach?.season);
 	const shopEnabled = $derived(parent && (data.me ? data.shopOpen === true : a.status === 'authenticated' && a.memberShopEnabled === true));
 	let navOpen = $state(false);

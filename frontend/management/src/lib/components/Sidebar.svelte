@@ -39,7 +39,7 @@
 	const badgeLabel = (badge: string, n: number) => t(badge === 'registrations' ? 'reg.badge' : badge === 'payments' ? 'fin.badge' : badge === 'finance' ? 'fin.badge_all' : 'signups.badge', { n });
 	const fullName = $derived(me ? `${me.first_name} ${me.last_name}`.trim() || me.email : email);
 	const initials = $derived(((me?.first_name[0] ?? '') + (me?.last_name[0] ?? '')).toUpperCase() || email[0]?.toUpperCase() || '?');
-	const home = $derived(portal === 'parent' ? '/parent' : portal === 'coach' ? '/coach' : '/');
+	const home = $derived(portal === 'parent' ? '/member' : portal === 'coach' ? '/coach' : '/');
 
 	let menu: HTMLDetailsElement | undefined = $state();
 	const close = () => menu && (menu.open = false);

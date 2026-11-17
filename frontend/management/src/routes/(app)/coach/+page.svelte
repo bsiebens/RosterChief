@@ -4,7 +4,6 @@
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
-	import InstallPush from '#lib/components/InstallPush.svelte';
 	import CoachEvents from '#lib/components/coach/CoachEvents.svelte';
 	import CoachNews from '#lib/components/coach/CoachNews.svelte';
 	import CoachSquad from '#lib/components/coach/CoachSquad.svelte';
@@ -52,5 +51,4 @@
 	<CoachEvents {events} />
 {:else}
 	<CoachToday {events} background={data.coach.event_background} crest={data.branding?.logo_url} />
-	<InstallPush />
 {/if}

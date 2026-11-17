@@ -39,24 +39,24 @@
 
 	const children = $derived(people.slice(1).map((person) => person.first_name || person.name));
 	const todo = $derived([
-		{ key: 'documents', href: '/parent?tab=documents', icon: FileText, label: t('portal.tile_documents'), n: counts.documents, tone: 'bg-warn-bg text-warn-text', hint: counts.documents ? t('portal.me_docs_open', { n: counts.documents }) : t('portal.me_all_good') },
-		{ key: 'payments', href: '/parent?tab=payments', icon: Wallet, label: t('portal.tile_payments'), n: counts.payments, tone: 'bg-info-bg text-info-text', hint: counts.payments ? t('portal.me_pay_open', { n: counts.payments }) : t('portal.me_all_good') },
-		{ key: 'forms', href: '/parent/forms', icon: ClipboardList, label: t('portal.forms_evaluations'), n: counts.forms, tone: 'bg-danger-bg text-danger', hint: counts.forms ? t('portal.me_forms_open', { n: counts.forms }) : t('portal.me_all_good') }
+		{ key: 'documents', href: '/member?tab=documents', icon: FileText, label: t('portal.tile_documents'), n: counts.documents, tone: 'bg-warn-bg text-warn-text', hint: counts.documents ? t('portal.me_docs_open', { n: counts.documents }) : t('portal.me_all_good') },
+		{ key: 'payments', href: '/member?tab=payments', icon: Wallet, label: t('portal.tile_payments'), n: counts.payments, tone: 'bg-info-bg text-info-text', hint: counts.payments ? t('portal.me_pay_open', { n: counts.payments }) : t('portal.me_all_good') },
+		{ key: 'forms', href: '/member/forms', icon: ClipboardList, label: t('portal.forms_evaluations'), n: counts.forms, tone: 'bg-danger-bg text-danger', hint: counts.forms ? t('portal.me_forms_open', { n: counts.forms }) : t('portal.me_all_good') }
 	]);
 	const club = $derived([
-		...(shop ? [{ key: 'orders', href: '/parent/shop?view=orders', icon: ReceiptText, label: t('portal.shop.orders'), hint: '' }] : []),
-		{ key: 'memberships', href: '/parent/profile?view=memberships', icon: IdCard, label: t('portal.mem_title'), hint: '' },
-		{ key: 'vouchers', href: '/parent/profile?view=vouchers', icon: Ticket, label: t('portal.vouchers'), hint: '' },
-		{ key: 'stats', href: '/parent/stats', icon: ChartColumn, label: t('portal.stats_page'), hint: '' },
-		{ key: 'teams', href: '/parent/profile?view=follow', icon: Shirt, label: t('portal.follow_title'), hint: '' }
+		...(shop ? [{ key: 'orders', href: '/member/shop?view=orders', icon: ReceiptText, label: t('portal.shop.orders'), hint: '' }] : []),
+		{ key: 'memberships', href: '/member/profile?view=memberships', icon: IdCard, label: t('portal.mem_title'), hint: '' },
+		{ key: 'vouchers', href: '/member/profile?view=vouchers', icon: Ticket, label: t('portal.vouchers'), hint: '' },
+		{ key: 'stats', href: '/member/stats', icon: ChartColumn, label: t('portal.stats_page'), hint: '' },
+		{ key: 'teams', href: '/member/profile?view=follow', icon: Shirt, label: t('portal.follow_title'), hint: '' }
 	]);
 	const settings = $derived([
-		{ key: 'profile', href: '/parent/profile', icon: UserRound, label: 'portal.profile_details' },
-		...(people.length > 1 ? [{ key: 'family', href: '/parent/profile', icon: UsersRound, label: 'portal.family' }] : []),
-		{ key: 'notifications', href: '/parent/notifications?view=settings', icon: Bell, label: 'portal.notifications' },
-		{ key: 'calendar-sync', href: '/parent/calendar-sync', icon: CalendarDays, label: 'portal.sync_calendar' },
+		{ key: 'profile', href: '/member/profile', icon: UserRound, label: 'portal.profile_details' },
+		...(people.length > 1 ? [{ key: 'family', href: '/member/profile', icon: UsersRound, label: 'portal.family' }] : []),
+		{ key: 'notifications', href: '/member/notifications?view=settings', icon: Bell, label: 'portal.notifications' },
+		{ key: 'calendar-sync', href: '/member/calendar-sync', icon: CalendarDays, label: 'portal.sync_calendar' },
 		{ key: 'security', href: '/account/security', icon: KeyRound, label: 'shell.menu.security' },
-		...(manyClubs ? [{ key: 'clubs', href: '/parent/profile?view=clubs', icon: ArrowRightLeft, label: 'portal.switch_club' }] : [])
+		...(manyClubs ? [{ key: 'clubs', href: '/member/profile?view=clubs', icon: ArrowRightLeft, label: 'portal.switch_club' }] : [])
 	]);
 </script>
 

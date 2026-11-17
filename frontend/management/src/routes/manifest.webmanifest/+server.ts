@@ -4,7 +4,7 @@ export const GET: RequestHandler = ({ locals }) => {
 	const club = locals.branding;
 	if (locals.mode !== 'club' || !club) return new Response(null, { status: 404 });
 	return new Response(JSON.stringify({
-		id: '/parent',
+		id: '/member',
 		name: club.name + ' · RosterChief',
 		short_name: club.name,
 		start_url: '/app',

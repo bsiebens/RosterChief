@@ -7,12 +7,12 @@ export type PortalItem = { key: string; href: string; label: string; icon: typeo
 export function portalItems(mode: PortalMode, shopEnabled: boolean): PortalItem[] {
 	return mode === 'parent'
 		? [
-				{ key: 'home', href: '/parent', label: 'portal.home', icon: House },
-				{ key: 'calendar', href: '/parent?tab=calendar', label: 'shell.nav.calendar', icon: CalendarDays },
-				{ key: 'news', href: '/parent?tab=news', label: 'shell.nav.news', icon: Newspaper },
-				...(shopEnabled ? [{ key: 'shop', href: '/parent/shop', label: 'shop.nav', icon: ShoppingBag }] : []),
-				{ key: 'forms', href: '/parent/forms', label: 'portal.forms_evaluations', icon: ClipboardList },
-				{ key: 'me', href: '/parent?tab=me', label: 'portal.me', icon: UserRound }
+				{ key: 'home', href: '/member', label: 'portal.home', icon: House },
+				{ key: 'calendar', href: '/member?tab=calendar', label: 'shell.nav.calendar', icon: CalendarDays },
+				{ key: 'news', href: '/member?tab=news', label: 'shell.nav.news', icon: Newspaper },
+				...(shopEnabled ? [{ key: 'shop', href: '/member/shop', label: 'shop.nav', icon: ShoppingBag }] : []),
+				{ key: 'forms', href: '/member/forms', label: 'portal.forms_evaluations', icon: ClipboardList },
+				{ key: 'me', href: '/member?tab=me', label: 'portal.me', icon: UserRound }
 			]
 		: [
 				{ key: 'home', href: '/coach', label: 'portal.today', icon: House },
@@ -29,26 +29,26 @@ export function portalItems(mode: PortalMode, shopEnabled: boolean): PortalItem[
 export function portalPhoneItems(mode: PortalMode, shopEnabled = false): PortalItem[] {
 	if (mode === 'coach') return portalItems('coach', false);
 	return [
-		{ key: 'home', href: '/parent', label: 'portal.home', icon: House },
-		{ key: 'calendar', href: '/parent?tab=calendar', label: 'portal.agenda', icon: CalendarDays },
-		{ key: 'news', href: '/parent?tab=news', label: 'shell.nav.news', icon: Newspaper },
-		...(shopEnabled ? [{ key: 'shop', href: '/parent/shop', label: 'shop.nav', icon: ShoppingBag }] : []),
-		{ key: 'me', href: '/parent?tab=me', label: 'portal.me', icon: UserRound }
+		{ key: 'home', href: '/member', label: 'portal.home', icon: House },
+		{ key: 'calendar', href: '/member?tab=calendar', label: 'portal.agenda', icon: CalendarDays },
+		{ key: 'news', href: '/member?tab=news', label: 'shell.nav.news', icon: Newspaper },
+		...(shopEnabled ? [{ key: 'shop', href: '/member/shop', label: 'shop.nav', icon: ShoppingBag }] : []),
+		{ key: 'me', href: '/member?tab=me', label: 'portal.me', icon: UserRound }
 	];
 }
 
 /** Which entry the current location belongs to. */
 export function activePortalKey(url: { pathname: string; hash: string; searchParams: { get(name: string): string | null } }): string {
 	const { pathname, hash, searchParams } = url;
-	if (pathname.startsWith('/parent/forms')) return 'forms';
-	if (pathname.startsWith('/parent/profile') || pathname.startsWith('/parent/calendar-sync')) return 'profile';
-	if (pathname.startsWith('/parent/stats')) return 'stats';
-	if (pathname.startsWith('/parent/notifications')) return 'notifications';
-	if (pathname.startsWith('/parent/shop')) return 'shop';
+	if (pathname.startsWith('/member/forms')) return 'forms';
+	if (pathname.startsWith('/member/profile') || pathname.startsWith('/member/calendar-sync')) return 'profile';
+	if (pathname.startsWith('/member/stats')) return 'stats';
+	if (pathname.startsWith('/member/notifications')) return 'notifications';
+	if (pathname.startsWith('/member/shop')) return 'shop';
 	if (pathname.startsWith('/coach/teams/')) return 'teams';
 	if (pathname.startsWith('/coach/news')) return 'news';
 	if (pathname.startsWith('/coach/notifications')) return 'home';
-	if (pathname !== '/parent' && pathname !== '/coach') return 'calendar';
+	if (pathname !== '/member' && pathname !== '/coach') return 'calendar';
 	return searchParams.get('tab') || hash.slice(1) || 'home';
 }
 

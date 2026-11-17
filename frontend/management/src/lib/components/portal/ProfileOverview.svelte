@@ -27,7 +27,7 @@
 
 <div class="grid min-w-0 gap-4">
 	{#if show.includes('memberships')}<section class="card" aria-labelledby="mem-title">
-		<div class="card-h"><IdCard size={17} aria-hidden="true" /><h2 id="mem-title">{t('portal.mem_title')}</h2><a class="link-more ml-auto" href="/parent?tab=payments">{t('portal.payments')} →</a></div>
+		<div class="card-h"><IdCard size={17} aria-hidden="true" /><h2 id="mem-title">{t('portal.mem_title')}</h2><a class="link-more ml-auto" href="/member?tab=payments">{t('portal.payments')} →</a></div>
 		<div class="divide-y divide-rule">
 			{#each overview.memberships as row (row.member_id + row.season)}
 				{@const person = people.find((entry) => entry.id === row.member_id)}
@@ -47,10 +47,10 @@
 	</section>{/if}
 
 	{#if show.includes('forms')}<section class="card" aria-labelledby="pf-title">
-		<div class="card-h"><ClipboardList size={17} aria-hidden="true" /><h2 id="pf-title">{t('portal.forms_open')}</h2><a class="link-more ml-auto" href="/parent/forms">{t('portal.forms')} →</a></div>
+		<div class="card-h"><ClipboardList size={17} aria-hidden="true" /><h2 id="pf-title">{t('portal.forms_open')}</h2><a class="link-more ml-auto" href="/member/forms">{t('portal.forms')} →</a></div>
 		<div class="divide-y divide-rule">
 			{#each overview.forms as form (`${form.id}-${form.member_id}`)}
-				<a class="flex min-h-14 items-center gap-3 px-5 py-2 hover:bg-subhead" href="/parent/forms?fill={form.id}.{form.member_id}"><span class="min-w-0 flex-1"><b class="block text-ink">{form.title}</b><span class="text-xs text-muted">{name(form.member_id)}{form.closes_at ? ` · ${t('pubform.closes', { date: formatDateTime(form.closes_at) })}` : ''}</span></span><ChevronRight size={16} class="text-muted" aria-hidden="true" /></a>
+				<a class="flex min-h-14 items-center gap-3 px-5 py-2 hover:bg-subhead" href="/member/forms?fill={form.id}.{form.member_id}"><span class="min-w-0 flex-1"><b class="block text-ink">{form.title}</b><span class="text-xs text-muted">{name(form.member_id)}{form.closes_at ? ` · ${t('pubform.closes', { date: formatDateTime(form.closes_at) })}` : ''}</span></span><ChevronRight size={16} class="text-muted" aria-hidden="true" /></a>
 			{:else}
 				<p class="px-5 py-4 text-sm text-muted">{t('portal.no_forms')}</p>
 			{/each}

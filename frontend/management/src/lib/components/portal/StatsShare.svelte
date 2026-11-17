@@ -56,7 +56,7 @@
 	</section>
 {:else}
 <section class="card" aria-labelledby="stats-share-title">
-	<div class="card-h"><ChartColumn size={17} aria-hidden="true" /><h2 id="stats-share-title">{t('portal.stats_title')}</h2><a class="link-more ml-auto" href="/parent/stats?who={person.id}">{t('portal.stats_open')} →</a></div>
+	<div class="card-h"><ChartColumn size={17} aria-hidden="true" /><h2 id="stats-share-title">{t('portal.stats_title')}</h2><a class="link-more ml-auto" href="/member/stats?who={person.id}">{t('portal.stats_open')} →</a></div>
 	<div class="grid gap-3 p-5">
 		<label class="flex items-center gap-3">
 			<input type="checkbox" class="toggle" checked={!!person.share_token} disabled={busy} onchange={(e) => set(e.currentTarget.checked)} />

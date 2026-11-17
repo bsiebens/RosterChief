@@ -24,10 +24,10 @@
 		const path = page.url.pathname;
 		const tab = page.url.searchParams.get('tab');
 		if (mode === 'parent') {
-			if (path.startsWith('/parent/notifications')) return tab === null && page.url.searchParams.get('view') !== 'settings' ? '/parent' : '/parent?tab=me';
-			if (path.startsWith('/parent/shop')) return tab === null && page.url.searchParams.get('view') === 'orders' ? '/parent?tab=me' : null;
-			if (path !== '/parent') return '/parent?tab=me';
-			return tab === 'payments' || tab === 'documents' ? '/parent?tab=me' : null;
+			if (path.startsWith('/member/notifications')) return tab === null && page.url.searchParams.get('view') !== 'settings' ? '/member' : '/member?tab=me';
+			if (path.startsWith('/member/shop')) return tab === null && page.url.searchParams.get('view') === 'orders' ? '/member?tab=me' : null;
+			if (path !== '/member') return '/member?tab=me';
+			return tab === 'payments' || tab === 'documents' ? '/member?tab=me' : null;
 		}
 		if (path.startsWith('/coach/notifications')) return '/coach';
 		if (path.startsWith('/coach/news/')) return '/coach?tab=news';
@@ -42,7 +42,7 @@
 	<h1 class="phone-title" class:long={title.length > 14}>{#if context}<span class="phone-sub">{context}</span>{/if}{title}</h1>
 	{#if actions}{@render actions()}{/if}
 	{#if mode === 'parent' || mode === 'coach'}
-		<a class="phone-ib" href="/{mode}/notifications" aria-label={notifications.unread ? t('portal.todo_count', { n: notifications.unread }) : t('portal.notifications')}>
+		<a class="phone-ib" href="/{mode === 'parent' ? 'member' : 'coach'}/notifications" aria-label={notifications.unread ? t('portal.todo_count', { n: notifications.unread }) : t('portal.notifications')}>
 			<Bell size={22} aria-hidden="true" />{#if notifications.unread > 0}<span class="phone-dot"></span>{/if}
 		</a>
 	{/if}
@@ -55,7 +55,7 @@
 	<Sheet open={switchOpen} title={t('portal.switch_view')} onclose={() => (switchOpen = false)}>
 		<div class="grid gap-3 p-4 pt-0">
 			<p class="text-sm text-muted">{t('portal.switch_view_help')}</p>
-			<a class="card flex min-h-20 items-center gap-3 p-4" href="/parent" onclick={() => rememberApp('member')}>
+			<a class="card flex min-h-20 items-center gap-3 p-4" href="/member" onclick={() => rememberApp('member')}>
 				<span class="grid size-12 shrink-0 place-items-center rounded-box bg-subhead text-ink"><House size={22} aria-hidden="true" /></span>
 				<span class="min-w-0 flex-1"><b class="block text-lg text-ink">{t('portal.member_view')}</b><span class="block text-sm text-muted">{t('portal.member_view_hint')}</span></span>
 			</a>

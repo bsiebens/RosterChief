@@ -285,7 +285,7 @@ class RequirementsApiTests(TestCase):
         self.assertEqual([e["kind"] for e in item["history"]], ["submitted", "declined"])
         self.assertEqual(item["history"][1]["note"], "Photo is blurry")
         note = InboxNotification.objects.get(user=self.alice_user, title__contains="Declined")
-        self.assertEqual((note.href, "Photo is blurry" in note.body), ("/parent?tab=payments", True))
+        self.assertEqual((note.href, "Photo is blurry" in note.body), ("/member?tab=payments", True))
         self.submit(req, name="again.pdf")  # a new version goes back to review
         self.assertEqual(self.item(req)["display"], "pending")
         self.assertEqual(self.item(req)["review_note"], "")
