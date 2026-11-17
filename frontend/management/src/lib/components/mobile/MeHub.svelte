@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { CalendarDays } from '@lucide/svelte';
 	import { api } from '#lib/management-api.ts';
 	import { ArrowRightLeft, Bell, ChartColumn, ChevronRight, IdCard, Ticket, ClipboardList, FileText, KeyRound, Shirt, UserRound, UsersRound, Wallet, Whistle, ReceiptText } from '@lucide/svelte';
 	import AccountMenu from '#lib/components/AccountMenu.svelte';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import InstallPush from '#lib/components/InstallPush.svelte';
-	import CalendarSync from '#lib/components/portal/CalendarSync.svelte';
 	import ThemeSwitch from '#lib/components/portal/ThemeSwitch.svelte';
 	import { rememberApp } from '#lib/landing.ts';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -55,6 +55,7 @@
 		{ key: 'profile', href: '/parent/profile', icon: UserRound, label: 'portal.profile_details' },
 		...(people.length > 1 ? [{ key: 'family', href: '/parent/profile', icon: UsersRound, label: 'portal.family' }] : []),
 		{ key: 'notifications', href: '/parent/notifications?view=settings', icon: Bell, label: 'portal.notifications' },
+		{ key: 'calendar-sync', href: '/parent/calendar-sync', icon: CalendarDays, label: 'portal.sync_calendar' },
 		{ key: 'security', href: '/account/security', icon: KeyRound, label: 'shell.menu.security' },
 		...(manyClubs ? [{ key: 'clubs', href: '/parent/profile?view=clubs', icon: ArrowRightLeft, label: 'portal.switch_club' }] : [])
 	]);
@@ -106,7 +107,7 @@
 		<div class="card divide-y divide-rule overflow-hidden">
 			{#each settings as row (row.key)}
 				<a class="flex min-h-14 items-center gap-3 px-4" href={row.href}><span class="grid size-10 shrink-0 place-items-center rounded-box bg-subhead text-ink"><row.icon size={18} aria-hidden="true" /></span><b class="min-w-0 flex-1 text-ink">{t(row.label)}</b><ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" /></a>
-				{#if row.key === 'notifications'}<CalendarSync row />{/if}
+				
 			{/each}
 			<div class="p-4"><ThemeSwitch /></div>
 		</div>

@@ -41,7 +41,7 @@ export function portalPhoneItems(mode: PortalMode, shopEnabled = false): PortalI
 export function activePortalKey(url: { pathname: string; hash: string; searchParams: { get(name: string): string | null } }): string {
 	const { pathname, hash, searchParams } = url;
 	if (pathname.startsWith('/parent/forms')) return 'forms';
-	if (pathname.startsWith('/parent/profile')) return 'profile';
+	if (pathname.startsWith('/parent/profile') || pathname.startsWith('/parent/calendar-sync')) return 'profile';
 	if (pathname.startsWith('/parent/stats')) return 'stats';
 	if (pathname.startsWith('/parent/notifications')) return 'notifications';
 	if (pathname.startsWith('/parent/shop')) return 'shop';
