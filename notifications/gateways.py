@@ -417,7 +417,7 @@ class WebPushGateway:
             webpush(
                 subscription_info={"endpoint": subscription.endpoint, "keys": {"p256dh": subscription.p256dh, "auth": subscription.auth}},
                 data=json.dumps(webpush_payload(message)),
-                vapid_private_key=_env("DJANGO_VAPID_PRIVATE_KEY").replace("\\n", "\n"),
+                vapid_private_key=_load_vapid(),  # pywebpush only reads a raw key from a string; the PEM that generate_vapid_keys prints needs this loader
                 vapid_claims={"sub": f"mailto:{_env('DJANGO_VAPID_ADMIN_EMAIL', 'admin@rosterchief.app')}"},
                 ttl=message.policy.ttl_seconds,
                 timeout=HTTP_TIMEOUT,
