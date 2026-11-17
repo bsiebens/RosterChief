@@ -152,9 +152,9 @@
 
 {#snippet mobileEditor()}
 	<div class="grid min-w-0 gap-3">
-		<div class="grid gap-1 rounded-box bg-subhead p-1 {linesOn ? 'grid-cols-3' : 'grid-cols-2'}" role="group" aria-label={t('events.tab.lineup')}>
+		<div class="grid gap-2 {linesOn ? 'grid-cols-3' : 'grid-cols-2'}" role="group" aria-label={t('events.tab.lineup')}>
 			{#each [['players', t('coach.lu_view_players')], ['picked', t('coach.lu_view_picked', { n: picked.length })], ...(linesOn ? [['lines', t('coach.lu_view_lines')]] : [])] as [key, label] (key)}
-				<button type="button" class="min-h-10 rounded-md px-3 font-display text-sm font-bold tracking-wide uppercase {view === key ? 'bg-(--portal-panel) text-ink shadow-sm' : 'text-muted'}" aria-pressed={view === key} onclick={() => (view = key as typeof view)}>{label}</button>
+				<button type="button" class="min-h-11 min-w-0 rounded-full border px-2 font-display text-sm font-bold tracking-wide uppercase {view === key ? 'border-ink bg-ink text-paper' : 'border-line bg-(--portal-panel) text-ink'}" aria-pressed={view === key} onclick={() => (view = key as typeof view)}>{label}</button>
 			{/each}
 		</div>
 		{#if view === 'players'}
@@ -162,7 +162,7 @@
 				<div class="flex items-center gap-2 border-b border-line px-3.5 py-2">
 					<label class="sr-only" for="lu-search">{t('portal.search_players')}</label>
 					<input id="lu-search" type="search" class="input min-w-0 flex-1" placeholder={t('portal.search_players')} bind:value={query} />
-					<button type="button" class="portal-person compact text shrink-0 !px-3" aria-pressed={onlyAvailable} onclick={() => (onlyAvailable = !onlyAvailable)}>{t('coach.lu_available')}</button>
+					<button type="button" class="inline-flex h-[38px] shrink-0 items-center rounded-full border px-3.5 text-[15px] font-semibold {onlyAvailable ? 'border-ink bg-ink text-paper' : 'border-line bg-(--portal-panel) text-ink'}" aria-pressed={onlyAvailable} onclick={() => (onlyAvailable = !onlyAvailable)}>{t('coach.lu_available')}</button>
 				</div>
 				{#each shownGroups as [position, members] (position)}
 					<div>
