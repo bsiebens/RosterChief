@@ -679,7 +679,7 @@ def coach_home(request):
                 "opponent_logo": event.opponent.logo.url if event.opponent and event.opponent.logo else None, "is_home": event.is_home_game,
                 "end": event.end, "gathering": event.gathering, "opponent": event.opponent.name if event.opponent else "", "notes": event.notes,
                 "going": event.going, "out": event.out, "unanswered": event.unanswered, "maybe": event.maybe, "invited": event.invited,
-                "has_game_sheet": hasattr(event, "timeline"),
+                "has_game_sheet": hasattr(event, "timeline"), "score_for": event.score_for, "score_against": event.score_against,
                 "cancelled": event.cancelled, "lineup": event.kind in (Event.EventKind.GAME, Event.EventKind.TOURNAMENT),
                 "lineup_published": getattr(getattr(event, "lineup", None), "published_at", None) is not None,
                 #: none / draft / scheduled / published, and when a scheduled one goes out

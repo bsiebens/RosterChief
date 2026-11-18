@@ -80,6 +80,8 @@
 					</span>
 					{#if event.cancelled}
 						<span class="badge badge-sm badge-error">{t('portal.cancelled')}</span>
+					{:else if event.score_for != null && event.score_against != null}
+						<span class="shrink-0 font-display text-xl leading-none font-extrabold tabular-nums text-ink" aria-label={t('portal.final') + ' ' + event.score_for + '–' + event.score_against}>{event.score_for}–{event.score_against}</span>
 					{:else}
 						{#if lineupChip(event, formatDateTime)}{@const chip = lineupChip(event, formatDateTime)!}<span class="badge badge-sm {chip.cls}">{t(chip.key, { when: chip.text ?? '' })}</span>{/if}
 						{#if event.can_manage_attendance && event.invited > 0}

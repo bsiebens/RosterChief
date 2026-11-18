@@ -38,7 +38,7 @@
 
 	// One row per event: everyone in the family who is part of it answers on the same row, each with their own first name in full and status.
 	type Who = { name: string; pill: { cls: string; text: string } };
-	type Row = { id: string; start: string; title: string; kind: string; official: boolean; line: string; going: number | null | undefined; who: Who[]; eventId: string; cancelled: boolean };
+	type Row = { id: string; start: string; title: string; kind: string; official: boolean; line: string; going: number | null | undefined; who: Who[]; eventId: string; cancelled: boolean; score: string };
 	const rows = $derived.by(() => {
 		const byKey = new Map<string, Row>();
 		const add = (rowKey: string, base: Omit<Row, 'id' | 'who'>, who: Who) => {
@@ -49,7 +49,7 @@
 		for (const { event, attendance, officiating } of entries) {
 			if (!past && key(new Date(event.start)) < todayKey) continue;
 			const meet = event.gathering ? t('portal.meet_time', { time: formatTime(event.gathering) }) : '';
-			const base = { start: event.start, title: event.title, kind: event.kind, official: false, line: [meet, event.location].filter(Boolean).join(' · '), going: undefined as number | null | undefined, eventId: event.event_id, cancelled: event.cancelled };
+			const base = { start: event.start, title: event.title, kind: event.kind, official: false, line: [meet, event.location].filter(Boolean).join(' · '), going: undefined as number | null | undefined, eventId: event.event_id, cancelled: event.cancelled, score: event.score_for != null && event.score_against != null && !event.cancelled ? `${event.score_for}–${event.score_against}` : '' };
 			for (const row of attendance) add(event.event_id, { ...base, going: row.going_count }, { name: firstName(row.member_id), pill: statusPill(row.status) });
 			for (const offer of officiating) add(`${event.event_id}-official`, { ...base, official: true, title: `${event.title} · ${t(`portal.crew_${offer.role}`)}` }, { name: firstName(offer.member_id), pill: statusPill(offer.status === 'invited' ? 'no_response' : 'duty') });
 		}
@@ -97,7 +97,7 @@
 						<span class="min-w-0 flex-1">
 							<span class="flex items-start justify-between gap-3">
 								<b class="min-w-0 text-base leading-snug font-semibold text-ink {row.cancelled ? 'line-through' : ''}">{row.title}</b>
-								{#if row.going != null}<span class="shrink-0 pt-0.5 text-sm whitespace-nowrap text-muted">{t('portal.n_going', { n: row.going })}</span>{/if}
+								{#if row.score}<span class="shrink-0 font-display text-xl leading-none font-extrabold tabular-nums text-ink" aria-label={t('portal.final') + ' ' + row.score}>{row.score}</span>{:else if row.going != null}<span class="shrink-0 pt-0.5 text-sm whitespace-nowrap text-muted">{t('portal.n_going', { n: row.going })}</span>{/if}
 							</span>
 							{#if row.line}<span class="block text-sm text-muted">{row.line}</span>{/if}
 							{#if row.who.length > 1 || (people.length > 1 && row.who.length)}
