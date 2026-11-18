@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { MapPin } from '@lucide/svelte';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import { formatDateTime, formatTime } from '#lib/events/types.ts';
@@ -42,6 +42,14 @@
 	}
 	// Moves on by itself every few seconds; stops for good once the person touches or hovers it.
 	let paused = $state(false);
+	let resume: ReturnType<typeof setTimeout>;
+	// Any touch, hover or tap holds the countdown; after 8 quiet seconds it starts again from the current game.
+	function touch() {
+		paused = true;
+		clearTimeout(resume);
+		resume = setTimeout(() => (paused = false), 8000);
+	}
+	onDestroy(() => clearTimeout(resume));
 	$effect(() => {
 		if (!carousel || paused) return;
 		const id = setTimeout(() => goTo(slide + 1), 6000);
@@ -96,12 +104,12 @@
 </script>
 
 {#if shown.length}
-	<section bind:this={strip} {onscroll} onpointerdown={() => (paused = true)} onmouseenter={() => (paused = true)} class={carousel ? 'flex min-w-0 snap-x snap-mandatory gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden' : 'grid gap-2'} aria-label={t('portal.following')}>
-		{#each shown as game (game.event_id)}
+	<section bind:this={strip} {onscroll} onpointerdown={touch} onpointermove={touch} onwheel={touch} class={carousel ? 'flex min-w-0 snap-x snap-mandatory gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden' : 'grid gap-2'} aria-label={t('portal.following')}>
+		{#each shown as game, index (game.event_id)}
 			{@const [left, right] = sides(game)}
 			{@const live = game.status === 'live'}
 			{@const ink = live ? 'text-[#fff]' : 'text-ink'}
-			<button type="button" class="card relative isolate grid {carousel ? 'w-[88%] shrink-0 snap-center' : 'w-full'} min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 overflow-hidden border-l-4 px-3 text-left transition-colors md:gap-3 md:px-4 {live ? 'portal-event-banner min-h-32 py-4 text-[#fff]' : 'py-2.5 hover:bg-subhead border-l-ice'}" onclick={() => show(game)} aria-label={t('portal.timeline_view') + ': ' + game.title}>
+			<button type="button" class="card relative isolate grid {carousel ? 'w-[88%] shrink-0 snap-center' : 'w-full'} min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 overflow-hidden border-l-4 px-3 text-left transition-colors md:gap-3 md:px-4 {live ? 'portal-event-banner min-h-32 py-4 text-[#fff]' : 'py-2.5 hover:bg-subhead border-l-ice'}" onclick={() => (carousel && index !== slide ? (touch(), goTo(index)) : show(game))} aria-label={t('portal.timeline_view') + ': ' + game.title}>
 				{#if live}<EventBackdrop src={background} />{/if}
 				<span class="flex min-w-0 flex-col-reverse items-center gap-1 md:flex-row md:justify-end md:gap-3">
 					<span class="line-clamp-2 min-w-0 text-center font-display text-sm leading-tight font-extrabold break-words {ink} uppercase md:truncate md:text-right md:text-lg">{left.name}</span>
@@ -132,8 +140,8 @@
 	{#if carousel}
 		<div class="flex items-center justify-center gap-2">
 			{#each shown as game, i (game.event_id)}
-				<button type="button" class="relative h-3 overflow-hidden rounded-full transition-all {i === slide ? 'w-10 bg-line' : 'w-3 bg-line'}" onclick={() => { paused = true; goTo(i); }} aria-label={game.title}>
-					{#if i === slide}{#key slide}<span class="absolute inset-y-0 left-0 rounded-full bg-club {paused ? 'w-full' : 'dot-countdown'}"></span>{/key}{/if}
+				<button type="button" class="relative h-3 overflow-hidden rounded-full transition-all {i === slide ? 'w-10 bg-line' : 'w-3 bg-line'}" onclick={() => { touch(); goTo(i); }} aria-label={game.title}>
+					{#if i === slide}{#key `${slide}-${paused}`}<span class="absolute inset-y-0 left-0 rounded-full bg-club {paused ? 'w-full' : 'dot-countdown'}"></span>{/key}{/if}
 				</button>
 			{/each}
 		</div>
