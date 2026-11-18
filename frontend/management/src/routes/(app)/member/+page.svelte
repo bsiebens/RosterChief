@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { ArrowLeft, Bell, CalendarDays, ChartColumn, Check, CircleQuestionMark, Clock, X, Shirt, Info, ListChecks, MapPin, Users, ChevronRight, CircleCheck, ClipboardList, FileText, Handshake, KeyRound, List, UserRound, UsersRound, Wallet, Whistle } from '@lucide/svelte';
+	import { ArrowLeft, Bell, CalendarDays, ChartColumn, Check, CircleQuestionMark, Clock, X, Shirt, Info, ListChecks, MapPin, Users, ChevronRight, CircleCheck, ClipboardList, FileText, Handshake, KeyRound, List, ListOrdered, UserRound, UsersRound, Wallet, Whistle } from '@lucide/svelte';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { addressLine, formatDateTime, formatLongDay, formatTime, kindLabelKey, kindStyle, mapsHref, statusLabelKey, statusStyle } from '#lib/events/types.ts';
@@ -724,7 +724,6 @@
 						<a class="btn btn-outline btn-sm md:h-8" href={mapsHref(event.location_detail, event.location)} target="_blank" rel="noopener noreferrer">{t('portal.open_maps')}</a>
 					</div>
 				{/if}
-				{#if event.score_for != null && event.score_against != null}<p class="font-display text-2xl font-extrabold">{event.score_for}–{event.score_against}</p>{/if}
 				{#if event.notes}<p class="mt-1 border-t border-line pt-2 text-sm whitespace-pre-line text-slate">{event.notes}</p>{/if}
 			</div>
 			{#if audience && extras?.roster?.length}
@@ -784,6 +783,9 @@
 					</p>
 				</section>
 			{/if}
+			{#if audience && extras?.game}
+				<button class="btn btn-outline min-h-12 w-full gap-2 text-base" type="button" onclick={() => (timelineOpen = true)}><ListOrdered size={18} aria-hidden="true" />{t('portal.timeline_view')}</button>
+			{/if}
 			{#if audience && extras?.totals?.total}
 				{@const totals = extras.totals}
 				{@const parts = [
@@ -806,7 +808,7 @@
 				{@const game = extras.game}
 				{@const mine = new Set(people.map((person) => person.id))}
 				<section class="card card-body">
-					<h2 class="card-title"><Users size={16} aria-hidden="true" />{t('portal.lineup_dressed')}<button class="btn btn-outline btn-sm ml-auto md:h-8" type="button" onclick={() => (timelineOpen = true)}>{t('portal.timeline_view')}</button></h2>
+					<h2 class="card-title"><Users size={16} aria-hidden="true" />{t('portal.lineup_dressed')}</h2>
 					<p class="text-center font-display text-4xl leading-none font-extrabold tabular-nums text-ink">{game.score}</p>
 					{#if game.lineup?.ours.length}
 						<div class="flex flex-wrap gap-1.5">
