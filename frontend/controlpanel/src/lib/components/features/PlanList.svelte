@@ -3,6 +3,7 @@
 	import { platform } from '#lib/api.ts';
 	import { limitText, type CatalogFeature, type FullPlan } from '#lib/features.ts';
 	import Alert from '../Alert.svelte';
+	import MoveButtons from '../MoveButtons.svelte';
 	import Modal from '../Modal.svelte';
 	import PlanForm from './PlanForm.svelte';
 
@@ -38,6 +39,21 @@
 	let error = $state('');
 	let busy = $state(false);
 
+	/** Plans show in the order the platform chose, here and in every plan picker and billing screen. */
+	async function move(plan: FullPlan, direction: -1 | 1) {
+		const index = plans.findIndex((p) => p.id === plan.id);
+		if (index + direction < 0 || index + direction >= plans.length) return;
+		const ids = plans.map((p) => p.id);
+		[ids[index], ids[index + direction]] = [ids[index + direction], ids[index]];
+		busy = true;
+		error = '';
+		const r = await platform('PUT', '/plans/order', { plan_ids: ids });
+		busy = false;
+		if (!r.ok) return (error = r.message ?? 'The order could not be saved.');
+		notice = `${plan.name} moved ${direction < 0 ? 'up' : 'down'}.`;
+		onchange();
+	}
+
 	const create = () => ((editing = null), (formOpen = true));
 	const edit = (p: FullPlan) => ((editing = p), (formOpen = true));
 	const saved = (m: string) => ((notice = m), (error = ''), onchange());
@@ -57,7 +73,7 @@
 
 <div class="flex flex-col gap-4">
 	<div class="flex items-center justify-between gap-3">
-		<p class="text-sm text-muted">Plans bundle features. Clubs without a subscription use the default plan.</p>
+		<p class="text-sm text-muted">Plans bundle features. Clubs without a subscription use the default plan. Use the arrows to put the plans in the order you want them listed and offered.</p>
 		{#if canEdit}<button class="btn btn-primary btn-sm" onclick={create}><Plus size={14} aria-hidden="true" /> New plan</button>{/if}
 	</div>
 	{#if notice}<Alert kind="success">{notice}</Alert>{/if}
@@ -77,6 +93,7 @@
 								<span class="font-display text-xl leading-none font-extrabold text-ink uppercase">{p.name}</span>
 								{#if p.is_default}<span class="badge badge-info">default</span>{/if}
 								<span class="badge {p.is_active ? 'badge-success' : 'badge-ghost'}">{p.is_active ? 'active' : 'inactive'}</span>
+								{#if canEdit}<span class="ml-auto"><MoveButtons label="plan {p.name}" canUp={plans.indexOf(p) > 0} canDown={plans.indexOf(p) < plans.length - 1} {busy} onmove={(d) => move(p, d)} /></span>{/if}
 							</div>
 							<div class="mt-1 font-mono text-[11px] text-muted">{p.code} · {p.subscriber_count} {p.subscriber_count === 1 ? 'club' : 'clubs'}</div>
 						</div>

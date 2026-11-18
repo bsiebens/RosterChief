@@ -202,7 +202,7 @@ def tell_family(actor, evaluation: PlayerEvaluation) -> None:
     try:
         recipients.deliver(
             evaluation.player, club, title="A new evaluation is available", body=f"{evaluation.checklist.name} · {evaluation.season.name}",
-            skip_user_id=getattr(actor, "pk", None), kind=inbox.Kind.INFO, href="/parent/forms", push=True, category="form",
+            skip_user_id=getattr(actor, "pk", None), kind=inbox.Kind.INFO, href="/member/forms", push=True, category="form",
         )
     except Exception:
         import logging

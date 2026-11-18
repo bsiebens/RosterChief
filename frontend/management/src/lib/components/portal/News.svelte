@@ -9,7 +9,7 @@
 	import type { PortalArticle } from '#lib/portal.ts';
 	import Sheet from './Sheet.svelte';
 
-	let { articles, home = false, path = '/parent' }: { articles: PortalArticle[]; home?: boolean; path?: string } = $props();
+	let { articles, home = false, path = '/member' }: { articles: PortalArticle[]; home?: boolean; path?: string } = $props();
 	// From tablet width an article opens in the reading drawer; on a phone it takes the whole page (the back button returns to the list).
 	let desktop = $state(false);
 	onMount(() => {
@@ -30,6 +30,10 @@
 		const needle = query.trim().toLowerCase();
 		return !needle || `${translation(article).title} ${translation(article).excerpt}`.toLowerCase().includes(needle);
 	};
+	// Phone: "my teams" (news tagged with a team of mine) or "the whole club"; with no team news it opens on the club.
+	// svelte-ignore state_referenced_locally
+	let phoneScope = $state<'teams' | 'club'>(articles.some((article) => (article.teams ?? []).length) ? 'teams' : 'club');
+	const phoneShown = $derived(articles.filter((article) => (phoneScope === 'teams' ? (article.teams ?? []).length > 0 : !(article.teams ?? []).length)));
 	const shown = $derived(home ? articles.slice(0, 4) : articles.filter(matches));
 	const featured = $derived(home ? undefined : shown[0]);
 	const rest = $derived(home ? shown : shown.slice(1));
@@ -54,17 +58,23 @@
 {/snippet}
 
 {#if selected && !desktop}
-	<a class="btn btn-outline mb-3 justify-self-start gap-2" href={closeHref} data-sveltekit-reset="false"><ArrowLeft size={16} aria-hidden="true" />{t('portal.news')}</a>
+	<a class="btn btn-outline mb-3 justify-self-start gap-2 max-md:hidden" href={closeHref} data-sveltekit-reset="false"><ArrowLeft size={16} aria-hidden="true" />{t('portal.news')}</a>
 	<div class="card overflow-hidden">{@render articleView()}</div>
 {:else}
 {#if home}
-	<div class="mb-2 flex items-center justify-between gap-2">
+	<div class="mb-2 flex items-center justify-between gap-2 max-md:hidden">
 		<h2 class="card-title"><Newspaper size={16} aria-hidden="true" />{t('portal.news')}</h2>
 		<a class="link-more" href={path + '?tab=news'}>{t('overview.news.view_all')} →</a>
 	</div>
 {/if}
 {#if !home}
-	<div class="mb-4 flex flex-wrap items-center gap-2">
+	<!-- Phone: two choices, my teams or the whole club; the article list is below. -->
+	<div class="mb-3 flex gap-2 md:hidden" role="group" aria-label={t('portal.news_filter')}>
+		{#each [['teams', 'portal.news_mine'], ['club', 'portal.news_club_all']] as [key, label] (key)}
+			<button type="button" class="inline-flex h-[38px] items-center rounded-full border px-4 text-[15px] font-semibold {phoneScope === key ? 'border-ink bg-ink text-paper' : 'border-line bg-(--portal-panel) text-ink'}" aria-pressed={phoneScope === key} onclick={() => (phoneScope = key as 'teams' | 'club')}>{t(label)}</button>
+		{/each}
+	</div>
+	<div class="mb-4 flex flex-wrap items-center gap-2 max-md:hidden">
 		<div class="flex flex-wrap gap-1.5" role="group" aria-label={t('portal.news_filter')}>
 			<button type="button" class="portal-person compact text" aria-pressed={team === ''} onclick={() => (team = '')}>{t('portal.all')}</button>
 			{#each teamNames as name (name)}<button type="button" class="portal-person compact text" aria-pressed={team === name} onclick={() => (team = name)}>{name}</button>{/each}
@@ -73,8 +83,30 @@
 		<label class="relative ml-auto w-full sm:w-64"><span class="sr-only">{t('portal.news_search')}</span><Search size={14} class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim" aria-hidden="true" /><input class="input w-full pl-9" type="search" placeholder={t('portal.news_search')} bind:value={query} /></label>
 	</div>
 {/if}
+{#if !home}
+	<div class="grid gap-3 md:hidden">
+		{#each phoneShown as article, i (article.id)}
+			{#if i === 0}
+				<a class="grid gap-2 rounded-box bg-sidebar-bg p-5 text-sidebar-fg" href={path + '?tab=news&article=' + article.id} data-sveltekit-reset="false">
+					<p class="font-mono text-[11px] tracking-[.12em] text-sidebar-fg-dim uppercase">{(article.teams ?? []).join(', ') || t('portal.news')}{#if article.published_at} · {formatDay(article.published_at)}{/if}</p>
+					<h2 class="font-display text-3xl leading-[.98] font-extrabold uppercase">{translation(article).title}</h2>
+					{#if translation(article).excerpt}<p class="line-clamp-3 text-sm">{translation(article).excerpt}</p>{/if}
+					<span class="font-semibold">{t('portal.read_more')} →</span>
+				</a>
+			{/if}
+		{/each}
+		{#if phoneShown.length > 1}
+			<div class="card divide-y divide-rule overflow-hidden">
+				{#each phoneShown.slice(1) as article (article.id)}
+					<a class="flex min-h-16 items-center gap-3 px-4 py-2" href={path + '?tab=news&article=' + article.id} data-sveltekit-reset="false"><span class="min-w-0 flex-1"><b class="line-clamp-2 text-ink">{translation(article).title}</b><span class="block truncate text-sm text-muted">{(article.teams ?? []).join(', ') || t('portal.news_club')}{#if article.published_at} · {formatDay(article.published_at)}{/if}</span></span><ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" /></a>
+				{/each}
+			</div>
+		{/if}
+		{#if !phoneShown.length}<p class="card card-body text-sm text-muted">{t('portal.no_news')}</p>{/if}
+	</div>
+{/if}
 {#if shown.length}
-	<div class={home ? 'min-w-0' : 'grid min-w-0 grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]'}>
+	<div class={home ? 'min-w-0' : 'grid min-w-0 grid-cols-1 items-start gap-4 max-md:hidden xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]'}>
 		{#if featured}
 			{@const lead = photo(featured)}
 			<a class="card group block overflow-hidden hover:border-club" href={path + '?tab=news&article=' + featured.id} data-sveltekit-reset="false">
@@ -108,7 +140,7 @@
 		</div>
 	</div>
 {:else}
-	<p class="card card-body text-sm text-muted">{t('portal.no_news')}</p>
+	<p class="card card-body text-sm text-muted {home ? '' : 'max-md:hidden'}">{t('portal.no_news')}</p>
 {/if}
 {/if}
 {#if selected && desktop}

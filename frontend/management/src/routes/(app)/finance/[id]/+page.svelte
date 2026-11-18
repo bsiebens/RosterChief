@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { ArrowLeft, Ban, Banknote, FileDown, Mail, MailCheck, ReceiptText, Trash2, Users } from '@lucide/svelte';
+	import { ArrowLeft, Ban, Banknote, CalendarClock, FileDown, Mail, MailCheck, ReceiptText, Trash2, Users } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import LegacyInvoiceHistory from '#lib/components/registration/LegacyInvoiceHistory.svelte';
 	import ActionList from '#lib/components/actions/ActionList.svelte';
@@ -8,7 +8,7 @@
 	import PaymentDialog from '#lib/components/finance/PaymentDialog.svelte';
 	import InstallmentSchedule from '#lib/components/registration/InstallmentSchedule.svelte';
 	import Modal from '#lib/components/Modal.svelte';
-	import { formatDay } from '#lib/events/types.ts';
+	import { formatDay, parseIsoDate } from '#lib/events/types.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { invoicePdfHref, paymentBadge, registrationHref, type InvoicePayment } from '#lib/registrations.ts';
@@ -26,6 +26,20 @@
 	let removing = $state<InvoicePayment | null>(null);
 	let removeOpen = $state(false);
 	let busy = $state(false);
+	// The plan editor starts from the stored plan: payments in all, and the days between them (the first gap when the stored gaps are uneven).
+	let planCount = $state(1);
+	let planEvery = $state(30);
+	$effect(() => {
+		const o = item.installment_offsets;
+		planCount = o.length + 1;
+		planEvery = o[0] ?? 30;
+	});
+	const planUneven = $derived(item.installment_offsets.some((days, i) => days !== item.installment_offsets[0] * (i + 1)));
+	const planDates = $derived.by(() => {
+		const first = item.invoice_due_date ? parseIsoDate(item.invoice_due_date) : null;
+		if (!first) return [];
+		return Array.from({ length: Math.max(1, planCount) }, (_, i) => new Date(first.getFullYear(), first.getMonth(), first.getDate() + i * (Number(planEvery) || 0)));
+	});
 	const startPay = (membershipId: string | null) => {
 		payFor = membershipId;
 		payOpen = true;
@@ -114,6 +128,36 @@
 			</section>
 
 			{#if item.installments.length}<InstallmentSchedule rows={item.installments} />{/if}
+
+			{#if confirmed}
+				<section class="card card-body gap-3" aria-labelledby="plan-title">
+					<h2 id="plan-title" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><CalendarClock size={16} aria-hidden="true" /> {t('installments.plan_title')}</h2>
+					<p class="text-sm text-muted">{t('installments.plan_help')}</p>
+					{#if done === 'plan'}<Alert kind="success">{t('installments.plan_saved')}</Alert>{/if}
+					<form method="POST" action="?/plan" class="grid gap-3" use:enhance={run()}>
+						<div class="grid gap-3 sm:grid-cols-2">
+							<div class="form-control">
+								<label class="label" for="plan-count"><span class="label-text">{t('installments.plan_count')}</span></label>
+								<select id="plan-count" name="count" class="select select-bordered w-full" bind:value={planCount}>
+									<option value={1}>{t('installments.plan_one')}</option>
+									{#each Array.from({ length: 11 }, (_, i) => i + 2) as n (n)}<option value={n}>{t('installments.plan_n', { n })}</option>{/each}
+								</select>
+							</div>
+							<div class="form-control">
+								<label class="label" for="plan-every"><span class="label-text">{t('installments.plan_every')}</span></label>
+								<input id="plan-every" name="every" type="number" min="1" max="365" class="input input-bordered w-full" bind:value={planEvery} disabled={planCount < 2} required={planCount > 1} />
+							</div>
+						</div>
+						{#if planUneven}<p class="text-xs text-warn-text">{t('installments.plan_uneven')}</p>{/if}
+						{#if planCount > 1 && planDates.length}
+							<p class="text-sm text-muted">{t('installments.plan_preview', { n: planCount, dates: planDates.map((d) => formatDay(d)).join(' · ') })}</p>
+						{/if}
+						{#if otherFailure && form && 'op' in form && form.op === 'plan'}<Alert kind="error">{otherFailure}</Alert>{/if}
+						<p class="text-xs text-muted">{t('installments.plan_grace')} <a class="link" href="/settings/registration">{t('installments.plan_grace_link')}</a></p>
+						<div class="flex justify-end"><button class="btn btn-primary" type="submit" disabled={busy}>{t('installments.plan_save')}</button></div>
+					</form>
+				</section>
+			{/if}
 
 			<section class="card card-body card-hl gap-3">
 				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Banknote size={16} aria-hidden="true" /> {t('fin.card.payments')}</h2>

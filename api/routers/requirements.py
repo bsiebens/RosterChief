@@ -17,6 +17,7 @@ from events.models import Season
 from members.models import ClubMembership, Member, MemberRequirementStatus, OnboardingRequirement
 from members.services import access, onboarding
 from members.services.errors import Invalid
+from registration.services import installments
 
 router = Router(auth=AUTHENTICATORS)
 
@@ -89,6 +90,7 @@ def member_checklist(request, member_id: UUID, season_id: UUID | None = None):
     items = onboarding.checklist_for(membership)
     return {
         "membership": {"id": membership.pk, "season": {"id": membership.season_id, "name": membership.season.name}, "status": membership.status, "fee_status": membership.fee_status},
+        "overdue": installments.overdue(membership),
         "items": items,
         "total": len(items),
         "done": sum(1 for i in items if i.resolved),

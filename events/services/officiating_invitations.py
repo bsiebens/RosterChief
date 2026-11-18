@@ -160,7 +160,7 @@ def _notify_member(club, member, items):
     if not pending:
         return 0
     first = next(iter(games.values()))
-    href = f"/parent?tab=calendar&event={first.pk}" if len(games) == 1 else "/parent?tab=calendar&crew=1"
+    href = f"/member?tab=calendar&event={first.pk}" if len(games) == 1 else "/member?tab=calendar&crew=1"
     body = _("%(game)s, %(when)s.") % {"game": first.title, "when": describe_when_where(first)} if len(games) == 1 else _("There are %(count)s games you can help officiate. Open your calendar to respond.") % {"count": len(games)}
     told = recipients.deliver(member, club, title=_("Games you can help officiate"), body=body, href=href, push=True, category="crew")
     if told:

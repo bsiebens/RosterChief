@@ -509,6 +509,11 @@ class OnboardingRequirement(UUIDModel):
     min_value = models.DecimalField(_("minimum value"), max_digits=15, decimal_places=4, null=True, blank=True)
     max_value = models.DecimalField(_("maximum value"), max_digits=15, decimal_places=4, null=True, blank=True)
     requires_document = models.BooleanField(_("requires a document"), default=False, help_text=_("Staff can attach a file (e.g. the certificate itself) when marking this complete."))
+    #: A document the club must hand over first (a form to fill in, a certificate to sign): the member or guardian cannot submit anything until staff
+    #: have sent a file for this member (``MemberRequirementStatus.sent_file``).
+    needs_staff_file = models.BooleanField(_("staff provide the file first"), default=False, help_text=_("The member can only complete this once staff have sent them a document (e.g. a certificate form to fill in)."))
+    #: What the person completing it must do, shown to the member and their guardians next to the requirement.
+    member_instructions = models.TextField(_("instructions for the member"), blank=True, help_text=_("Shown to the member or guardian completing this, e.g. where to take the form and what to hand back."))
     blocked_event_kinds = models.JSONField(_("blocks selection for"), default=list, blank=True, help_text=_("Event kinds a member can't be invited to or selected for while this is open. Empty means purely informational."))
     is_active = models.BooleanField(_("active"), default=True, help_text=_("Inactive requirements no longer apply to new memberships, but existing statuses are kept."))
     #: Optional expiry: a completed item stays valid this many months (e.g. a medical certificate valid for 12). Blank = never expires.

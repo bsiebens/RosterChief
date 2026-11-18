@@ -21,6 +21,10 @@ class RequirementOut(Schema):
     min_value: Decimal | None = None
     max_value: Decimal | None = None
     requires_document: bool
+    #: Staff must send the member a file before the member can hand anything in.
+    needs_staff_file: bool = False
+    #: What the person completing it has to do, shown to the member and guardians.
+    member_instructions: str = ""
     blocked_event_kinds: list[str]
     is_active: bool
     valid_for_months: int | None = None
@@ -41,6 +45,8 @@ class RequirementIn(Schema):
     min_value: Decimal | None = None
     max_value: Decimal | None = None
     requires_document: bool = False
+    needs_staff_file: bool = False
+    member_instructions: str = ""
     blocked_event_kinds: list[str] = Field(default_factory=list)
     is_active: bool = True
     valid_for_months: int | None = None
@@ -56,6 +62,8 @@ class RequirementPatch(Schema):
     min_value: Decimal | None = None
     max_value: Decimal | None = None
     requires_document: bool | None = None
+    needs_staff_file: bool | None = None
+    member_instructions: str | None = None
     blocked_event_kinds: list[str] | None = None
     is_active: bool | None = None
     valid_for_months: int | None = None
@@ -83,6 +91,8 @@ class ItemOut(Schema):
     review_note: str = ""
     #: A personalised file the club sent this member (download through ``.../sent-file``), with the note that came with it.
     has_sent_file: bool = False
+    #: Open, and the club still has to send its document first (the member cannot hand in until then).
+    awaiting_file: bool = False
     sent_at: datetime.datetime | None = None
     sent_note: str = ""
     submitted_at: datetime.datetime | None = None
@@ -139,6 +149,18 @@ class ItemOut(Schema):
         return list(obj.status.events.all()) if obj.status else []
 
 
+class OverdueOut(Schema):
+    """A late instalment of the membership (the oldest overdue part and everything overdue), shown to staff like a missing requirement."""
+
+    due_date: datetime.date
+    remaining: Decimal
+    #: The last day of the grace period; after it the member cannot sign up for the event types in ``block_kinds``.
+    grace_until: datetime.date
+    #: Past the grace period and the club blocks some event types: the member is blocked right now.
+    blocking: bool
+    block_kinds: list[str] = Field(default_factory=list)
+
+
 class SeasonRef(Schema):
     id: UUID
     name: str
@@ -155,6 +177,8 @@ class ChecklistOut(Schema):
     """A member's documents for one season. ``membership`` is null when they have none that season (then ``items`` is empty)."""
 
     membership: MembershipRef | None = None
+    #: A late instalment of this membership, or null.
+    overdue: OverdueOut | None = None
     items: list[ItemOut]
     total: int
     done: int

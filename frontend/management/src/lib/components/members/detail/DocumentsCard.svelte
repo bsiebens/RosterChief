@@ -13,7 +13,7 @@
 	 * marking received (with a file and an expiry date), "not needed", reopening and downloading need `members.manage_members`.
 	 * `form` is the page's action result, for the errors of the dialogs.
 	 */
-	let { checklist, canManage = false, form, actionBase = '?tab=documents&' }: { checklist: Checklist | null; canManage?: boolean; form: any; /** Where the form actions live: `?tab=documents&` on the member page, `?` on a page that spreads `requirementActions`. */ actionBase?: string } = $props();
+	let { checklist, canManage = false, form, actionBase = '?tab=documents&', single = false }: { checklist: Checklist | null; canManage?: boolean; /** One column: for a narrow place such as a dialog. */ single?: boolean; form: any; /** Where the form actions live: `?tab=documents&` on the member page, `?` on a page that spreads `requirementActions`. */ actionBase?: string } = $props();
 	const items = $derived(checklist?.items ?? []);
 	const membership = $derived(checklist?.membership ?? null);
 
@@ -46,6 +46,10 @@
 		if (i.display === 'bypassed') return i.note ? `${t('req.doc.d.bypassed')}: ${i.note}` : t('req.doc.d.bypassed');
 		return t('req.doc.d.missing');
 	};
+
+	const od = $derived(checklist?.overdue ?? null);
+	const odKinds = (kinds: string[]) => kinds.map((k) => t(`eventform.kind.${k}`)).join(', ');
+	const money = (v: string) => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'EUR' }).format(Number(v));
 
 	let completeFor = $state<ChecklistItem | null>(null);
 	let completeOpen = $state(false);
@@ -94,71 +98,85 @@
 	{#if saved}<Alert kind="success">{t('req.doc.saved')}</Alert>{/if}
 	{#if errText && !completeOpen && !bypassOpen && !answerOpen && !noteOpen && !sendOpen}<Alert kind="error" title={t('req.doc.failed')}>{errText}</Alert>{/if}
 
+	{#if od}
+		<div class="mt-3 flex items-start gap-3 rounded-lg border border-error bg-danger-bg/40 p-3.5" role="alert">
+			<span class="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-surface text-danger"><CircleAlert size={18} aria-hidden="true" /></span>
+			<div class="min-w-0 flex-1">
+				<p class="font-semibold text-ink">{t('req.doc.overdue_title')}</p>
+				<p class="text-xs text-muted">{t('req.doc.overdue_body', { amount: money(od.remaining), date: formatDate(od.due_date) })}</p>
+				<p class="mt-1 text-xs {od.blocking ? 'font-semibold text-danger' : 'text-muted'}">{od.block_kinds.length ? t(od.blocking ? 'req.doc.overdue_blocking' : 'req.doc.overdue_grace', { date: formatDate(od.grace_until), kinds: odKinds(od.block_kinds) }) : t('req.doc.overdue_no_block')}</p>
+			</div>
+		</div>
+	{/if}
 	{#if !membership}
 		<p class="mt-3 text-sm text-muted">{t('req.doc.no_membership')}</p>
 	{:else if !items.length}
 		<p class="mt-3 text-sm text-muted">{canManage ? t('req.doc.none_manage') : t('req.doc.none')} {#if canManage}<a class="link" href="/settings/requirements">{t('req.doc.manage_link')}</a>{/if}</p>
 	{:else}
-		<ul class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+		<ul class="mt-3 grid gap-3 {single ? '' : 'md:grid-cols-2 xl:grid-cols-3'}">
 			{#each items as i (i.requirement.id)}
 				{@const l = look[i.display]}
-				<li class="rounded-lg border border-line p-3.5">
-					<div class="flex flex-wrap items-center gap-x-4 gap-y-3">
-						<div class="flex min-w-0 flex-1 basis-48 items-center gap-3">
-							<span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-surface {l.tint}">
-								{#if isQuestion(i) && i.display === 'missing'}<CircleQuestionMark size={20} />{:else}<l.icon size={20} />{/if}
-							</span>
-							<div class="min-w-0 flex-1">
-								<p class="truncate font-semibold text-ink" title={i.requirement.description}>{i.requirement.name}</p>
-								<p class="truncate text-xs text-muted" title={isQuestion(i) ? detail(i) : undefined}>{detail(i)}</p>
-							</div>
+				{@const waiting = i.awaiting_file}
+				<li class="rounded-lg border p-3.5 {waiting ? 'border-warn-border bg-warn-bg/40' : 'border-line'}">
+					<div class="flex items-start gap-3">
+						<span class="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-surface {l.tint}">
+							{#if isQuestion(i) && i.display === 'missing'}<CircleQuestionMark size={18} />{:else}<l.icon size={18} />{/if}
+						</span>
+						<div class="min-w-0 flex-1">
+							<p class="font-semibold text-ink" title={i.requirement.description}>{i.requirement.name}</p>
+							<p class="text-xs text-muted">{detail(i)}</p>
 						</div>
-						{#if i.display === 'complete' || i.display === 'bypassed'}
-							<!-- Done: the status pill replaces the action buttons; a file can still be opened and a mistake reopened through quiet icon buttons. -->
-							<div class="ml-auto flex items-center gap-1.5">
-								{#if canManage && i.has_document}<a class="btn btn-ghost btn-xs btn-square" href={documentHref(membership.id, i.requirement.id)} target="_blank" rel="noopener" aria-label={t('req.doc.download')} title={t('req.doc.download')}><Download size={14} /></a>{/if}
-								{#if canManage && isQuestion(i) && i.display === 'complete'}<button class="btn btn-ghost btn-xs btn-square" type="button" aria-label={t('req.doc.q.edit')} title={t('req.doc.q.edit')} onclick={() => ((answerFor = i), (answerOpen = true))}><Pencil size={14} /></button>{/if}
-								{#if canManage && i.display === 'complete'}<button class="btn btn-ghost btn-xs btn-square" type="button" aria-label={t('req.doc.request')} title={t('req.doc.request')} onclick={() => askNote(i, 'request')}><MessageSquareText size={14} /></button>{/if}
-								{#if canManage}
-									<form method="POST" action="{actionBase}/reopenRequirement" use:enhance={({ cancel }) => { if (!confirm(t('req.doc.reopen_confirm'))) cancel(); }}>
-										<input type="hidden" name="membership_id" value={membership.id} />
-										<input type="hidden" name="requirement_id" value={i.requirement.id} />
-										<button class="btn btn-ghost btn-xs btn-square" type="submit" aria-label={t('req.doc.reopen')} title={t('req.doc.reopen')}><RotateCcw size={14} /></button>
-									</form>
-								{/if}
-								<span class="badge badge-sm {l.badge}">{t(`req.doc.status.${i.display}`)}</span>
-							</div>
-						{:else if canManage}
-							<div class="ml-auto flex flex-wrap items-center justify-end gap-1.5">
-								{#if i.has_document}<a class="btn btn-outline btn-xs gap-1" href={documentHref(membership.id, i.requirement.id)} target="_blank" rel="noopener"><Download size={13} /> {t('req.doc.download')}</a>{/if}
-								{#if i.display === 'pending'}
-									<form method="POST" action="{actionBase}/approveRequirement" use:enhance={submit(() => {})}>
-										<input type="hidden" name="membership_id" value={membership.id} />
-										<input type="hidden" name="requirement_id" value={i.requirement.id} />
-										<button class="btn btn-primary btn-xs gap-1" type="submit" disabled={busy}><CircleCheck size={13} /> {t('req.doc.approve')}</button>
-									</form>
-									<button class="btn btn-outline btn-error btn-xs gap-1" type="button" onclick={() => askNote(i, 'decline')}><CircleX size={13} /> {t('req.doc.decline')}</button>
-								{/if}
-								{#if i.display !== 'requested' && i.display !== 'declined'}<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => askNote(i, 'request')}><MessageSquareText size={13} /> {t('req.doc.request')}</button>{/if}
-								{#if !isQuestion(i)}<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => ((sendFor = i), (sendOpen = true))}><Send size={13} /> {t(i.has_sent_file ? 'req.doc.send_replace' : 'req.doc.send')}</button>{/if}
-								{#if i.display !== 'missing'}
-									<form method="POST" action="{actionBase}/reopenRequirement" use:enhance={({ cancel }) => { if (!confirm(t('req.doc.reopen_confirm'))) cancel(); }}>
-										<input type="hidden" name="membership_id" value={membership.id} />
-										<input type="hidden" name="requirement_id" value={i.requirement.id} />
-										<button class="btn btn-outline btn-error btn-xs gap-1" type="submit"><RotateCcw size={13} /> {t('req.doc.reopen')}</button>
-									</form>
-								{/if}
-								{#if i.display === 'missing' || i.display === 'expired' || i.display === 'declined' || i.display === 'requested'}<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => ((bypassFor = i), (bypassOpen = true))}><UserCheck size={13} /> {t('req.doc.bypass')}</button>{/if}
-								{#if isQuestion(i)}
-									<button class="btn btn-primary btn-xs gap-1" type="button" onclick={() => ((answerFor = i), (answerOpen = true))}><Pencil size={13} /> {i.display === 'expiring_soon' ? t('req.doc.renew') : t('req.doc.q.answer')}</button>
-								{:else}
-									<button class="btn btn-primary btn-xs gap-1" type="button" onclick={() => ((completeFor = i), (completeOpen = true))}><Plus size={13} /> {i.display === 'expiring_soon' ? t('req.doc.renew') : t('req.doc.receive')}</button>
-								{/if}
-							</div>
-						{:else}
-							<span class="ml-auto badge badge-sm {l.badge}">{t(`req.doc.status.${i.display}`)}</span>
-						{/if}
+						<div class="flex shrink-0 items-center gap-1">
+							{#if canManage && (i.display === 'complete' || i.display === 'bypassed')}
+								{#if i.has_document}<a class="btn btn-ghost btn-xs btn-square" href={documentHref(membership.id, i.requirement.id)} target="_blank" rel="noopener" aria-label={t('req.doc.download')} title={t('req.doc.download')}><Download size={14} /></a>{/if}
+								{#if isQuestion(i) && i.display === 'complete'}<button class="btn btn-ghost btn-xs btn-square" type="button" aria-label={t('req.doc.q.edit')} title={t('req.doc.q.edit')} onclick={() => ((answerFor = i), (answerOpen = true))}><Pencil size={14} /></button>{/if}
+								{#if i.display === 'complete'}<button class="btn btn-ghost btn-xs btn-square" type="button" aria-label={t('req.doc.request')} title={t('req.doc.request_tip')} onclick={() => askNote(i, 'request')}><MessageSquareText size={14} /></button>{/if}
+								<form method="POST" action="{actionBase}/reopenRequirement" use:enhance={({ cancel }) => { if (!confirm(t('req.doc.reopen_confirm'))) cancel(); }}>
+									<input type="hidden" name="membership_id" value={membership.id} />
+									<input type="hidden" name="requirement_id" value={i.requirement.id} />
+									<button class="btn btn-ghost btn-xs btn-square" type="submit" aria-label={t('req.doc.reopen')} title={t('req.doc.reopen')}><RotateCcw size={14} /></button>
+								</form>
+							{/if}
+							<span class="badge badge-sm {l.badge}">{t(`req.doc.status.${i.display}`)}</span>
+						</div>
 					</div>
+					{#if i.requirement.member_instructions}
+						<p class="mt-2.5 rounded-md bg-surface px-3 py-2 text-xs text-ink"><span class="font-semibold">{t('req.doc.instructions')}</span> {i.requirement.member_instructions}</p>
+					{/if}
+					{#if waiting}
+						<p class="mt-2.5 flex items-start gap-2 text-xs font-semibold text-warn-text"><Paperclip size={13} class="mt-0.5 shrink-0" aria-hidden="true" />{canManage ? t('req.doc.awaiting_staff') : t('req.doc.awaiting_member')}</p>
+					{/if}
+					{#if canManage && i.display !== 'complete' && i.display !== 'bypassed'}
+						<div class="mt-3 flex flex-wrap items-center gap-1.5 border-t border-rule pt-3">
+							{#if isQuestion(i)}
+								<button class="btn btn-primary btn-xs gap-1" type="button" onclick={() => ((answerFor = i), (answerOpen = true))}><Pencil size={13} /> {i.display === 'expiring_soon' ? t('req.doc.renew') : t('req.doc.q.answer')}</button>
+							{:else if waiting}
+								<button class="btn btn-primary btn-xs gap-1" type="button" onclick={() => ((sendFor = i), (sendOpen = true))}><Send size={13} /> {t('req.doc.send_first')}</button>
+								<button class="btn btn-outline btn-xs gap-1" type="button" title={t('req.doc.receive_tip')} onclick={() => ((completeFor = i), (completeOpen = true))}><Plus size={13} /> {t('req.doc.receive')}</button>
+							{:else}
+								<button class="btn btn-primary btn-xs gap-1" type="button" title={t('req.doc.receive_tip')} onclick={() => ((completeFor = i), (completeOpen = true))}><Plus size={13} /> {i.display === 'expiring_soon' ? t('req.doc.renew') : t('req.doc.receive')}</button>
+							{/if}
+							{#if i.display === 'pending'}
+								<form method="POST" action="{actionBase}/approveRequirement" use:enhance={submit(() => {})}>
+									<input type="hidden" name="membership_id" value={membership.id} />
+									<input type="hidden" name="requirement_id" value={i.requirement.id} />
+									<button class="btn btn-primary btn-xs gap-1" type="submit" disabled={busy}><CircleCheck size={13} /> {t('req.doc.approve')}</button>
+								</form>
+								<button class="btn btn-outline btn-error btn-xs gap-1" type="button" onclick={() => askNote(i, 'decline')}><CircleX size={13} /> {t('req.doc.decline')}</button>
+							{/if}
+							{#if i.has_document}<a class="btn btn-outline btn-xs gap-1" href={documentHref(membership.id, i.requirement.id)} target="_blank" rel="noopener"><Download size={13} /> {t('req.doc.download')}</a>{/if}
+							{#if !isQuestion(i) && !waiting}<button class="btn btn-outline btn-xs gap-1" type="button" title={t('req.doc.send_tip')} onclick={() => ((sendFor = i), (sendOpen = true))}><Send size={13} /> {t(i.has_sent_file ? 'req.doc.send_replace' : 'req.doc.send')}</button>{/if}
+							{#if i.display !== 'requested' && i.display !== 'declined'}<button class="btn btn-outline btn-xs gap-1" type="button" title={t('req.doc.request_tip')} onclick={() => askNote(i, 'request')}><MessageSquareText size={13} /> {t('req.doc.request')}</button>{/if}
+							{#if i.display === 'missing' || i.display === 'expired' || i.display === 'declined' || i.display === 'requested'}<button class="btn btn-ghost btn-xs gap-1" type="button" title={t('req.doc.bypass_tip')} onclick={() => ((bypassFor = i), (bypassOpen = true))}><UserCheck size={13} /> {t('req.doc.bypass')}</button>{/if}
+							{#if i.display !== 'missing'}
+								<form method="POST" action="{actionBase}/reopenRequirement" class="ml-auto" use:enhance={({ cancel }) => { if (!confirm(t('req.doc.reopen_confirm'))) cancel(); }}>
+									<input type="hidden" name="membership_id" value={membership.id} />
+									<input type="hidden" name="requirement_id" value={i.requirement.id} />
+									<button class="btn btn-ghost btn-xs gap-1 text-danger" type="submit"><RotateCcw size={13} /> {t('req.doc.reopen')}</button>
+								</form>
+							{/if}
+						</div>
+					{/if}
 					{#if i.review_note && (i.display === 'declined' || i.display === 'requested')}
 						<p class="mt-2.5 rounded-md bg-surface px-3 py-2 text-xs text-ink"><span class="font-semibold">{t(i.display === 'declined' ? 'req.doc.note_declined' : 'req.doc.note_requested')}</span> {i.review_note}</p>
 					{/if}
@@ -195,6 +213,17 @@
 				</li>
 			{/each}
 		</ul>
+		{#if canManage}
+			<details class="mt-3 rounded-lg bg-surface px-3 py-2 text-xs text-muted">
+				<summary class="cursor-pointer font-semibold text-ink">{t('req.doc.legend')}</summary>
+				<dl class="mt-2 grid gap-1.5">
+					<div><dt class="inline font-semibold text-ink">{t('req.doc.receive')}:</dt> <dd class="inline">{t('req.doc.receive_tip')}</dd></div>
+					<div><dt class="inline font-semibold text-ink">{t('req.doc.send')}:</dt> <dd class="inline">{t('req.doc.send_tip')}</dd></div>
+					<div><dt class="inline font-semibold text-ink">{t('req.doc.request')}:</dt> <dd class="inline">{t('req.doc.request_tip')}</dd></div>
+					<div><dt class="inline font-semibold text-ink">{t('req.doc.bypass')}:</dt> <dd class="inline">{t('req.doc.bypass_tip')}</dd></div>
+				</dl>
+			</details>
+		{/if}
 		{#if canManage}<p class="mt-3 text-sm"><a class="link inline-flex items-center gap-1.5 font-semibold" href="/settings/requirements"><Settings2 size={14} aria-hidden="true" /> {t('req.doc.manage_link')}</a></p>{/if}
 	{/if}
 </div>

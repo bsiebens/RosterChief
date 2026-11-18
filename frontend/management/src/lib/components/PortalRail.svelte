@@ -10,7 +10,7 @@
 	let { me, branding, mode, shopEnabled = false }: { me: Me | null; branding: Branding; mode: PortalMode; shopEnabled?: boolean } = $props();
 	const items = $derived(portalItems(mode, shopEnabled));
 	const active = $derived(activePortalKey(page.url));
-	const home = $derived(mode === 'parent' ? '/parent' : '/coach');
+	const home = $derived(mode === 'parent' ? '/member' : '/coach');
 </script>
 
 <aside class="sticky top-0 z-30 flex h-dvh w-[84px] shrink-0 flex-col items-center gap-1 bg-sidebar-bg py-4">

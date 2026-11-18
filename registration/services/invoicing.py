@@ -263,6 +263,30 @@ def number_state(d: RegistrationDetails) -> str | None:
 
 
 @transaction.atomic
+def set_installments(actor, batch: RegistrationBatch, offsets: list[int]) -> RegistrationBatch:
+    """Staff set (or clear, with ``[]``) the fixed instalment plan of a confirmed invoice. Each person's fee is split in equal parts over the first due date
+    and ``offsets`` days after it; payments already made settle the oldest open part first, so changing the plan later never loses a payment."""
+    require_finance(actor)
+    batch = RegistrationBatch.objects.select_for_update().get(pk=batch.pk)
+    if batch.cancelled_at:
+        raise Invalid("This registration is cancelled.", code="cancelled")
+    if not batch.confirmed_at or not batch.invoice_due_date:
+        raise Invalid("Confirm the invoice first.", code="not_confirmed")
+    offsets = list(offsets)
+    if not config.valid_offsets(offsets):
+        raise Invalid("Check the instalments.", {"offsets": ["Enter up to 11 later payments, each later than the one before, within 365 days."]})
+    if offsets and (datetime.date.max - batch.invoice_due_date).days < offsets[-1]:
+        raise Invalid("The instalment schedule would end beyond the last supported date.", {"offsets": ["Choose fewer or shorter instalments."]})
+    if offsets != batch.installment_offsets:
+        before = batch.installment_offsets
+        batch.installment_offsets = offsets
+        batch.save(update_fields=["installment_offsets", "modified"])
+        for d in batch.details.select_related("member"):
+            audit.record(actor, "registration.installments_set", member=d.member, target=batch, changes={"installment_offsets": {"from": before, "to": offsets}}, target_label=batch.invoice_number or "")
+    return batch
+
+
+@transaction.atomic
 def confirm_invoice(actor, batch: RegistrationBatch, *, due_date: datetime.date | None = None, send: bool = True) -> RegistrationBatch:
     """Number the invoice, set its due date, roster the requested teams and email the contact that the registration is confirmed (with the invoice PDF
     attached unless ``send`` is false). After this the memberships show up in the Sign-ups queue and the review can no longer be edited."""

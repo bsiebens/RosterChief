@@ -11,6 +11,8 @@ export type SignupRow = {
 	signed_up_at: string | null;
 	/** Names of the active requirements not completed or bypassed yet. */
 	open_requirements: string[];
+	/** A late instalment of this sign-up's registration. */
+	overdue: import('#lib/requirements.ts').Overdue | null;
 	/** Fee settled and nothing open: can be approved now. */
 	clean: boolean;
 	teams: { id: string; name: string }[];

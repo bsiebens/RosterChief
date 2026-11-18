@@ -37,6 +37,8 @@ export const actions: Actions = {
 			min_value: questionType === 'number' ? decimal(f.get('min_value')) : null,
 			max_value: questionType === 'number' ? decimal(f.get('max_value')) : null,
 			requires_document: kind === 'document' && f.get('requires_document') === 'on',
+			needs_staff_file: kind === 'document' && f.get('needs_staff_file') === 'on',
+			member_instructions: String(f.get('member_instructions') ?? '').trim(),
 			valid_for_months: whole(f.get('valid_for_months')),
 			reminder_days_before: whole(f.get('reminder_days_before')) ?? 30,
 			blocked_event_kinds: f.getAll('blocked_event_kinds').map(String),

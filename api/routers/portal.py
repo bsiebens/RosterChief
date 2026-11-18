@@ -1,6 +1,6 @@
 """Club app endpoints scoped to the signed-in member and their children."""
 
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
@@ -19,6 +19,7 @@ from api.routers.public_news import public_news_item
 from events.models import Attendance, Event, EventAttachment, EventTask, GameTimeline, Lineup, LineupSelection, Season
 from events.services import attachments as attachment_svc
 from events.services import attendance, follows, officiating_invitations, referees
+from events.services import lineup as lineup_svc
 from events.services import tasks as task_svc
 from events.services.attachments import ALLOWED_EXTENSIONS, MAX_ATTACHMENT_BYTES
 from formbuilder.models import FormSend, Submission
@@ -88,6 +89,14 @@ def _charge(order, today):
     }  # fmt: skip
 
 
+def _location_detail(event) -> dict | None:
+    """Where exactly: the venue's name, street address, postcode, town and map pin, so a phone can open the address itself and not just the town."""
+    loc = event.location
+    if loc is None:
+        return None
+    return {"name": loc.name, "address": loc.address, "zip_code": loc.zip_code, "city": loc.city, "latitude": loc.latitude, "longitude": loc.longitude}
+
+
 def _event_display(event):
     return {
         "event_id": event.pk,
@@ -98,6 +107,7 @@ def _event_display(event):
         "gathering": event.gathering,
         "deadline": event.deadline,
         "location": event.location.name if event.location else "",
+        "location_detail": _location_detail(event),
         "opponent": event.opponent.name if event.opponent else "",
         "opponent_logo": event.opponent.logo.url if event.opponent and event.opponent.logo else None,
         "is_home": event.is_home_game,
@@ -108,9 +118,23 @@ def _event_display(event):
     }
 
 
-def _attendance(row, blocked=None):
+def _going_counts(event_ids) -> dict:
+    """How many of the invited are going, and how many are invited, per event (one query), for the agenda rows. Counts only: no names, no reasons."""
+    out: dict = {}
+    rows = Attendance.objects.filter(event_id__in=list(event_ids)).values("event_id", "status", "status_before_lineup").annotate(n=Count("pk"))
+    for row in rows:
+        answer = row["status_before_lineup"] if row["status"] in ("selected", "not_selected") and row["status_before_lineup"] else row["status"]
+        entry = out.setdefault(row["event_id"], {"going": 0, "invited": 0})
+        entry["invited"] += row["n"]
+        if answer in ("present", "selected"):
+            entry["going"] += row["n"]
+    return out
+
+
+def _attendance(row, blocked=None, counts=None):
     code, detail = blocked if blocked else (None, None)
-    return {**_event_display(row.event), "id": row.pk, "member_id": row.member_id, "status": row.status, "note": row.note, "blocked": code, "blocked_detail": detail}
+    entry = (counts or {}).get(row.event_id, {})
+    return {**_event_display(row.event), "id": row.pk, "member_id": row.member_id, "status": row.status, "note": row.note, "blocked": code, "blocked_detail": detail, "going_count": entry.get("going"), "invited_count": entry.get("invited")}
 
 
 def _requirement_rows(people, rows, now):
@@ -188,12 +212,20 @@ def portal_home(request):
     now = timezone.now()
     team_ids = TeamMembership.objects.filter(member_id__in=people, season__end_date__gte=timezone.localdate()).values("team_id")
     news = member_news().filter(Q(teams__isnull=True) | Q(teams__in=team_ids)).distinct().prefetch_related("teams", "photos")[:12]
+    # The agenda shows the whole season: the window is at least 90 days either side of today, and wider when the current season is.
+    window_start, window_end = now - timedelta(days=90), now + timedelta(days=90)
+    season = Season.objects.filter(start_date__lte=timezone.localdate(now), end_date__gte=timezone.localdate(now)).order_by("start_date").first()
+    if season is not None:
+        zone = timezone.get_current_timezone()
+        window_start = min(window_start, timezone.make_aware(datetime.combine(season.start_date, time.min), zone))
+        window_end = max(window_end, timezone.make_aware(datetime.combine(season.end_date, time.max), zone))
     events = list(
-        Attendance.objects.filter(member_id__in=people, event__start__range=(now - timedelta(days=90), now + timedelta(days=90)))
+        Attendance.objects.filter(member_id__in=people, event__start__range=(window_start, window_end))
         .select_related("event__location", "event__opponent", "member")
         .order_by("event__start", "member_id", "id")
     )
     blockers = _blockers(events, now)
+    counts = _going_counts({row.event_id for row in events})
     fees = ClubMembership.objects.filter(member_id__in=people).select_related("season", "registration_details__batch").prefetch_related("payments")
     invoices = invoice_access.downloadable_invoices(viewer)
     sends = list(
@@ -208,7 +240,7 @@ def portal_home(request):
         "shop_enabled": _shop_visible(request),
         "people": [{"id": member.pk, "name": str(member), "first_name": member.first_name, "photo_url": member.photo_url} for member in people.values()],
         "events": sorted(
-            [_attendance(row, blockers.get(row.pk)) for row in events] + _requirement_rows(people, events, now),
+            [_attendance(row, blockers.get(row.pk), counts) for row in events] + _requirement_rows(people, events, now),
             key=lambda row: (row["start"], str(row["member_id"])),
         ),
         "tasks": _open_tasks(viewer, people, events, now),
@@ -489,6 +521,8 @@ def _roster(event, people):
                 "extra": regular is None,
                 "team": guest.team.name if guest else None,
                 "state": states.get(answer, "waiting"),
+                #: Once the line-up is published: picked or not. Everyone in the audience sees this (never the lines), null before that.
+                "selected": True if row.status == "selected" else False if row.status == "not_selected" else None,
                 "mine": row.member_id in people,
             }
         )
@@ -640,14 +674,17 @@ def coach_home(request):
         "news": [public_news_item(request, item) for item in news],
         "events": [
             {
-                "id": event.pk, "title": event.title, "start": event.start, "location": event.location.name if event.location else "",
+                "id": event.pk, "title": event.title, "start": event.start, "location": event.location.name if event.location else "", "location_detail": _location_detail(event),
                 "kind": event.kind, "deadline": event.deadline, "team_ids": [team.pk for team in event.teams.all()],
                 "opponent_logo": event.opponent.logo.url if event.opponent and event.opponent.logo else None, "is_home": event.is_home_game,
                 "end": event.end, "gathering": event.gathering, "opponent": event.opponent.name if event.opponent else "", "notes": event.notes,
                 "going": event.going, "out": event.out, "unanswered": event.unanswered, "maybe": event.maybe, "invited": event.invited,
-                "has_game_sheet": hasattr(event, "timeline"),
+                "has_game_sheet": hasattr(event, "timeline"), "score_for": event.score_for, "score_against": event.score_against,
                 "cancelled": event.cancelled, "lineup": event.kind in (Event.EventKind.GAME, Event.EventKind.TOURNAMENT),
                 "lineup_published": getattr(getattr(event, "lineup", None), "published_at", None) is not None,
+                #: none / draft / scheduled / published, and when a scheduled one goes out
+                "lineup_status": lineup_svc.status(getattr(event, "lineup", None)) if event.kind in (Event.EventKind.GAME, Event.EventKind.TOURNAMENT) else "none",
+                "lineup_scheduled_at": getattr(getattr(event, "lineup", None), "scheduled_publish_at", None),
                 "can_manage_attendance": access.can_manage_attendance(request.user, event),
             }
             for event in events

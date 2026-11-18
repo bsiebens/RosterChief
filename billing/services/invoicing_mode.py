@@ -52,7 +52,7 @@ def needs_invoice(day: datetime.date | None = None, ahead_days: int = 0) -> list
         .select_related("club", "plan")
     )
     for due in uninvoiced:
-        lead = dues_svc._terms(due.plan).renewal_lead_days
+        lead = dues_svc.cycle_of_due(due).renewal_lead_days
         opens_on = due.period_start - datetime.timedelta(days=lead)
         if opens_on <= limit:
             rows.append({"kind": "invoice", "club": due.club, "plan": due.plan, "period_start": due.period_start, "opens_on": opens_on, "due": due})

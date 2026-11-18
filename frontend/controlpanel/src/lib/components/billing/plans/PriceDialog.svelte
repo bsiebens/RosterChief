@@ -1,16 +1,17 @@
 <script lang="ts">
-	import type { BillingPlan } from '#lib/billing.ts';
+	import type { BillingPlan, PlanCycle } from '#lib/billing.ts';
 	import Modal from '#lib/components/Modal.svelte';
 	import PriceForm from './PriceForm.svelte';
 
-	let { plan = $bindable(null), ondone }: { plan: BillingPlan | null; ondone: (message: string) => void } = $props();
+	/** A new dated price for one billing cycle of a plan. */
+	let { target = $bindable(null), ondone }: { target: { plan: BillingPlan; cycle: PlanCycle } | null; ondone: (message: string) => void } = $props();
 
 	let open = $state(false);
 	$effect(() => {
-		open = !!plan;
+		open = !!target;
 	});
 </script>
 
-<Modal bind:open title={plan ? `New price · ${plan.plan.name}` : 'New price'} onclose={() => (plan = null)}>
-	{#if plan}<PriceForm {plan} onclose={() => (open = false)} {ondone} />{/if}
+<Modal bind:open title={target ? `New price · ${target.plan.plan.name} · ${target.cycle.name}` : 'New price'} onclose={() => (target = null)}>
+	{#if target}<PriceForm plan={target.plan} cycle={target.cycle} onclose={() => (open = false)} {ondone} />{/if}
 </Modal>

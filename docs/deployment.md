@@ -173,7 +173,7 @@ The old `backup.sh` runs `docker compose exec db pg_dump` and `docker compose ex
 
 Everything else (writing to `.part` and renaming, `seal()` with age, refusing to upload without an age key, the `.offsite-sent` list that makes a failed night catch up the next one, the rclone flags) is independent of Docker and stays. Run it as **root** on the `backend` or `full` host only; frontend hosts hold no data. Optionally add a distinct filename prefix, such as `v2-`, so old and new files are easy to tell apart in the shared archive. The archive job accepts any `*.age` file.
 
-The adapted script has not been run on a new host yet. Test it with step 4 below before you trust it. If you want it committed here as `deploy/host/backup.sh` with a systemd timer, ask for it.
+The adapted script is committed as `deploy/host/backup.sh`. It has not been run on a new host yet, so test it with step 4 below before you trust it. A systemd timer is not included; use the cron line in step 5.
 
 ### Setting it up on the new host
 
@@ -213,8 +213,10 @@ Do these as root on the new backend/full host, in order.
      key_file /root/.ssh/rosterchief_backup known_hosts_file /root/.ssh/known_hosts shell_type none set_modtime false
    rclone lsd offsite:rosterchief      # lists "incoming"
    ```
-4. **Install the adapted script** as `/usr/local/sbin/rosterchief-backup` (mode 700) and run it once by hand:
+4. **Install the script** from the repository (copy it over with `scp`, do not paste it into a terminal, long pastes get corrupted) as `/usr/local/sbin/rosterchief-backup` (mode 700) and run it once by hand:
    ```bash
+   scp deploy/host/backup.sh <host>:/tmp/rosterchief-backup
+   ssh <host> 'sudo install -m 700 -o root -g root /tmp/rosterchief-backup /usr/local/sbin/rosterchief-backup && rm /tmp/rosterchief-backup'
    BACKUP_REMOTE=offsite:rosterchief/incoming /usr/local/sbin/rosterchief-backup /var/backups/rosterchief
    ls -l /var/backups/rosterchief           # db-….dump.age, media-….tar.gz.age, private-media-….tar.gz.age
    rclone ls offsite:rosterchief/incoming   # the same files, on the backup server

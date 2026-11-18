@@ -5,6 +5,9 @@
 	import { api } from '#lib/management-api.ts';
 	import { pwa, registerPwa } from '#lib/pwa.svelte.ts';
 
+	/** `hideWhenOn`: shown only while push is not on yet (the card disappears once notifications are enabled). */
+	let { hideWhenOn = false }: { hideWhenOn?: boolean } = $props();
+	let statusReady = $state(false);
 	let browserReady = $state(false);
 	let supported = $state(false);
 	let ios = $state(false);
@@ -25,9 +28,12 @@
 		ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 		supported = window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 		browserReady = true;
-		if (!supported) return;
+		if (!supported) {
+			statusReady = true;
+			return;
+		}
 		denied = Notification.permission === 'denied';
-		void loadStatus();
+		void loadStatus().finally(() => (statusReady = true));
 	});
 
 	async function loadStatus() {
@@ -99,6 +105,7 @@
 	}
 </script>
 
+{#if !hideWhenOn || (statusReady && !subscribed)}
 <section class="card card-body gap-3">
 	<h2 class="card-title"><Smartphone size={16} aria-hidden="true" />{t('pwa.title')}</h2>
 	{#if browserReady && !pwa.installed}
@@ -119,3 +126,4 @@
 	{/if}
 	{#if message}<p class="text-sm text-danger" role="alert">{message}</p>{/if}
 </section>
+{/if}

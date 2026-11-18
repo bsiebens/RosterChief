@@ -11,7 +11,7 @@ from events.models import Season
 from members.models import ClubMembership
 from members.services import access, signups
 from members.services.errors import Invalid
-from registration.services import invoicing
+from registration.services import installments, invoicing
 from teams.models import Team
 
 router = Router()
@@ -54,7 +54,7 @@ def _out(row: dict) -> dict:
         "membership_id": m.pk,
         "member": {"id": m.member_id, "name": m.member.get_full_name(), "email": m.member.email, "date_of_birth": m.member.date_of_birth, "has_login": row["has_login"]},
         "season_id": m.season_id, "season_name": m.season.name, "fee_status": m.fee_status, "fee_amount": m.fee_amount, "amount_paid": m.amount_paid,
-        "remaining_balance": row["remaining_balance"], "signed_up_at": m.signed_up_at, "open_requirements": row["open_requirements"], "clean": row["clean"],
+        "remaining_balance": row["remaining_balance"], "signed_up_at": m.signed_up_at, "open_requirements": row["open_requirements"], "overdue": installments.overdue(m), "clean": row["clean"],
         "teams": [{"id": t.pk, "name": t.name} for t in row["teams"]], "registration": _registration(row.get("registration")),
     }  # fmt: skip
 

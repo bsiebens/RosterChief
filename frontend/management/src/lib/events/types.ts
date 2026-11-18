@@ -6,7 +6,7 @@ import { getLang, t } from '#lib/i18n.svelte.ts';
 
 export type Ref = { id: string; name: string };
 /** `is_home`: one of the club's own venues (a game there is a home game). */
-export type LocationRef = { id: string; name: string; city: string; address?: string; is_home?: boolean };
+export type LocationRef = { id: string; name: string; city: string; address?: string; zip_code?: string; latitude?: number | null; longitude?: number | null; is_home?: boolean };
 /** A team as the options offer it; `short_name` is what a game title uses when the API sends it (it does not yet). */
 export type TeamRef = Ref & { short_name?: string };
 export type OpponentRef = { id: string; name: string; logo_url: string | null };
@@ -386,3 +386,12 @@ export type AttendanceChange = {
 	via: 'coach' | 'self' | 'guardian' | 'system' | string;
 	note_changed: boolean;
 };
+
+/** The street address on one line ("Stationsstraat 12, 2800 Mechelen"), without the venue's name. */
+export const addressLine = (loc: { address?: string; zip_code?: string; city?: string } | null | undefined) => [loc?.address, [loc?.zip_code, loc?.city].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+
+/** The maps link for a venue: its exact map pin when it has one, else the full street address, else just the name. Never only the town. */
+export function mapsHref(loc: { name?: string; address?: string; zip_code?: string; city?: string; latitude?: number | null; longitude?: number | null } | null | undefined, fallback = ''): string {
+	const query = loc?.latitude != null && loc?.longitude != null ? `${loc.latitude},${loc.longitude}` : [loc?.name, addressLine(loc)].filter(Boolean).join(', ') || fallback;
+	return query ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}` : '';
+}

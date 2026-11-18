@@ -55,10 +55,33 @@ def list_countries(request):
     return [CountryOut(code=c.code, name=str(c.name)) for c in countries]
 
 
+class ClubCountsOut(Schema):
+    active: int
+    archived: int
+    all: int
+
+
 class ClubFilters(Schema):
     q: str | None = None
     status: str = "active"  # active | archived | all
     sport_id: UUID | None = None
+
+
+def _searched(qs, filters: ClubFilters):
+    """The search and sport filters (not the status), shared by the list and the counts next to its status filter."""
+    if filters.q:
+        qs = qs.filter(Q(name__icontains=filters.q) | Q(slug__icontains=filters.q))
+    if filters.sport_id:
+        qs = qs.filter(sport_id=filters.sport_id)
+    return qs
+
+
+@router.get("/clubs/counts", response=ClubCountsOut, summary="How many clubs are active, archived and in all, for the same search and sport filter as the list")
+def club_counts(request, filters: ClubFilters = Query(...)):
+    qs = _searched(Club.objects.exclude(schema_name="public"), filters)
+    active = qs.filter(archived_at__isnull=True).count()
+    archived = qs.filter(archived_at__isnull=False).count()
+    return ClubCountsOut(active=active, archived=archived, all=active + archived)
 
 
 @router.get("/clubs", response=list[ClubListOut], summary="Clubs, with search and an active/archived filter")
@@ -71,11 +94,7 @@ def list_clubs(request, filters: ClubFilters = Query(...)):
         qs = qs.filter(archived_at__isnull=False)
     elif filters.status != "all":
         raise ApiError(422, "validation_error", "status must be active, archived or all.", {"status": ["Use active, archived or all."]})
-    if filters.q:
-        qs = qs.filter(Q(name__icontains=filters.q) | Q(slug__icontains=filters.q))
-    if filters.sport_id:
-        qs = qs.filter(sport_id=filters.sport_id)
-    return [ClubListOut.of(c) for c in qs]
+    return [ClubListOut.of(c) for c in _searched(qs, filters)]
 
 
 @router.post("/clubs", response={202: ProvisioningOut}, summary="Request a new club. Accepted at once; the schema is built in the background (poll the returned id)")

@@ -21,7 +21,7 @@
 	const key = (row: MembershipRow, item: RequirementItem) => `${row.member_id}:${item.id}`;
 	const person = (id: string) => people.find((entry) => entry.id === id);
 	const day = (value: string) => formatDay(parseIsoDate(value) ?? value);
-	const needsAction = (item: RequirementItem) => !item.locked;
+	const needsAction = (item: RequirementItem) => !item.locked && !item.awaiting_file;
 	const choices = (item: RequirementItem) => (item.options ?? []).map((option) => (typeof option === 'string' ? { value: option, label: option } : option));
 	const open = (row: MembershipRow) => row.requirements.filter((item) => item.state === 'missing' || item.state === 'expired' || item.state === 'declined' || item.state === 'requested').length;
 	const waiting = (row: MembershipRow) => row.requirements.filter((item) => item.state === 'pending').length;
@@ -47,11 +47,11 @@
 	}
 </script>
 
-<section class="card" aria-labelledby="req-title">
-	<div class="card-h"><ShieldCheck size={17} aria-hidden="true" /><h2 id="req-title">{t('portal.req_title')}</h2></div>
+<section class="card req-card" aria-labelledby="req-title">
+	<div class="card-h max-md:hidden"><ShieldCheck size={17} aria-hidden="true" /><h2 id="req-title">{t('portal.req_title')}</h2></div>
 	{#each memberships as row (row.member_id + row.season)}
 		{@const who = person(row.member_id)}
-		<div class="border-b border-line last:border-b-0">
+		<div class="border-b border-line last:border-b-0 req-member">
 			<div class="flex items-center gap-3 bg-subhead px-5 py-3">
 				<ClubCrest name={who?.name ?? ''} logoUrl={who?.photo_url} size={32} />
 				<div class="min-w-0 flex-1"><b class="block text-ink">{who?.name}</b><span class="text-xs text-muted">{row.season}</span></div>
@@ -68,6 +68,7 @@
 							<div class="min-w-0 flex-1">
 								<p class="font-semibold text-ink">{item.name}</p>
 								{#if item.description}<p class="text-xs text-muted">{item.description}</p>{/if}
+								{#if item.member_instructions}<p class="mt-1.5 rounded-box bg-subhead px-3 py-2 text-sm text-ink"><span class="text-xs font-semibold text-muted">{t('portal.req_instructions')}</span><br />{item.member_instructions}</p>{/if}
 							</div>
 							<span class="badge badge-sm shrink-0 {tone(item.state)}">{t(`portal.req_state_${item.state}`)}</span>
 						</div>
@@ -90,6 +91,7 @@
 						{#if item.valid_until}
 							<p class="flex items-center gap-1.5 text-xs {item.state === 'expired' ? 'font-semibold text-danger' : item.state === 'expiring_soon' ? 'font-semibold text-warn-text' : 'text-muted'}">{#if item.state !== 'complete'}<TriangleAlert size={13} aria-hidden="true" />{/if}{t(item.state === 'expired' ? 'portal.req_expired_on' : 'portal.req_valid_until', { date: day(item.valid_until) })}</p>
 						{/if}
+						{#if item.awaiting_file && !item.locked}<p class="rounded-box bg-warn-bg px-3 py-2 text-sm text-warn-text">{t('portal.req_awaiting')}</p>{/if}
 						{#if item.state === 'pending'}<p class="text-xs text-info-text">{t('portal.req_pending_help')}</p>{/if}
 						{#if item.state === 'expiring_soon'}<p class="text-xs text-muted">{t('portal.req_renew_help')}</p>{/if}
 						{#if needsAction(item)}

@@ -1,3 +1,4 @@
+export type LocationDetail = { name: string; address: string; zip_code: string; city: string; latitude: number | null; longitude: number | null };
 export type PortalEventDisplay = {
 	event_id: string;
 	title: string;
@@ -7,6 +8,8 @@ export type PortalEventDisplay = {
 	gathering: string | null;
 	deadline: string | null;
 	location: string;
+	/** Where exactly: street address and map pin, so maps opens the address itself and not the town. */
+	location_detail?: LocationDetail | null;
 	/** The other team's name, for the initials crest when it has no logo. */
 	opponent?: string;
 	opponent_logo: string | null;
@@ -25,6 +28,9 @@ export type PortalEvent = PortalEventDisplay & {
 	note: string;
 	/** Why this person cannot sign up right now, so the app says so instead of offering buttons: not invited any more, or an overdue instalment (they can still decline). */
 	blocked?: 'not_invited' | 'late_installment' | null;
+	/** How many invited people are going (counts only), for the agenda rows. */
+	going_count?: number | null;
+	invited_count?: number | null;
 	/** For not_invited: an open requirement blocks this kind of event (with its names), an exclusion, or the person left the event's team or group. */
 	blocked_detail?: { reason: 'requirements' | 'excluded' | 'not_in_audience'; requirements: string[] } | null;
 };
@@ -69,10 +75,10 @@ export type ParentHome = {
 };
 
 export type CoachEvent = {
-	id: string; title: string; start: string; end: string | null; gathering: string | null; location: string; kind: string; deadline: string | null;
+	id: string; title: string; start: string; end: string | null; gathering: string | null; location: string; location_detail?: LocationDetail | null; kind: string; deadline: string | null;
 	team_ids: string[]; opponent: string; opponent_logo: string | null; is_home: boolean; notes?: string;
 	going: number; out: number; unanswered: number; maybe: number; invited: number;
-	cancelled: boolean; lineup: boolean; lineup_published: boolean; has_game_sheet: boolean; can_manage_attendance: boolean;
+	cancelled: boolean; lineup: boolean; lineup_published: boolean; lineup_status?: 'none' | 'draft' | 'scheduled' | 'published'; lineup_scheduled_at?: string | null; has_game_sheet: boolean; can_manage_attendance: boolean; score_for?: number | null; score_against?: number | null;
 };
 
 export type CoachHome = {
@@ -113,7 +119,7 @@ export type EventExtras = {
 	/** The game as the competition's page captured it (played games only): lineup and timeline by period. */
 	game: GameSheet | null;
 	/** Everyone invited and whether they come. Never a reason or note; those are for the coaching app. */
-	roster?: { id: string; name: string; number: number | null; position: string | null; extra: boolean; team: string | null; state: 'going' | 'out' | 'maybe' | 'waiting'; mine: boolean }[] | null;
+	roster?: { id: string; name: string; number: number | null; position: string | null; extra: boolean; team: string | null; state: 'going' | 'out' | 'maybe' | 'waiting'; /** Once the line-up is published: picked or not (never the lines). */ selected?: boolean | null; mine: boolean }[] | null;
 	/** Whole-club events only: the counts instead of a list of names (too many people). */
 	totals?: { going: number; maybe: number; waiting: number; out: number; total: number } | null;
 	tasks: PortalTask[];
@@ -167,6 +173,11 @@ export type RequirementItem = {
 	review_note: string;
 	/** A personalised file the club sent for this person (download through `sentFileHref`). */
 	has_sent_file: boolean;
+	/** The club has to send its document first; until then the member cannot hand anything in. */
+	awaiting_file: boolean;
+	needs_staff_file: boolean;
+	/** What the person completing it has to do. */
+	member_instructions: string;
 	sent_at: string | null;
 	sent_note: string;
 	/** What the member may read of the history: decisions and messages from the club. */

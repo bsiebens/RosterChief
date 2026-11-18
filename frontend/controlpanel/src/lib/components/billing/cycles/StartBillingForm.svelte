@@ -3,6 +3,7 @@
 	import Alert from '#lib/components/Alert.svelte';
 	import InvoiceNumberField from '#lib/components/billing/InvoiceNumberField.svelte';
 	import { day, newKey, price } from './fmt.ts';
+	import type { PlanCycle } from '#lib/billing.ts';
 	import type { PlanLite, Unbilled } from './types.ts';
 
 	let { club, plans, archiveAfterDays, nextNumber = null, onclose, ondone }: { club: Unbilled; plans: PlanLite[]; archiveAfterDays: number; nextNumber?: string | null; onclose: () => void; ondone: (message: string) => void } = $props();
@@ -23,9 +24,18 @@
 	let error = $state('');
 	let fields = $state<Record<string, string>>({});
 
-	const label = (p: PlanLite) => `${p.plan.name} — ${p.current_price == null ? 'no price yet' : `€ ${price(p.current_price)} net`}${p.terms ? ` / ${p.terms.duration_months} mo` : ''}`;
-	const bad = (p: PlanLite) => p.current_price == null;
+	const open = (p: PlanLite) => p.cycles.filter((c) => c.is_active);
+	const billable = (p: PlanLite) => open(p).filter((c) => c.current_price != null);
+	const cycleText = (c: PlanCycle) => `${c.name} — ${c.current_price == null ? 'no price yet' : `€ ${price(c.current_price)} net`} / ${c.duration_months} mo`;
+	const label = (p: PlanLite) => (open(p).length === 1 ? `${p.plan.name} — ${open(p)[0].current_price == null ? 'no price yet' : `€ ${price(open(p)[0].current_price)} net`} / ${open(p)[0].duration_months} mo` : `${p.plan.name} — ${open(p).length} billing cycles`);
+	const bad = (p: PlanLite) => billable(p).length === 0;
 	const chosen = $derived(active.find((p) => p.plan.id === planId));
+	// The billing cycle (monthly, yearly ...): asked when the plan offers more than one; the first priced one is preselected.
+	let cycleId = $state('');
+	$effect(() => {
+		cycleId = chosen ? (billable(chosen)[0]?.id ?? '') : '';
+	});
+	const cycle = $derived(chosen?.cycles.find((c) => c.id === cycleId) ?? null);
 
 	const whole = (v: string) => /^\d+$/.test(v.trim());
 	const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -46,7 +56,7 @@
 		if (!planId) return (fields = { plan_id: 'Choose a plan.' });
 		if (trial && (!whole(trialDays) || Number(trialDays) < 1 || Number(trialDays) > 365)) return (fields = { trial_days: 'Enter a whole number of days between 1 and 365.' });
 		busy = true;
-		const r = await platform('POST', `/clubs/${club.id}/billing/subscribe`, { plan_id: planId, start: start || null, trial_days: trial ? Number(trialDays) : null, auto_renew: autoRenew, auto_archive: autoArchive, notes, invoice_number: invoiceNumber }, fetch, { 'Idempotency-Key': key });
+		const r = await platform('POST', `/clubs/${club.id}/billing/subscribe`, { plan_id: planId, cycle_id: cycleId || null, start: start || null, trial_days: trial ? Number(trialDays) : null, auto_renew: autoRenew, auto_archive: autoArchive, notes, invoice_number: invoiceNumber }, fetch, { 'Idempotency-Key': key });
 		busy = false;
 		if (!r.ok) {
 			fields = r.fields;
@@ -71,6 +81,16 @@
 		{#if fields.plan_id}<span class="mt-1 block text-xs text-club-dark">{fields.plan_id}</span>{/if}
 	</div>
 
+	{#if chosen && open(chosen).length > 1}
+		<div class="form-control">
+			<label class="label" for="{id}-cycle"><span class="label-text">Billing cycle</span></label>
+			<select id="{id}-cycle" class="select select-bordered w-full {fields.cycle_id ? 'select-error' : ''}" bind:value={cycleId} aria-invalid={fields.cycle_id ? 'true' : undefined}>
+				{#each open(chosen) as c (c.id)}<option value={c.id} disabled={c.current_price == null}>{cycleText(c)}</option>{/each}
+			</select>
+			{#if fields.cycle_id}<span class="mt-1 block text-xs text-club-dark">{fields.cycle_id}</span>{/if}
+		</div>
+	{/if}
+
 	<div class="form-control">
 		<label class="label" for="{id}-start"><span class="label-text">Start date (optional)</span></label>
 		<input id="{id}-start" class="input input-bordered w-full" type="date" bind:value={start} aria-describedby="{id}-start-help" aria-invalid={fields.start ? 'true' : undefined} />
@@ -87,7 +107,7 @@
 					{#if fields.trial_days}{fields.trial_days}
 					{:else if trialEnd}
 						Free from {day(startDay)} to {day(trialEnd)}.
-						{#if chosen}The first paid period ({chosen.current_price == null ? 'no price yet' : `€ ${price(chosen.current_price)}`} + VAT) is then invoiced automatically {chosen.terms?.renewal_lead_days ?? 'a few'} days before the trial ends and the club has {chosen.terms?.grace_days ?? 'a number of'} grace days to pay.
+						{#if chosen}The first paid period ({cycle?.current_price == null ? 'no price yet' : `€ ${price(cycle.current_price)}`} + VAT) is then invoiced automatically {cycle?.renewal_lead_days ?? 'a few'} days before the trial ends and the club has {cycle?.grace_days ?? 'a number of'} grace days to pay.
 						{:else}Choose a plan to see what is billed after the trial.{/if}
 					{:else}Enter a whole number of days between 1 and 365.{/if}
 				</span>

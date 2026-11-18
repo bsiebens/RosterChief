@@ -1266,6 +1266,8 @@ textarea[name="note"] {
 
 /* Club portal surfaces and the mobile tab bar. */
 .portal-ui {
+    --color-line: #d2d7df; /* borders and rules: a notch darker than the manage app so cards stand out from the page */
+    --color-rule: #e2e5ea;
     --portal-panel: #ffffff;
     --portal-hero: var(--tenant-sidebar-bg, #172942);
     --portal-hero-content: var(--tenant-sidebar-fg, #fff);
@@ -1291,15 +1293,14 @@ textarea[name="note"] {
     justify-content: center;
     gap: 0.2rem;
     color: var(--color-muted);
-    font: 700 0.72rem/1.1 var(--font-display);
-    letter-spacing: 0.045em;
+    font: 600 0.75rem/1.1 var(--font-sans);
     text-align: center;
-    text-transform: uppercase;
 }
 
 .portal-tab.active, .portal-tab:hover { color: var(--portal-tab-active); }
 .portal-tab { position: relative; }
-.portal-tab.active::before { content: ''; position: absolute; top: 0; left: 50%; width: 2.25rem; height: 2px; transform: translateX(-50%); border-radius: 0 0 2px 2px; background: var(--color-club); }
+.portal-tab-badge { position: absolute; top: 0.3rem; left: calc(50% + 0.55rem); display: grid; min-width: 1.1rem; height: 1.1rem; place-items: center; border-radius: 999px; background: var(--color-club); color: var(--color-club-content); padding: 0 0.3rem; font: 700 0.65rem/1 var(--font-sans); letter-spacing: 0; }
+/* The member tab bar has no bar above the active tab (only its colour); the coach side keeps its red one (see .portal-coach below). */
 
 .portal-ui .portal-masthead {
     padding-top: env(safe-area-inset-top);
@@ -1318,10 +1319,17 @@ textarea[name="note"] {
 
 .portal-coach .portal-mode-label { color: inherit; }
 
+/* The coach side looks like its own app: a near-black band and tab bar under the club colour rule, in light and dark. */
+.portal-coach .portal-masthead { background: #0b0d10; border-bottom-color: var(--color-club); }
+.portal-coach .portal-tabs { background-color: #0b0d10; border-top-color: #2a2f38; }
+.portal-coach .portal-tab { color: #a8b0bd; }
+.portal-coach .portal-tab.active, .portal-coach .portal-tab:hover { color: #fff; }
+.portal-coach .portal-tab.active::before { content: ''; position: absolute; top: 0; left: 50%; width: 2.25rem; height: 3px; transform: translateX(-50%); border-radius: 0 0 2px 2px; background: var(--color-club); }
+
 /* On a phone the coach pages carry their title (and the add button) in a dark band under the masthead, as in the approved design. */
 @media (max-width: 47.99rem) {
     .portal-coach .portal-topbar {
-        background-color: var(--portal-hero);
+        background-color: #0b0d10;
         color: var(--portal-hero-content);
         border-color: var(--color-sidebar-hairline);
     }
@@ -1430,14 +1438,21 @@ textarea[name="note"] {
 
 .portal-sheet::backdrop { background: rgb(0 0 0 / 0.65); }
 
+/* On a phone nothing shows a scrollbar: not the page, sheets, dialogs, tables or any other scrolling area. They all still scroll by touch. */
+@media (max-width: 47.99rem) {
+    * { scrollbar-width: none; }
+    *::-webkit-scrollbar { display: none; width: 0; height: 0; }
+}
+
 @media (min-width: 48rem) {
     /* From tablet width the sheet is a drawer on the right, as in the approved design. */
     .portal-sheet { inset: 0 0 0 auto; margin: 0; width: min(30rem, 100%); max-width: none; height: 100dvh; max-height: none; border-width: 0 0 0 1px; border-radius: 0; }
     .portal-sheet.wide { width: min(46rem, 100%); }
 }
 
+/* Light or dark: follows the phone's setting; the person can force either in Me (data-theme on <html>, set by app.html from localStorage). */
 @media (prefers-color-scheme: dark) {
-    .portal-ui {
+    :root:not([data-theme="light"]) .portal-ui {
         color-scheme: dark;
         --portal-panel: #191f2b;
         --portal-tab-active: color-mix(in srgb, var(--color-club) 70%, white);
@@ -1466,13 +1481,50 @@ textarea[name="note"] {
         --color-info-text: #a3d8f5;
     }
 
-    .portal-ui :is(.input, .select, .textarea, .modal-box, .btn-outline) { background-color: var(--portal-panel); }
-    .portal-ui .btn-outline:hover { background-color: var(--color-subhead); }
+    :root:not([data-theme="light"]) .portal-ui :is(.input, .select, .textarea, .modal-box, .btn-outline) { background-color: var(--portal-panel); }
+    :root:not([data-theme="light"]) .portal-ui .btn-outline:hover { background-color: var(--color-subhead); }
     /* The plain button is the page's ink (light in the dark scheme) with white text: swap the text to the dark panel colour. */
-    .portal-ui .btn:not(.btn-primary, .btn-success, .btn-warning, .btn-error, .btn-ghost, .btn-outline) { color: var(--color-white); }
-    .portal-ui :is(.badge-outline, .badge-ghost) { background-color: var(--portal-panel); }
+    :root:not([data-theme="light"]) .portal-ui .btn:not(.btn-primary, .btn-success, .btn-warning, .btn-error, .btn-ghost, .btn-outline) { color: var(--color-white); }
+    :root:not([data-theme="light"]) .portal-ui :is(.badge-outline, .badge-ghost) { background-color: var(--portal-panel); }
     .portal-ui .badge-neutral { color: var(--color-white); }
 }
+
+
+:root[data-theme="dark"] .portal-ui {
+    color-scheme: dark;
+    --portal-panel: #191f2b;
+    --portal-tab-active: color-mix(in srgb, var(--color-club) 70%, white);
+    --color-paper: #101318;
+    --color-white: #191f2b;
+    --color-ink: #f2f4f8;
+    --color-slate: #d4dce8;
+    --color-muted: #a5b0c1;
+    --color-dim: #91a0b4;
+    --color-subhead: #202939;
+    --color-line: #2e394c;
+    --color-rule: #2a3444;
+    --color-edge: #343f50;
+    --color-stroke: #45536a;
+    --color-danger: #ff9da8;
+    --color-ok-bg: #122e24;
+    --color-ok-border: #295944;
+    --color-ok-text: #82e0ad;
+    --color-warn-bg: #352819;
+    --color-warn-border: #76592e;
+    --color-warn-text: #ffd08d;
+    --color-danger-bg: #3b2229;
+    --color-danger-border: #71414b;
+    --color-info-bg: #163044;
+    --color-info-border: #355978;
+    --color-info-text: #a3d8f5;
+}
+
+:root[data-theme="dark"] .portal-ui :is(.input, .select, .textarea, .modal-box, .btn-outline) { background-color: var(--portal-panel); }
+:root[data-theme="dark"] .portal-ui .btn-outline:hover { background-color: var(--color-subhead); }
+/* The plain button is the page's ink (light in the dark scheme) with white text: swap the text to the dark panel colour. */
+:root[data-theme="dark"] .portal-ui .btn:not(.btn-primary, .btn-success, .btn-warning, .btn-error, .btn-ghost, .btn-outline) { color: var(--color-white); }
+:root[data-theme="dark"] .portal-ui :is(.badge-outline, .badge-ghost) { background-color: var(--portal-panel); }
+.portal-ui .badge-neutral { color: var(--color-white); }
 
 /* Tablet/desktop restyle (phase 4, area F): a card-body whose first child is its heading (h2 or header) gets the
    same hairline-divided header strip as .card-h. Opt in with the `card-hl` class next to `card card-body`. */
@@ -1489,3 +1541,88 @@ textarea[name="note"] {
     background: var(--color-club);
     color: var(--color-club-content);
 }
+
+
+/* Phone header, as on the design boards: a title (with a small mono line above it), the person or team chip, the bell. Coaches get a near-black band
+   with a red rule and a hanging "Coach view" tag. Replaces the club masthead and the page title bar on phones. */
+.phone-top {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    display: flex;
+    min-height: 4rem;
+    align-items: center;
+    gap: 0.75rem;
+    padding: calc(0.75rem + env(safe-area-inset-top)) 1rem 0.25rem;
+    background: var(--color-paper);
+    color: var(--color-ink);
+}
+.phone-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 800 1.875rem/1 var(--font-display); letter-spacing: 0.02em; text-transform: uppercase; }
+.phone-sub { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; margin-bottom: 0.125rem; font: 400 0.6875rem/1.2 var(--font-mono); letter-spacing: 0.06em; color: var(--color-muted); }
+.phone-ib, .phone-chip { position: relative; display: inline-flex; height: 2.75rem; flex: none; align-items: center; justify-content: center; border: 1px solid var(--color-line); background: var(--portal-panel); color: inherit; }
+.phone-ib { width: 2.75rem; border-radius: 999px; }
+.phone-chip { gap: 0.5rem; border-radius: 999px; padding: 0 0.75rem 0 0.3rem; font-weight: 600; }
+.phone-dot { position: absolute; top: 0.5rem; right: 0.6rem; width: 0.6rem; height: 0.6rem; border-radius: 999px; background: var(--color-club); border: 2px solid var(--portal-panel); }
+.phone-switch { display: inline-flex; width: 2.75rem; height: 2.75rem; flex: none; align-items: center; justify-content: center; border-radius: 999px; background: var(--color-club); color: var(--color-club-content); }
+.phone-top.coach { padding-top: calc(1.9rem + env(safe-area-inset-top)); padding-bottom: 0.5rem; background: #0b0d10; color: #f1f3f6; border-bottom: 1px solid #2a2f38; }
+.phone-top.coach::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 5px; background: var(--color-club); }
+.phone-top.coach .phone-tag { position: absolute; left: 1rem; top: 5px; padding: 0.125rem 0.5rem; border-radius: 0 0 6px 6px; background: var(--color-club); color: var(--color-club-content); font: 400 0.625rem/1.3 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; }
+.phone-top.coach .phone-sub { color: #a8b0bd; }
+.phone-top.coach .phone-ib, .phone-top.coach .phone-chip { background: #171a20; border-color: #2a2f38; color: #f1f3f6; }
+.phone-top.coach .phone-dot { border-color: #171a20; }
+
+.phone-title.long { white-space: normal; font-size: 1.5rem; line-height: 1.05; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+
+/* The left bar of an event card follows the kind of event, as the colours elsewhere in the portal do. */
+.portal-event-banner[data-kind='training'] { border-inline-start-color: var(--color-ice); }
+.portal-event-banner[data-kind='tournament'] { border-inline-start-color: var(--color-warn); }
+.portal-event-banner[data-kind='meeting'] { border-inline-start-color: var(--color-primary); }
+.portal-event-banner[data-kind='social'] { border-inline-start-color: var(--color-ok); }
+.portal-event-banner[data-kind='other'] { border-inline-start-color: var(--color-dim); }
+
+/* The kind pill on an event card is solid in the event's colour. */
+.portal-event-banner .kind-pill { background: var(--color-club); color: var(--color-club-content); }
+.portal-event-banner[data-kind='training'] .kind-pill { background: var(--color-ice); color: var(--color-ice-ink); }
+.portal-event-banner[data-kind='tournament'] .kind-pill { background: var(--color-warn); color: #2b1a00; }
+.portal-event-banner[data-kind='meeting'] .kind-pill { background: #fff; color: var(--color-primary); }
+.portal-event-banner[data-kind='social'] .kind-pill { background: var(--color-ok); color: #fff; }
+.portal-event-banner[data-kind='other'] .kind-pill { background: var(--color-dim); color: #0b0d10; }
+
+/* Documents on a phone: every person is a card of their own, with room between them, so it is clear what is for whom. */
+@media (max-width: 47.99rem) {
+    .portal-ui .req-card { display: grid; gap: 1.25rem; border: 0; background: transparent !important; box-shadow: none; }
+    .req-member { overflow: hidden; border: 1px solid var(--color-line); border-radius: var(--radius-box); background: var(--portal-panel); }
+    .req-member:last-child { border-bottom: 1px solid var(--color-line); }
+}
+
+/* The neutral status pill (Can't, Maybe, Not picked): readable on a white card and on a dark one. */
+.pill-muted { background: #e3e6ec; color: #333c4b; }
+:root:not([data-theme='light']) .portal-ui .pill-muted { background: #262e3d; color: #b6bfce; }
+:root[data-theme='dark'] .portal-ui .pill-muted { background: #262e3d; color: #b6bfce; }
+
+/* On a phone the product options open as a card from the bottom, like the other sheets. */
+@media (max-width: 47.99rem) {
+    .portal-modal-sheet { inset: auto 0 0; margin: 0 auto; width: 100%; max-width: 42rem; max-height: 92dvh; border-radius: var(--radius-box) var(--radius-box) 0 0; padding-bottom: env(safe-area-inset-bottom); }
+}
+
+.phone-top .phone-title { flex: 1 1 auto; min-width: 6rem; }
+.phone-chip { padding: 0 0.6rem 0 0.3rem; gap: 0.4rem; }
+
+/* A bar with one main action at the bottom of a phone screen (Add event, New post, View basket): a solid band just above the tab bar, so the list
+   scrolling behind it stops above the button instead of running under it. Larger screens keep the button in the page. */
+@media (max-width: 47.99rem) {
+    .action-dock { position: fixed; right: 0; bottom: calc(3.5rem + env(safe-area-inset-bottom)); left: 0; z-index: 20; display: flex; justify-content: center; padding: 0.75rem 1rem; border-top: 1px solid var(--color-line); background: var(--color-paper); }
+    .action-dock > * { width: 100%; max-width: 42rem; }
+}
+
+@keyframes toast-in { from { opacity: 0; transform: translateY(0.75rem); } to { opacity: 1; transform: none; } }
+.toast-in { animation: toast-in 0.18s ease-out; }
+
+/* The phone header is for phones only: tablets and desktops have the top bar (this must out-rank the display: flex above). */
+@media (min-width: 48rem) {
+    .phone-top { display: none; }
+}
+
+.dot-countdown { width: 0; animation: dot-countdown 6s linear forwards; }
+@keyframes dot-countdown { to { width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .dot-countdown { width: 100%; animation: none; } }

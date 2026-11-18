@@ -19,6 +19,10 @@ class LocationRef(Schema):
     name: str
     city: str = ""
     address: str = ""
+    zip_code: str = ""
+    #: The map pin, when the venue has one: maps links use it so they open the exact spot.
+    latitude: float | None = None
+    longitude: float | None = None
     is_home: bool = False
 
 

@@ -14,9 +14,9 @@ function destination(value) {
 	if (event) return '/app?event=' + event[1];
 	const article = target.pathname.match(new RegExp('^/news/(' + UUID + ')/?$', 'i'));
 	if (article) return '/app?article=' + article[1];
-	if (/^\/forms(\/|$)/.test(target.pathname)) return '/parent?tab=forms';
-	if (/^\/shop(\/|$)/.test(target.pathname)) return '/parent/shop';
-	if (/^\/(registrations|finance)(\/|$)/.test(target.pathname)) return '/parent?tab=payments';
+	if (/^\/forms(\/|$)/.test(target.pathname)) return '/member?tab=forms';
+	if (/^\/shop(\/|$)/.test(target.pathname)) return '/member/shop';
+	if (/^\/(registrations|finance)(\/|$)/.test(target.pathname)) return '/member?tab=payments';
 	return target.pathname === '/' ? '/app' : target.pathname + target.search + target.hash;
 }
 
@@ -43,7 +43,7 @@ self.addEventListener('notificationclick', (event) => {
 		const url = new URL(href, self.location.origin).href;
 		const exact = windows.find((client) => client.url === url);
 		if (exact) { await exact.focus(); return; }
-		const portal = windows.find((client) => new URL(client.url).pathname.startsWith('/parent'));
+		const portal = windows.find((client) => new URL(client.url).pathname.startsWith('/member'));
 		if (portal) {
 			try {
 				const navigated = await portal.navigate(url);

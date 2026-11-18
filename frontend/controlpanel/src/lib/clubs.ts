@@ -1,4 +1,4 @@
-import type { CreditNote, InvoiceBrief, ProrationFields, VoidedInvoice } from './billing.ts';
+import type { CreditNote, CycleRef, InvoiceBrief, ProrationFields, VoidedInvoice } from './billing.ts';
 
 export type SportRef = { id: string; name: string; slug: string };
 export type Sport = SportRef & { club_count: number };
@@ -84,6 +84,8 @@ export type Due = {
 export type ClubBilling = {
 	billed: boolean;
 	plan: PlanRef | null;
+	/** How the club is billed on its plan (monthly, yearly ...). */
+	cycle?: CycleRef | null;
 	auto_renew: boolean | null;
 	auto_archive: boolean | null;
 	notes: string;

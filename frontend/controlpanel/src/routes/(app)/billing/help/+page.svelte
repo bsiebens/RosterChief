@@ -41,7 +41,7 @@
         <section id="cycles" class="card scroll-mt-4">
             <div class="card-body gap-3">
                 <h2 class="card-title">Billing cycles</h2>
-                <p>Every club has its <strong>own cycle</strong>, anchored on the day it was subscribed (an “anniversary” cycle). A period starts that day and lasts the plan's <em>period length</em> (for example 12 months). The next period starts the
+                <p>Every club has its <strong>own cycle</strong>, anchored on the day it was subscribed (an “anniversary” cycle). A period starts that day and lasts the <em>period length</em> of the billing cycle it is billed on (for example 1 month, 3 months or 12 months). The next period starts the
                     day after the previous one ends, so there are never gaps or overlaps.</p>
                 <ul class="list-disc space-y-1 pl-5">
                     <li><strong>Price and VAT are fixed when a period opens.</strong> Changing a plan's price later (prices are dated, a new price is a new row) only affects periods opened after the new price starts.</li>
@@ -49,7 +49,7 @@
                     <li><strong>Plan changes are prorated.</strong> Switching a billed club's plan mid-cycle shortens the running period, credits the unused part and starts a new cycle on the new plan, see <a class="link" href="#switching">Switching
                         plans mid-cycle</a>. Unbilled clubs just get the new features.
                     </li>
-                    <li>Each plan has three timing settings (Plans &amp; pricing): <em>period length</em>, <em>invoice N days before the period starts</em> and <em>grace days</em>.</li>
+                    <li>A plan can offer several <strong>billing cycles</strong> (for example monthly, quarterly and yearly), each with its own price. Every cycle has three timing settings (Plans &amp; pricing): <em>period length</em>, <em>invoice N days before the period starts</em> and <em>grace days</em>. You choose the cycle per club when you start billing it or change its plan; the order of plans and cycles is yours to set with the arrows.</li>
                 </ul>
             </div>
         </section>

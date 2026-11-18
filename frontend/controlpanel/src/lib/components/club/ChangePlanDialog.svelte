@@ -3,7 +3,7 @@
 	// new plan. Every change of plan or date re-runs a read-only preview; nothing is written until "Change plan…".
 	import { untrack } from 'svelte';
 	import { platform } from '#lib/api.ts';
-	import type { PlanChangePreview, PlanChangeResult } from '#lib/billing.ts';
+	import type { BillingPlan, PlanChangePreview, PlanChangeResult } from '#lib/billing.ts';
 	import type { ClubBilling, ClubDetail, Plan } from '#lib/clubs.ts';
 	import { day, money2, todayLocal, vatPct } from '#lib/components/billing/periods/format.ts';
 	import InvoiceNumberField from '#lib/components/billing/InvoiceNumberField.svelte';
@@ -27,7 +27,33 @@
 		return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 	};
 
-	const choices = $derived(plans.filter((p) => p.is_active && p.id !== (currentPlanId ?? billing?.plan?.id)));
+	// The platform's billing plans (with their cycles), loaded when the dialog opens: the options are every active plan and billing cycle but the club's own.
+	let billingPlans = $state<BillingPlan[]>([]);
+	$effect(() => {
+		if (!open) return;
+		void platform<BillingPlan[]>('GET', '/billing/plans').then((r) => (billingPlans = r.data ?? []));
+	});
+	const currentPlan = $derived(currentPlanId ?? billing?.plan?.id ?? null);
+	const currentCycleId = $derived(billing?.cycle?.id ?? null);
+	type Choice = { key: string; label: string; disabled: boolean };
+	const choices = $derived.by<Choice[]>(() => {
+		const out: Choice[] = [];
+		for (const plan of plans.filter((p) => p.is_active)) {
+			const cycles = (billingPlans.find((b) => b.plan.id === plan.id)?.cycles ?? []).filter((c) => c.is_active);
+			if (!cycles.length) {
+				if (plan.id !== currentPlan) out.push({ key: `${plan.id}:`, label: plan.name, disabled: false });
+				continue;
+			}
+			for (const c of cycles) {
+				if (plan.id === currentPlan && c.id === currentCycleId) continue;
+				const price = c.current_price == null ? 'no price yet' : `€ ${Number(c.current_price).toFixed(2)} net`;
+				out.push({ key: `${plan.id}:${c.id}`, label: cycles.length > 1 || plan.id === currentPlan ? `${plan.name} · ${c.name} (${price})` : plan.name, disabled: c.current_price == null });
+			}
+		}
+		return out;
+	});
+	const planOf = (key: string) => key.split(':')[0];
+	const cycleOf = (key: string) => key.split(':')[1] || null;
 	// The period running today (an advance-invoiced next period does not count): the switch date must be after its start.
 	const running = $derived(billing?.dues.find((d) => d.period_start <= today && d.period_end >= today && d.status !== 'cancelled') ?? null);
 	const minDate = $derived(running ? addDay(running.period_start, 1) : undefined);
@@ -50,7 +76,7 @@
 	$effect(() => {
 		if (!open) return;
 		untrack(() => {
-			planId = choices[0]?.id ?? '';
+			planId = choices.find((c) => !c.disabled)?.key ?? '';
 			effective = today;
 			preview = null;
 			previewError = submitError = numberError = '';
@@ -74,7 +100,7 @@
 			previewFields = {};
 		});
 		timer = setTimeout(async () => {
-			const r = await platform<PlanChangePreview>('POST', `/clubs/${club.id}/billing/change-plan/preview`, { plan_id: id, effective_date: date, invoice_number: num });
+			const r = await platform<PlanChangePreview>('POST', `/clubs/${club.id}/billing/change-plan/preview`, { plan_id: planOf(id), cycle_id: cycleOf(id), effective_date: date, invoice_number: num });
 			if (mine !== seq) return;
 			loading = false;
 			if (r.ok && r.data) preview = r.data;
@@ -102,7 +128,7 @@
 		if (!preview) return;
 		busy = true;
 		submitError = '';
-		const r = await platform<PlanChangeResult>('POST', `/clubs/${club.id}/billing/change-plan`, { plan_id: planId, effective_date: effective, invoice_number: invoiceNumber }, fetch, { 'Idempotency-Key': key });
+		const r = await platform<PlanChangeResult>('POST', `/clubs/${club.id}/billing/change-plan`, { plan_id: planOf(planId), cycle_id: cycleOf(planId), effective_date: effective, invoice_number: invoiceNumber }, fetch, { 'Idempotency-Key': key });
 		busy = false;
 		if (!r.ok || !r.data) {
 			if (r.status !== 0) key = crypto.randomUUID();
@@ -120,7 +146,7 @@
 <Modal bind:open title="Change plan and start a new cycle" wide>
 	<div class="flex flex-col gap-4">
 		<p class="text-sm text-muted">
-			{club.name} is billed. Switching plan shortens and prorates the running period, issues a credit note for the unused part, and starts a new full period on the new plan from the switch date.
+			{club.name} is billed. Switching plan or billing cycle shortens and prorates the running period, issues a credit note for the unused part, and starts a new full period on the new plan and cycle from the switch date.
 		</p>
 
 		{#if !isSuperuser}
@@ -129,9 +155,9 @@
 
 		<div class="grid gap-3 sm:grid-cols-2">
 			<div class="form-control w-full">
-				<label class="label" for="cp-plan"><span class="label-text">New plan</span></label>
+				<label class="label" for="cp-plan"><span class="label-text">New plan and billing cycle</span></label>
 				<select id="cp-plan" class="select select-bordered w-full" bind:value={planId} disabled={!isSuperuser}>
-					{#each choices as plan (plan.id)}<option value={plan.id}>{plan.name}</option>{/each}
+					{#each choices as choice (choice.key)}<option value={choice.key} disabled={choice.disabled}>{choice.label}</option>{/each}
 				</select>
 			</div>
 			<Field label="Switch date" type="date" max={today} min={minDate} bind:value={effective} disabled={!isSuperuser} error={previewFields.effective_date} help="Defaults to today. You can back-date within the current period; features change immediately either way." />
@@ -198,7 +224,7 @@
 				{/if}
 
 				<section class="rounded border border-rule bg-paper p-3">
-					<h3 class="mb-2 font-display text-sm font-extrabold tracking-[.06em] text-ink uppercase">New cycle on {p.new_period.plan.name}</h3>
+					<h3 class="mb-2 font-display text-sm font-extrabold tracking-[.06em] text-ink uppercase">New cycle on {p.new_period.plan.name}{p.new_period.cycle ? ` · ${p.new_period.cycle.name}` : ''}</h3>
 					<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-sm">
 						<dt class="text-muted">Period</dt><dd class="font-mono text-xs">{day(p.new_period.period_start)} – {day(p.new_period.period_end)}</dd>
 						<dt class="text-muted">Net</dt><dd class="font-mono tabular-nums">{money2(p.new_period.net)}</dd>

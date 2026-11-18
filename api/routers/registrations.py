@@ -14,6 +14,7 @@ from ninja.errors import HttpError
 
 from api.schemas_registrations import (
     ConfirmIn,
+    InstallmentPlanIn,
     InvoicePaymentIn,
     MarkInvoicePaidIn,
     RegistrationDetail,
@@ -256,6 +257,14 @@ def record_payment(request, batch_id: uuid.UUID, payload: InvoicePaymentIn):
     pay.record(request.user, batch, payload.amount, method=payload.method, reference=payload.reference, paid_at=payload.paid_at, note=payload.note, voucher=_voucher(payload.voucher_number),
                allocations=[a.dict() for a in payload.allocations] if payload.allocations else None)  # fmt: skip
     return 201, _out(request, _batch(batch_id))
+
+
+@router.put("/{batch_id}/installments", response=RegistrationDetail, summary="Set the instalment plan of the invoice (finance)", operation_id="set_registration_installments")
+def set_installments(request, batch_id: uuid.UUID, payload: InstallmentPlanIn):
+    """``offsets`` are the days after the first due date for each later payment (``[]`` = pay in one go). 422 when the invoice is not confirmed or is cancelled."""
+    _gate(request)
+    invoicing.set_installments(request.user, _batch(batch_id), payload.offsets)
+    return _out(request, _batch(batch_id))
 
 
 @router.post("/{batch_id}/mark-paid", response=RegistrationDetail, summary="Settle what the invoice still has open (finance)", operation_id="mark_registration_paid")

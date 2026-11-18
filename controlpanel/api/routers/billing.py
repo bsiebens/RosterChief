@@ -1,4 +1,4 @@
-"""Billing: plan terms and prices, per-club billing, dues (periods), payments and invoices."""
+"""Billing: plan billing cycles and prices, per-club billing, dues (periods), payments and invoices."""
 
 import re
 from decimal import Decimal
@@ -7,7 +7,7 @@ from uuid import UUID
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import Max, Q, Sum
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -15,7 +15,7 @@ from django_countries import countries
 from ninja import Query, Router, Schema
 from ninja.pagination import paginate
 
-from billing.models import BillingSettings, ClubBilling, ClubCreditEntry, CreditNote, CreditNoteSequence, Due, DuePayment, Invoice, InvoiceSequence, PlanPrice
+from billing.models import BillingSettings, ClubBilling, ClubCreditEntry, CreditNote, CreditNoteSequence, Due, DuePayment, Invoice, InvoiceSequence, PlanCycle, PlanPrice
 from billing.services import BillingError, invoicing_mode, numbering
 from billing.services import credit as credit_svc
 from billing.services import credit_notes as credit_notes_svc
@@ -39,7 +39,11 @@ from ..schemas import (
     CreditEntryOut,
     CreditLedgerOut,
     CreditNoteOut,
+    CycleIn,
+    CycleOrderIn,
     CycleOut,
+    CyclePatch,
+    CycleRef,
     DueOut,
     InvoiceIssueIn,
     InvoiceOut,
@@ -57,11 +61,11 @@ from ..schemas import (
     PlanChangeIn,
     PlanChangeOut,
     PlanChangePreviewOut,
+    PlanCycleOut,
     PlanRef,
     PriceIn,
     PriceOut,
     SubscribeBillingIn,
-    TermsIO,
     VoidReissueOut,
 )
 
@@ -87,38 +91,108 @@ def _due(due_id: UUID) -> Due:
 
 
 def _plan(plan_id: UUID) -> Plan:
-    return get_object_or_404(Plan.objects.select_related("terms"), pk=plan_id)
+    return get_object_or_404(Plan, pk=plan_id)
 
 
-# --- plan terms and prices -------------------------------------------------------------------------------------------
+def _cycle(cycle_id: UUID) -> PlanCycle:
+    return get_object_or_404(PlanCycle.objects.select_related("plan"), pk=cycle_id)
 
 
-@router.get("/billing/plans", response=list[BillingPlanOut], summary="Plans with their billing terms and dated prices")
+def _cycle_for(plan: Plan, cycle_id: UUID | None) -> PlanCycle | None:
+    """The cycle the request names, which must belong to ``plan`` (``None`` = the default one, chosen by the billing service)."""
+    if cycle_id is None:
+        return None
+    cycle = PlanCycle.objects.filter(pk=cycle_id).first()
+    if cycle is None or cycle.plan_id != plan.pk:
+        raise ApiError(422, "validation_error", "That billing cycle does not belong to the plan.", {"cycle_id": ["Not a cycle of this plan."]})
+    return cycle
+
+
+def _plans_out() -> list[BillingPlanOut]:
+    return [BillingPlanOut.of(p) for p in Plan.objects.prefetch_related("cycles__prices").order_by("position", "name")]
+
+
+# --- billing cycles and prices of a plan -----------------------------------------------------------------------------
+
+
+@router.get("/billing/plans", response=list[BillingPlanOut], summary="Plans, in the platform's order, with their billing cycles and dated prices")
 def billing_plans(request):
-    return [BillingPlanOut.of(p) for p in Plan.objects.select_related("terms").prefetch_related("prices").order_by("name")]
+    return _plans_out()
 
 
-@router.put("/billing/plans/{plan_id}/terms", response=BillingPlanOut, summary="Set a plan's period length, invoice lead time and grace")
-def put_terms(request, plan_id: UUID, payload: TermsIO):
+def _validated_cycle(cycle: PlanCycle) -> None:
+    try:
+        cycle.full_clean(exclude=["plan"])
+    except ValidationError as exc:
+        fields = {k: [str(m) for m in v] for k, v in exc.message_dict.items()}
+        raise ApiError(422, "validation_error", "Check the billing cycle.", fields) from None
+
+
+@router.post("/billing/plans/{plan_id}/cycles", response={201: PlanCycleOut}, summary="Add a billing cycle to a plan (it goes last); price it afterwards")
+def add_cycle(request, plan_id: UUID, payload: CycleIn):
     plan = _plan(plan_id)
-    terms = plan.terms
-    for field, value in payload.dict().items():
-        setattr(terms, field, value)
-    terms.full_clean()
-    terms.save()
-    audit.record(request.user, "billing.terms_updated", target=plan, data=payload.dict())
-    return BillingPlanOut.of(_plan(plan_id))
+    if PlanCycle.objects.filter(plan=plan, duration_months=payload.duration_months).exists():
+        raise ApiError(409, "conflict", "This plan already has a billing cycle of that length.", {"duration_months": ["Already offered."]})
+    last = PlanCycle.objects.filter(plan=plan).aggregate(top=Max("position"))["top"]
+    cycle = PlanCycle(plan=plan, position=0 if last is None else last + 1, **payload.dict())
+    _validated_cycle(cycle)
+    cycle.save()
+    audit.record(request.user, "billing.cycle_added", target=plan, data={"cycle": cycle.display_name, **payload.dict()})
+    return 201, PlanCycleOut.of(cycle)
 
 
-@router.post("/billing/plans/{plan_id}/prices", response={201: PriceOut}, summary="Add a dated price (a rate change is always a new row)")
-def add_price(request, plan_id: UUID, payload: PriceIn):
+@router.patch("/billing/cycles/{cycle_id}", response=PlanCycleOut, summary="Change a cycle's name, length, invoice lead time, grace or whether it can be chosen. Periods already open keep their dates")
+def patch_cycle(request, cycle_id: UUID, payload: CyclePatch):
+    cycle = _cycle(cycle_id)
+    changes = payload.dict(exclude_unset=True)
+    if "duration_months" in changes and PlanCycle.objects.filter(plan=cycle.plan, duration_months=changes["duration_months"]).exclude(pk=cycle.pk).exists():
+        raise ApiError(409, "conflict", "This plan already has a billing cycle of that length.", {"duration_months": ["Already offered."]})
+    if changes.get("is_active") is False and cycle.is_active and not PlanCycle.objects.filter(plan=cycle.plan, is_active=True).exclude(pk=cycle.pk).exists():
+        raise ApiError(409, "conflict", "A plan needs at least one active billing cycle. Add or activate another one first.", {"is_active": ["The last active cycle."]})
+    for field, value in changes.items():
+        setattr(cycle, field, value)
+    _validated_cycle(cycle)
+    cycle.save()
+    audit.record(request.user, "billing.cycle_updated", target=cycle.plan, data={"cycle": cycle.display_name, **changes})
+    return PlanCycleOut.of(cycle)
+
+
+@router.delete("/billing/cycles/{cycle_id}", response={204: None}, summary="Delete a cycle nobody was ever billed on (otherwise deactivate it)")
+def delete_cycle(request, cycle_id: UUID):
+    cycle = _cycle(cycle_id)
+    if PlanCycle.objects.filter(plan=cycle.plan).count() == 1:
+        raise ApiError(409, "conflict", "A plan needs at least one billing cycle.")
+    if cycle.dues.exists() or cycle.club_billings.exists():
+        raise ApiError(409, "conflict", "Clubs have been billed on this cycle. Deactivate it instead.")
+    audit.record(request.user, "billing.cycle_deleted", target=cycle.plan, data={"cycle": cycle.display_name})
+    cycle.delete()
+    return 204, None
+
+
+@router.put("/billing/plans/{plan_id}/cycles/order", response=BillingPlanOut, summary="Put the plan's cycles in this order (ids first to last); the first active one is the default")
+def order_cycles(request, plan_id: UUID, payload: CycleOrderIn):
     plan = _plan(plan_id)
+    ids = list(payload.cycle_ids)
+    own = {c.pk: c for c in PlanCycle.objects.filter(plan=plan)}
+    if len(ids) != len(set(ids)) or any(i not in own for i in ids):
+        raise ApiError(422, "validation_error", "The list must hold cycles of this plan, each once.", {"cycle_ids": ["Invalid list."]})
+    rest = [c.pk for c in PlanCycle.objects.filter(plan=plan).exclude(pk__in=ids).order_by("position", "duration_months")]
+    for index, pk in enumerate(ids + rest):
+        if own[pk].position != index:
+            PlanCycle.objects.filter(pk=pk).update(position=index)
+    audit.record(request.user, "billing.cycles_reordered", target=plan, data={"order": [str(i) for i in ids + rest]})
+    return BillingPlanOut.of(Plan.objects.prefetch_related("cycles__prices").get(pk=plan.pk))
+
+
+@router.post("/billing/cycles/{cycle_id}/prices", response={201: PriceOut}, summary="Add a dated price to a billing cycle (a rate change is always a new row)")
+def add_price(request, cycle_id: UUID, payload: PriceIn):
+    cycle = _cycle(cycle_id)
     if payload.amount < 0:
         raise ApiError(422, "validation_error", "The amount cannot be negative.", {"amount": ["Cannot be negative."]})
-    if PlanPrice.objects.filter(plan=plan, active_from=payload.active_from).exists():
+    if PlanPrice.objects.filter(cycle=cycle, active_from=payload.active_from).exists():
         raise ApiError(409, "conflict", "A price already exists for that date.")
-    price = PlanPrice.objects.create(plan=plan, active_from=payload.active_from, amount=payload.amount)
-    audit.record(request.user, "billing.price_added", target=plan, data={"active_from": str(payload.active_from), "amount": str(payload.amount)})
+    price = PlanPrice.objects.create(plan=cycle.plan, cycle=cycle, active_from=payload.active_from, amount=payload.amount)
+    audit.record(request.user, "billing.price_added", target=cycle.plan, data={"cycle": cycle.display_name, "active_from": str(payload.active_from), "amount": str(payload.amount)})
     return 201, PriceOut(id=price.pk, active_from=price.active_from, amount=price.amount)
 
 
@@ -142,6 +216,7 @@ def _club_billing(club: Club) -> ClubBillingOut:
         auto_renew=billing.auto_renew if billing else None,
         auto_archive=billing.auto_archive if billing else None,
         notes=billing.notes if billing else "",
+        cycle=CycleRef.of(dues_svc.resolve_cycle(club, plan)) if billing is not None and plan is not None else None,
         trial_ends_at=billing.trial_ends_at if billing else None,
         downgraded_at=billing.downgraded_at if billing else None,
         owed=owed,
@@ -176,10 +251,13 @@ def subscribe(request, club_id: UUID, payload: SubscribeBillingIn):
     if ClubBilling.objects.filter(club=club).exists():
         raise ApiError(409, "billing_error", BILLED_USE_PLAN_CHANGE)
     try:
-        _, due = dues_svc.subscribe(club, plan, start=payload.start, auto_renew=payload.auto_renew, auto_archive=payload.auto_archive, notes=payload.notes, trial_days=payload.trial_days, actor=request.user, invoice_number=payload.invoice_number)
+        _, due = dues_svc.subscribe(
+            club, plan, start=payload.start, auto_renew=payload.auto_renew, auto_archive=payload.auto_archive, notes=payload.notes, trial_days=payload.trial_days, actor=request.user,
+            invoice_number=payload.invoice_number, cycle=_cycle_for(plan, payload.cycle_id),
+        )  # fmt: skip
     except ValueError as exc:
         raise _number_error(exc, "invoice_number") from None
-    audit.record(request.user, "billing.subscribed", club=club, data={"plan": plan.code, "opened_period": due is not None, "trial_days": payload.trial_days, **_custom_number_data(due)})
+    audit.record(request.user, "billing.subscribed", club=club, data={"plan": plan.code, "cycle": payload.cycle_id and str(payload.cycle_id), "opened_period": due is not None, "trial_days": payload.trial_days, **_custom_number_data(due)})
     return 201, _club_billing(club)
 
 
@@ -414,7 +492,7 @@ def _date_error(exc: plan_change_svc.PlanChangeDateError) -> ApiError:
 def change_plan_preview(request, club_id: UUID, payload: PlanChangeIn):
     club, plan = _change_inputs(club_id, payload)
     try:
-        change = plan_change_svc.build_plan_change(club, plan, payload.effective_date, payload.invoice_number)
+        change = plan_change_svc.build_plan_change(club, plan, payload.effective_date, payload.invoice_number, _cycle_for(plan, payload.cycle_id))
     except plan_change_svc.PlanChangeDateError as exc:
         raise _date_error(exc) from None
     except ValueError as exc:
@@ -427,7 +505,7 @@ def change_plan_preview(request, club_id: UUID, payload: PlanChangeIn):
 def change_plan(request, club_id: UUID, payload: PlanChangeIn):
     club, plan = _change_inputs(club_id, payload)
     try:
-        result = plan_change_svc.execute_plan_change(club, plan, effective_date=payload.effective_date, actor=request.user, invoice_number=payload.invoice_number)
+        result = plan_change_svc.execute_plan_change(club, plan, effective_date=payload.effective_date, actor=request.user, invoice_number=payload.invoice_number, cycle=_cycle_for(plan, payload.cycle_id))
     except plan_change_svc.PlanChangeDateError as exc:
         raise _date_error(exc) from None
     except ValueError as exc:
@@ -441,6 +519,8 @@ def change_plan(request, club_id: UUID, payload: PlanChangeIn):
         data={
             "from_plan": change.plan_from.code if change.plan_from else None,
             "to_plan": plan.code,
+            "from_cycle": change.cycle_from.display_name if change.cycle_from else None,
+            "to_cycle": change.cycle_to.display_name,
             "effective_date": str(change.effective_date),
             "old_due": str(result.old_due.pk) if result.old_due else None,
             "credit_notes": [n.number for n in result.credit_notes],

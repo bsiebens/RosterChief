@@ -22,6 +22,8 @@
 	let minValue = $state('');
 	let maxValue = $state('');
 	let requiresDocument = $state(false);
+	let needsStaffFile = $state(false);
+	let instructions = $state('');
 	let validFor = $state('');
 	let reminder = $state('30');
 	let kinds = $state<string[]>([]);
@@ -40,6 +42,8 @@
 		minValue = r?.min_value != null ? String(Number(r.min_value)) : '';
 		maxValue = r?.max_value != null ? String(Number(r.max_value)) : '';
 		requiresDocument = r?.requires_document ?? false;
+		needsStaffFile = r?.needs_staff_file ?? false;
+		instructions = r?.member_instructions ?? '';
 		validFor = r?.valid_for_months ? String(r.valid_for_months) : '';
 		reminder = String(r?.reminder_days_before ?? 30);
 		kinds = [...(r?.blocked_event_kinds ?? [])];
@@ -144,6 +148,11 @@
 			<textarea id="req-desc" name="description" class="textarea textarea-bordered w-full" rows="2" bind:value={description}></textarea>
 			<span class="label-text-alt mt-1 block">{t('req.f.description_help')}</span>
 		</div>
+		<div class="form-control">
+			<label class="label" for="req-instr"><span class="label-text">{t('req.f.instructions')}</span></label>
+			<textarea id="req-instr" name="member_instructions" class="textarea textarea-bordered w-full" rows="3" bind:value={instructions}></textarea>
+			<span class="label-text-alt mt-1 block">{t('req.f.instructions_help')}</span>
+		</div>
 		<fieldset class="grid gap-1.5">
 			<legend class="label-text mb-1">{t('req.f.kind')}</legend>
 			<div class="flex flex-wrap gap-x-5 gap-y-1.5 text-sm">
@@ -180,6 +189,13 @@
 				<input type="checkbox" name="requires_document" class="toggle" bind:checked={requiresDocument} />
 				<span class="label-text">{t('req.f.requires_document')}</span>
 			</label>
+			<div class="grid gap-1">
+				<label class="label cursor-pointer justify-start gap-2 py-1">
+					<input type="checkbox" name="needs_staff_file" class="toggle" bind:checked={needsStaffFile} />
+					<span class="label-text">{t('req.f.needs_staff_file')}</span>
+				</label>
+				<span class="label-text-alt pl-1">{t('req.f.needs_staff_file_help')}</span>
+			</div>
 		{/if}
 		<div class="grid gap-3 sm:grid-cols-2">
 			<Field label={t('req.f.valid_for')} name="valid_for_months" type="number" min="1" max="120" bind:value={validFor} error={err('valid_for_months')} help={t('req.f.valid_for_help')} />

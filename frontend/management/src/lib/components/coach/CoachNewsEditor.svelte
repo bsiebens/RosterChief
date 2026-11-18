@@ -243,7 +243,7 @@
 	{/if}
 
 	{#if canEdit}
-		<div class="sticky bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-10 flex items-center gap-2 rounded-box border border-line bg-(--portal-panel) p-2.5 shadow-sm md:bottom-2">
+		<div class="action-dock md:sticky md:bottom-2 md:z-10 md:rounded-box md:border md:border-line md:bg-(--portal-panel) md:p-2.5 md:shadow-sm"><div class="flex w-full items-center gap-2">
 			{#if canPublish}
 				<button type="button" class="btn {status === 'published' ? 'btn-primary' : 'btn-outline'} min-h-12 flex-1 gap-2" disabled={busy || !dirty} onclick={() => run('save', 'saved')}><Save size={16} aria-hidden="true" />{status === 'published' ? t('news.save') : t('news.save_draft')}</button>
 				{#if status !== 'published' || item?.is_scheduled}
@@ -255,7 +255,8 @@
 			{:else}
 				<button type="button" class="btn btn-primary min-h-12 flex-1 gap-2" disabled={busy || !dirty} onclick={() => run('save', 'saved')}><Save size={16} aria-hidden="true" />{t('news.save')}</button>
 			{/if}
-		</div>
+		</div></div>
+		<div class="h-[4.75rem] md:hidden" aria-hidden="true"></div>
 		{#if !canPublish && status === 'draft'}<p class="text-center text-xs text-muted">{t('news.submit_help')}</p>{/if}
 	{/if}
 </div>

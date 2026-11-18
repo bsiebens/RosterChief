@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { Bell, BellOff, CheckCheck, CircleAlert, CircleCheck, Info, Trash2 } from '@lucide/svelte';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
-	import { notifications, type AppNotification } from '#lib/notifications.svelte.ts';
+	import { notificationHref as hrefFor, notifications, type AppNotification } from '#lib/notifications.svelte.ts';
 
 	let { dark = false, portal }: { dark?: boolean; portal?: 'parent' | 'coach' } = $props();
 	const panelId = $props.id();
@@ -43,19 +43,7 @@
 		}
 	}
 
-	function notificationHref(href: string) {
-		if (!portal) return href;
-		const event = href.match(/^\/calendar\/events\/([0-9a-f-]{36})(?:[/?#]|$)/i);
-		if (event) return portal === 'coach' ? `/calendar/events/${event[1]}?view=coach` : `/parent?tab=calendar&event=${event[1]}`;
-		const article = href.match(/^\/news\/([0-9a-f-]{36})(?:[/?#]|$)/i);
-		if (article) return `/${portal}?tab=news&article=${article[1]}`;
-		if (portal === 'parent') {
-			if (/^\/forms(?:\/|$)/.test(href)) return '/parent/forms';
-			if (/^\/shop(?:\/|$)/.test(href)) return '/parent/shop';
-			if (/^\/(registrations|finance)(?:\/|$)/.test(href)) return '/parent?tab=payments';
-		}
-		return href;
-	}
+	const notificationHref = (href: string) => hrefFor(href, portal);
 
 	function onWindowClick(e: MouseEvent) {
 		if (open && root && !root.contains(e.target as Node)) open = false;

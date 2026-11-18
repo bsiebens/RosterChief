@@ -23,8 +23,8 @@ export const load: LayoutServerLoad = async ({ locals, url, fetch }) => {
 	if (a.status === 'mfa_enrollment_required' && !OPEN_WHILE_ENROLLING.includes(url.pathname)) redirect(303, `${SECURITY}?required=1`);
 	if (a.status === 'authenticated' && url.pathname === '/no-access') redirect(303, '/');
 	if (locals.mode === 'platform' && !PLATFORM_PATHS.includes(url.pathname)) redirect(303, '/');
-	const parentRoute = url.pathname === '/parent' || url.pathname.startsWith('/parent/');
-	if (locals.mode === 'club' && a.status === 'authenticated' && !a.me && !parentRoute && url.pathname !== '/app' && !OPEN_WHILE_ENROLLING.includes(url.pathname)) redirect(303, '/parent');
+	const parentRoute = url.pathname === '/member' || url.pathname.startsWith('/member/');
+	if (locals.mode === 'club' && a.status === 'authenticated' && !a.me && !parentRoute && url.pathname !== '/app' && !OPEN_WHILE_ENROLLING.includes(url.pathname)) redirect(303, '/member');
 
 	// Staff who open the member app: /me only says the club has a shop, not whether it is open to members right now.
 	let shopOpen: boolean | null = null;

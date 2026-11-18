@@ -89,23 +89,41 @@ class BillingSettings(UUIDModel):
         cache.set(self._cache_key(), self, self.CACHE_SECONDS)
 
 
-class PlanTerms(UUIDModel):
-    """The commercial clock of a plan: how long a period is and when it is invoiced and chased."""
+CYCLE_NAMES = {1: _("Monthly"), 2: _("Every 2 months"), 3: _("Quarterly"), 6: _("Half-yearly"), 12: _("Yearly"), 24: _("Every 2 years")}
 
-    plan = models.OneToOneField("features.Plan", verbose_name=_("plan"), on_delete=models.CASCADE, related_name="terms")
-    duration_months = models.PositiveSmallIntegerField(_("period length (months)"), default=12, validators=[MinValueValidator(1)])
+
+class PlanCycle(UUIDModel):
+    """One way to be billed on a plan: how long a period is, when it is invoiced and chased, and (through ``PlanPrice``) what it costs.
+
+    A plan can offer several (monthly, quarterly, yearly ...), each with its own dated prices; the platform picks one per club.
+    ``position`` is the order they are offered in; ``is_active`` off means no club can be put on it any more (clubs already on it keep renewing)."""
+
+    plan = models.ForeignKey("features.Plan", verbose_name=_("plan"), on_delete=models.CASCADE, related_name="cycles")
+    label = models.CharField(_("name"), max_length=60, blank=True, help_text=_("Optional. Empty = named after its length (Monthly, Quarterly, Yearly ...)."))
+    duration_months = models.PositiveSmallIntegerField(_("period length (months)"), default=12, validators=[MinValueValidator(1), MaxValueValidator(120)])
     renewal_lead_days = models.PositiveSmallIntegerField(_("invoice this many days before the period starts"), default=30)
     grace_days = models.PositiveSmallIntegerField(_("grace days, counted from the period start or from the day it was opened, whichever is later"), default=30)
+    position = models.PositiveIntegerField(_("position"), default=0, db_index=True)
+    is_active = models.BooleanField(_("active"), default=True, help_text=_("Inactive cycles cannot be chosen for a club any more. Clubs already on it keep renewing."))
 
     class Meta:
-        verbose_name = _("plan terms")
-        verbose_name_plural = _("plan terms")
+        verbose_name = _("plan billing cycle")
+        verbose_name_plural = _("plan billing cycles")
+        ordering = ["plan", "position", "duration_months"]
+        constraints = [models.UniqueConstraint(fields=["plan", "duration_months"], name="uniq_plan_cycle_length")]
 
     def __str__(self) -> str:
-        return f"{self.plan}: {self.duration_months} month(s)"
+        return f"{self.plan}: {self.display_name}"
+
+    @property
+    def display_name(self) -> str:
+        if self.label.strip():
+            return self.label.strip()
+        name = CYCLE_NAMES.get(self.duration_months)
+        return str(name) if name else f"Every {self.duration_months} months"
 
     def clean(self):
-        limit = self.duration_months * MAX_DAYS_PER_MONTH
+        limit = (self.duration_months or 1) * MAX_DAYS_PER_MONTH
         if self.renewal_lead_days >= limit:
             raise ValidationError({"renewal_lead_days": _("The invoice lead time must be shorter than the period.")})
         if self.grace_days > limit:
@@ -113,20 +131,38 @@ class PlanTerms(UUIDModel):
 
 
 class PlanPrice(UUIDModel):
-    """A dated price. A rate change is always a new row, never an edit; the latest ``active_from <= day`` applies."""
+    """A dated price of one billing cycle of a plan. A rate change is always a new row, never an edit; the latest ``active_from <= day`` applies.
+
+    Created without a ``cycle`` it goes to the plan's first cycle (a plan always has one)."""
 
     plan = models.ForeignKey("features.Plan", verbose_name=_("plan"), on_delete=models.CASCADE, related_name="prices")
+    cycle = models.ForeignKey(PlanCycle, verbose_name=_("billing cycle"), on_delete=models.CASCADE, related_name="prices", null=True, blank=True)
     active_from = models.DateField(_("active from"))
     amount = models.DecimalField(_("amount (EUR)"), max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0"))])
 
     class Meta:
         verbose_name = _("plan price")
         verbose_name_plural = _("plan prices")
-        ordering = ["plan", "-active_from"]
-        constraints = [models.UniqueConstraint(fields=["plan", "active_from"], name="uniq_plan_price_date")]
+        ordering = ["plan", "cycle", "-active_from"]
+        constraints = [models.UniqueConstraint(fields=["cycle", "active_from"], name="uniq_cycle_price_date")]
 
     def __str__(self) -> str:
-        return f"{self.plan}: {self.amount} from {self.active_from}"
+        return f"{self.cycle or self.plan}: {self.amount} from {self.active_from}"
+
+    def clean(self):
+        if self.cycle_id and self.plan_id and self.cycle.plan_id != self.plan_id:
+            raise ValidationError({"cycle": _("The billing cycle belongs to another plan.")})
+
+    def save(self, *args, **kwargs):
+        if self.cycle_id is None and self.plan_id:
+            self.cycle = ensure_default_cycle(self.plan)
+        super().save(*args, **kwargs)
+
+
+def ensure_default_cycle(plan) -> PlanCycle:
+    """The plan's first cycle; a plan without any gets a yearly one (the long-standing default) so it can always be priced."""
+    cycle = PlanCycle.objects.filter(plan=plan).order_by("position", "duration_months").first()
+    return cycle or PlanCycle.objects.create(plan=plan)
 
 
 class ClubBilling(UUIDModel):
@@ -134,6 +170,9 @@ class ClubBilling(UUIDModel):
 
     club = models.OneToOneField(settings.TENANT_MODEL, verbose_name=_("club"), on_delete=models.CASCADE, related_name="billing")
     auto_renew = models.BooleanField(_("auto renew"), default=True)
+    cycle = models.ForeignKey(
+        PlanCycle, verbose_name=_("billing cycle"), on_delete=models.SET_NULL, null=True, blank=True, related_name="club_billings", help_text=_("How the club is billed on its plan (monthly, yearly ...). Empty = the plan's first cycle.")
+    )
     auto_archive = models.BooleanField(_("auto archive"), default=True, help_text=_("Archive the club when a period stays unpaid past its grace."))
     notes = models.TextField(_("notes"), blank=True)
     trial_ends_at = models.DateField(_("trial ends"), null=True, blank=True, help_text=_("Set while the club's free trial period is running or has not been followed by a paid period yet."))
@@ -166,6 +205,9 @@ class Due(UUIDModel):
 
     club = models.ForeignKey(settings.TENANT_MODEL, verbose_name=_("club"), on_delete=models.CASCADE, related_name="dues")
     plan = models.ForeignKey("features.Plan", verbose_name=_("plan"), on_delete=models.PROTECT, related_name="dues")
+    cycle = models.ForeignKey(
+        PlanCycle, verbose_name=_("billing cycle"), on_delete=models.SET_NULL, null=True, blank=True, related_name="dues", help_text=_("The cycle this period was opened on (its figures are frozen on the period itself).")
+    )
     amount = models.DecimalField(_("amount"), max_digits=10, decimal_places=2, help_text=_("Net amount, excluding VAT."))
     vat_rate = models.DecimalField(_("VAT rate"), max_digits=5, decimal_places=2, default=Decimal("0"))
     vat_amount = models.DecimalField(_("VAT amount"), max_digits=10, decimal_places=2, default=Decimal("0"))
@@ -254,8 +296,10 @@ class Due(UUIDModel):
 
     def save(self, *args, **kwargs):
         if self._state.adding:
-            terms = self.plan.terms
-            if self.period_end is None:  # a trial passes its own end; otherwise the plan's period length applies
+            if self.cycle_id is None:
+                self.cycle = ensure_default_cycle(self.plan)
+            terms = self.cycle
+            if self.period_end is None:  # a trial passes its own end; otherwise the cycle's period length applies
                 self.period_end = self.period_start + relativedelta(months=terms.duration_months) - datetime.timedelta(days=1)
             if self.grace_until is None:
                 self.grace_until = grace_until_for(self.period_start, terms.grace_days)

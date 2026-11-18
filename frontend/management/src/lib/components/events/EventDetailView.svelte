@@ -18,8 +18,8 @@
     import EventLineup from '#lib/components/events/EventLineup.svelte';
     import EventTasks from '#lib/components/events/EventTasks.svelte';
     import {usePageHeader} from '#lib/header.svelte.ts';
-    import {t} from '#lib/i18n.svelte.ts';
-    import {describeRecurrence, eventEditHref, formatDateTime, formatDay, formatRange, kindLabelKey, kindStyle, statusLabelKey, statusStyle} from '#lib/events/types.ts';
+    import {getLang, t} from '#lib/i18n.svelte.ts';
+    import {describeRecurrence, eventEditHref, formatDateTime, formatDay, formatRange, formatTime, kindLabelKey, kindStyle, mapsHref, statusLabelKey, statusStyle} from '#lib/events/types.ts';
 
     import type {ActionData, PageData} from '../../../routes/(app)/calendar/events/[id]/$types';
 
@@ -28,15 +28,16 @@
     const style = $derived(kindStyle(ev.kind));
     const past = $derived(new Date(ev.start).getTime() < Date.now());
     const series = $derived(ev.series ? describeRecurrence(ev.series.recurrence, ev.series.description) : '');
-    const mapsHref = $derived(ev.location ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([ev.location.name, ev.location.city].filter(Boolean).join(', '))}` : '');
+    const mapsLink = $derived(ev.location ? mapsHref(ev.location) : '');
     // Phones in the coach app get their own layouts (hero card, tab strip, attendance cards, line-up editor).
     const narrow = new MediaQuery('max-width: 767px', false);
     const phone = $derived(data.coachView && narrow.current);
     const viewQuery = $derived(data.coachView ? '?view=coach' : '');
     const editHref = $derived(`${eventEditHref(ev.id)}${viewQuery}`);
-    let menuOpen = $state(false);
     const tabHref = (key: string) => `?tab=${key}${data.coachView ? '&view=coach' : ''}`;
-    const calendarHref = $derived(data.coachView ? `/coach?tab=calendar&team=${(data.event.teams ?? []).map((team) => team.id).join(',')}` : '/calendar');
+    // The month an event is in, as the coach calendar takes it (`YYYY-MM`), so going back lands on that month.
+    const monthOf = (iso: string) => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+    const calendarHref = $derived(data.coachView ? `/coach?tab=calendar&team=${(data.event.teams ?? []).map((team) => team.id).join(',')}&month=${monthOf(data.event.start)}` : '/calendar');
 
     // Phone coach view: Details, Attendance and (games and tournaments) Line-up; files live under Details.
     const phoneTabs = $derived([
@@ -57,7 +58,6 @@
     let updating = $state(false);
     const canUpdate = $derived(past && ev.has_game_source && (ev.can_edit || ev.can_manage_attendance));
     let cancelOpen = $state(false);
-    const openCancel = () => { menuOpen = false; cancelOpen = true; };
     let busy = $state(false);
     const submit = () => {
         busy = true;
@@ -68,7 +68,10 @@
         };
     };
 
-    usePageHeader(() => ({title: ev.title, context: `${t(kindLabelKey(ev.kind))} · ${formatDay(ev.start)}`, badge, actions}));
+    // On a coach phone the header is the kind of event (Training, Game ...) on every tab, with the day and start time above it; the title and the rest are below.
+    const phoneTitle = $derived(t(kindLabelKey(ev.kind)));
+    const phoneContext = $derived(`${new Intl.DateTimeFormat(getLang(), {weekday: 'short', day: 'numeric', month: 'short'}).format(new Date(ev.start))} · ${formatTime(ev.start)}`);
+    usePageHeader(() => ({title: phone ? phoneTitle : ev.title, context: phone ? phoneContext : `${t(kindLabelKey(ev.kind))} · ${formatDay(ev.start)}`, badge, actions}));
     const whereWhen = $derived([formatRange(ev.start, ev.end), ev.location ? [ev.location.name, ev.location.city].filter(Boolean).join(', ') : ''].filter(Boolean).join(' · '));
 </script>
 
@@ -154,15 +157,59 @@
             </div>
 {/snippet}
 
+{#snippet mobileInfo()}
+    <section class="card min-w-0 overflow-hidden border-l-4 {style.bar}">
+        <div class="grid min-w-0 gap-2.5 p-4">
+            <dl class="grid min-w-0 gap-1.5 text-sm">
+                    {#if ev.location}
+                        <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><MapPin size={15} aria-label={t('events.location')}/></dt><dd class="min-w-0 break-words"><a class="link font-semibold" href={mapsLink} target="_blank" rel="noreferrer">{ev.location.name}{ev.location.city ? `, ${ev.location.city}` : ''}</a></dd></div>
+                    {/if}
+                    <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><Users size={15} aria-label={t('events.audience')}/></dt>
+                        <dd class="flex min-w-0 flex-wrap gap-x-2 gap-y-0.5">
+                            {#if ev.club_wide}<span class="font-semibold">{t('events.whole_club')}</span>{/if}
+                            {#each ev.teams as team (team.id)}<a class="link font-semibold" href="/coach/teams/{team.id}">{team.name}</a>{/each}
+                            {#each ev.groups as g (g.id)}<span class="font-semibold">{g.name}</span>{/each}
+                            {#if !ev.club_wide && !ev.teams.length && !ev.groups.length}<span class="text-muted">{ev.invited_members.length ? t('events.only_invited') : '—'}</span>{/if}
+                        </dd></div>
+                    {#if ev.deadline}
+                        <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><Flag size={15} aria-label={t('events.deadline')}/></dt><dd class="min-w-0 break-words"><span class="text-muted">{t('events.deadline')}</span> <span class="font-semibold">{formatDateTime(ev.deadline)}</span></dd></div>
+                    {/if}
+                    {#if ev.series}
+                        <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><Repeat size={15} aria-hidden="true"/></dt><dd class="min-w-0 break-words text-slate">{series}{#if ev.detached} · <span class="text-muted">{t('events.detached')}</span>{/if}</dd></div>
+                    {/if}
+            </dl>
+                {#if ev.notes}<p class="border-t border-line pt-2.5 text-sm break-words whitespace-pre-line text-slate">{ev.notes}</p>{/if}
+                {#if ev.opponent}
+                    <div class="flex min-w-0 items-center gap-3 border-t border-line pt-2.5">
+                        {#if ev.opponent.logo_url}<img src={ev.opponent.logo_url} alt="" class="h-10 w-10 shrink-0 object-contain"/>{:else}<ClubCrest name={ev.opponent.name} size={40}/>{/if}
+                        <div class="min-w-0"><span class="block font-display text-[11px] font-bold tracking-[.08em] text-muted uppercase">{t('events.opponent')}</span><span class="block truncate font-display text-lg font-extrabold text-ink uppercase">{ev.opponent.name}</span></div>
+                    </div>
+                {/if}
+                {#if ev.referees.length || ev.officials.length}
+                    <dl class="grid gap-1.5 border-t border-line pt-2.5 text-sm">
+                        {@render officiating('referee', ev.referees)}
+                        {@render officiating('official', ev.officials)}
+                    </dl>
+                {/if}
+        </div>
+    </section>
+{/snippet}
+
 {#snippet mobileTop()}
     <div class="grid min-w-0 gap-3 md:hidden">
-        <div class="flex items-center justify-between gap-2">
-            <a class="btn btn-outline min-h-11 gap-2" href={calendarHref}><ArrowLeft size={16} aria-hidden="true"/> {t('portal.schedule')}</a>
-            <div class="flex items-center gap-2">
-                {#if ev.can_edit}<a class="btn btn-primary min-h-11 gap-2" href={editHref}><Pencil size={16} aria-hidden="true"/> {t('common.edit')}</a>{/if}
-                <button type="button" class="btn btn-outline btn-square min-h-11" aria-label={t('coach.ev_actions')} onclick={() => (menuOpen = true)}><Ellipsis size={20} aria-hidden="true"/></button>
+        {#if ev.can_edit}
+            <div class="grid grid-cols-2 gap-2">
+                <a class="btn btn-primary min-h-11 gap-2" href={editHref}><Pencil size={16} aria-hidden="true"/> {t('common.edit')}</a>
+                <button type="button" class="btn btn-outline min-h-11 gap-2 {ev.cancelled ? '' : 'btn-error'}" onclick={() => (cancelOpen = true)}>
+                    {#if ev.cancelled}<RotateCcw size={16} aria-hidden="true"/> {t('events.reactivate')}{:else}<Ban size={16} aria-hidden="true"/> {t('events.cancel')}{/if}
+                </button>
             </div>
-        </div>
+        {/if}
+        {#if canUpdate}
+            <form method="POST" action="?/updateGame&view=coach" use:enhance={() => { updating = true; return async ({ update }) => { await update({ reset: false }); updating = false; }; }}>
+                <button class="btn btn-outline min-h-11 w-full gap-2" type="submit" disabled={updating}><RefreshCw size={16} class={updating ? 'animate-spin' : ''} aria-hidden="true"/> {t('events.update_game')}</button>
+            </form>
+        {/if}
         <section class="card min-w-0 overflow-hidden border-l-4 {style.bar}">
             <div class="grid min-w-0 gap-2.5 p-4">
                 <div class="flex flex-wrap items-center gap-1.5">
@@ -182,36 +229,7 @@
                     {#if ev.gathering}
                         <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><Clock size={15} aria-label={t('events.gathering')}/></dt><dd class="min-w-0 break-words"><span class="text-muted">{t('events.gathering')}</span> <span class="font-semibold">{formatDateTime(ev.gathering)}</span></dd></div>
                     {/if}
-                    {#if ev.location}
-                        <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><MapPin size={15} aria-label={t('events.location')}/></dt><dd class="min-w-0 break-words"><a class="link font-semibold" href={mapsHref} target="_blank" rel="noreferrer">{ev.location.name}{ev.location.city ? `, ${ev.location.city}` : ''}</a></dd></div>
-                    {/if}
-                    <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><Users size={15} aria-label={t('events.audience')}/></dt>
-                        <dd class="flex min-w-0 flex-wrap gap-x-2 gap-y-0.5">
-                            {#if ev.club_wide}<span class="font-semibold">{t('events.whole_club')}</span>{/if}
-                            {#each ev.teams as team (team.id)}<a class="link font-semibold" href="/coach/teams/{team.id}">{team.name}</a>{/each}
-                            {#each ev.groups as g (g.id)}<span class="font-semibold">{g.name}</span>{/each}
-                            {#if !ev.club_wide && !ev.teams.length && !ev.groups.length}<span class="text-muted">{ev.invited_members.length ? t('events.only_invited') : '—'}</span>{/if}
-                        </dd></div>
-                    {#if ev.deadline}
-                        <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><Flag size={15} aria-label={t('events.deadline')}/></dt><dd class="min-w-0 break-words"><span class="text-muted">{t('events.deadline')}</span> <span class="font-semibold">{formatDateTime(ev.deadline)}</span></dd></div>
-                    {/if}
-                    {#if ev.series}
-                        <div class="flex min-w-0 items-start gap-2"><dt class="mt-0.5 text-muted"><Repeat size={15} aria-hidden="true"/></dt><dd class="min-w-0 break-words text-slate">{series}{#if ev.detached} · <span class="text-muted">{t('events.detached')}</span>{/if}</dd></div>
-                    {/if}
                 </dl>
-                {#if ev.notes}<p class="border-t border-line pt-2.5 text-sm break-words whitespace-pre-line text-slate">{ev.notes}</p>{/if}
-                {#if ev.opponent}
-                    <div class="flex min-w-0 items-center gap-3 border-t border-line pt-2.5">
-                        {#if ev.opponent.logo_url}<img src={ev.opponent.logo_url} alt="" class="h-10 w-10 shrink-0 object-contain"/>{:else}<ClubCrest name={ev.opponent.name} size={40}/>{/if}
-                        <div class="min-w-0"><span class="block font-display text-[11px] font-bold tracking-[.08em] text-muted uppercase">{t('events.opponent')}</span><span class="block truncate font-display text-lg font-extrabold text-ink uppercase">{ev.opponent.name}</span></div>
-                    </div>
-                {/if}
-                {#if ev.referees.length || ev.officials.length}
-                    <dl class="grid gap-1.5 border-t border-line pt-2.5 text-sm">
-                        {@render officiating('referee', ev.referees)}
-                        {@render officiating('official', ev.officials)}
-                    </dl>
-                {/if}
             </div>
         </section>
         <nav class="card min-w-0" aria-label={t('events.tabs')}>
@@ -279,7 +297,7 @@
                         <div class="flex items-center gap-2">
                             <dt class="flex items-center gap-1.5 text-muted">
                                 <MapPin size={14} aria-hidden="true"/> {t('events.location')}</dt>
-                            <dd><a class="link font-semibold" href={mapsHref} target="_blank" rel="noreferrer" title={t('events.open_map')}>{ev.location.name}{ev.location.city ? `, ${ev.location.city}` : ''}</a></dd>
+                            <dd><a class="link font-semibold" href={mapsLink} target="_blank" rel="noreferrer" title={t('events.open_map')}>{ev.location.name}{ev.location.city ? `, ${ev.location.city}` : ''}</a></dd>
                         </div>
                     {/if}
                         {@render officiating('referee', ev.referees)}
@@ -338,7 +356,7 @@
 
     {#if phone && shownTab === 'overview'}
         <div class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4">
-            {@render details()}
+            {@render mobileInfo()}
             {#if data.attachments}
                 <EventAttachments eventId={ev.id} initial={data.attachments}/>
             {/if}
@@ -420,26 +438,6 @@
         {/if}
     {/if}
 </div>
-
-<Sheet open={menuOpen} title={t('coach.ev_actions')} onclose={() => (menuOpen = false)}>
-    <div class="grid gap-2 p-4 pt-0">
-        <h2 class="font-display text-xl font-extrabold text-ink uppercase">{t('coach.ev_actions')}</h2>
-        {#if ev.can_edit}
-            <a class="btn btn-outline min-h-12 justify-start gap-2" href={editHref}><Pencil size={16} aria-hidden="true"/> {t('coach.ev_menu_edit')}</a>
-        {/if}
-        {#if canUpdate}
-            <form method="POST" action="?/updateGame&view=coach" use:enhance={() => { updating = true; return async ({ update }) => { await update({ reset: false }); updating = false; menuOpen = false; }; }}>
-                <button class="btn btn-outline min-h-12 w-full justify-start gap-2" type="submit" disabled={updating}><RefreshCw size={16} class={updating ? 'animate-spin' : ''}/> {t('events.update_game')}</button>
-            </form>
-        {/if}
-        {#if ev.can_edit}
-            <button class="btn btn-outline min-h-12 justify-start gap-2 {ev.cancelled ? '' : 'btn-error'}" type="button" onclick={openCancel}>
-                {#if ev.cancelled}<RotateCcw size={16}/> {t('events.reactivate')}{:else}<Ban size={16}/> {t('events.cancel')}{/if}
-            </button>
-        {/if}
-        {#if ev.kind === 'game' && !ev.cancelled}<div class="flex"><FollowButton kind="event" id={ev.id}/></div>{/if}
-    </div>
-</Sheet>
 
 <Modal bind:open={cancelOpen} title={ev.cancelled ? t('events.reactivate_title') : t('events.cancel_title')}>
     <form method="POST" action={ev.cancelled ? '?/uncancel' : '?/cancel'} class="grid gap-3" use:enhance={submit}>

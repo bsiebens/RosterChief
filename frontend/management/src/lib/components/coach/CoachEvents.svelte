@@ -1,14 +1,15 @@
 <script lang="ts">
 	import { ChevronLeft, ChevronRight } from '@lucide/svelte';
-	import { formatTime } from '#lib/events/types.ts';
-	import { dateKey, goingShare, isGame, startOfToday } from '#lib/coach.ts';
+	import { formatDateTime, formatTime, kindStyle } from '#lib/events/types.ts';
+	import { dateKey, goingShare, isGame, lineupChip, startOfToday } from '#lib/coach.ts';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import type { CoachEvent } from '#lib/portal.ts';
 	import PortalEventDate from '#lib/components/PortalEventDate.svelte';
 
-	let { events }: { events: CoachEvent[] } = $props();
+	let { events, initialMonth = '' }: { events: CoachEvent[]; /** `YYYY-MM`: the month to open on (coming back from an event). */ initialMonth?: string } = $props();
 	let filter = $state<'all' | 'game' | 'training'>('all');
-	let month = $state(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+	// svelte-ignore state_referenced_locally
+	let month = $state(/^\d{4}-\d{2}$/.test(initialMonth) ? new Date(Number(initialMonth.slice(0, 4)), Number(initialMonth.slice(5)) - 1, 1) : new Date(new Date().getFullYear(), new Date().getMonth(), 1));
 	let picked = $state('');
 	const FILTERS = [['all', 'portal.all'], ['game', 'coach.games'], ['training', 'events.kind.training']] as const;
 	const shown = $derived(events.filter((event) => filter === 'all' || (filter === 'game' ? isGame(event) : event.kind === 'training')));
@@ -53,14 +54,14 @@
 					{@const outside = day.getMonth() !== month.getMonth()}
 					<button
 						type="button"
-						class="relative grid h-9 place-items-center rounded-lg text-[13px] font-semibold {key === todayKey ? 'bg-ink text-(--color-white)' : picked === key ? 'bg-subhead ring-2 ring-club' : 'text-ink hover:bg-subhead'} {outside ? 'opacity-40' : ''}"
+						class="relative grid h-11 place-items-center rounded-lg pb-1.5 text-[13px] font-semibold {key === todayKey ? 'bg-ink text-(--color-white)' : picked === key ? 'bg-subhead ring-2 ring-club' : 'text-ink hover:bg-subhead'} {outside ? 'opacity-40' : ''}"
 						disabled={!dayEvents.length}
 						aria-pressed={picked === key}
 						aria-label={dayEvents.length ? `${day.getDate()} · ${dayEvents.map((event) => event.title).join(', ')}` : String(day.getDate())}
 						onclick={() => (picked = picked === key ? '' : key)}
 					>
 						{day.getDate()}
-						{#if dayEvents.length}<span class="absolute bottom-0.5 size-1.5 rounded-full {dayEvents.some(isGame) ? 'bg-club' : 'bg-info-text'}"></span>{/if}
+						{#if dayEvents.length}<span class="absolute bottom-1.5 size-1.5 rounded-full {dayEvents.some(isGame) ? 'bg-club' : 'bg-info-text'}"></span>{/if}
 					</button>
 				{/each}
 			</div>
@@ -71,7 +72,7 @@
 		{#if picked}<div class="flex justify-end border-b border-rule px-3 py-1"><button type="button" class="link-more" onclick={() => (picked = '')}>{t('coach.day_clear')}</button></div>{/if}
 		<div class="divide-y divide-rule">
 			{#each list as event (event.id)}
-				<a class="flex min-h-15 items-center gap-3 px-3.5 py-2.5 hover:bg-subhead {isGame(event) ? 'shadow-[inset_3px_0_0_var(--color-club)]' : ''}" href={href(event)}>
+				<a class="flex min-h-15 items-center gap-3 border-l-[3px] px-3.5 py-2.5 hover:bg-subhead {kindStyle(event.kind).bar}" href={href(event)}>
 					<PortalEventDate start={event.start} compact />
 					<span class="min-w-0 flex-1">
 						<b class="block truncate text-sm text-ink">{event.title}</b>
@@ -79,8 +80,10 @@
 					</span>
 					{#if event.cancelled}
 						<span class="badge badge-sm badge-error">{t('portal.cancelled')}</span>
+					{:else if event.score_for != null && event.score_against != null}
+						<span class="shrink-0 font-display text-xl leading-none font-extrabold tabular-nums text-ink" aria-label={t('portal.final') + ' ' + event.score_for + '–' + event.score_against}>{event.score_for}–{event.score_against}</span>
 					{:else}
-						{#if event.lineup && !event.lineup_published && Date.parse(event.start) >= Date.now()}<span class="badge badge-sm badge-warning">{t('portal.lineup')}</span>{/if}
+						{#if lineupChip(event, formatDateTime)}{@const chip = lineupChip(event, formatDateTime)!}<span class="badge badge-sm {chip.cls}">{t(chip.key, { when: chip.text ?? '' })}</span>{/if}
 						{#if event.can_manage_attendance && event.invited > 0}
 							<span class="grid shrink-0 justify-items-end gap-1" title={t('coach.attendance_of', { going: event.going, invited: event.invited })}>
 								<span class="font-mono text-sm font-semibold text-ink">{event.going}/{event.invited}</span>

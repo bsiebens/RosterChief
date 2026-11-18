@@ -98,3 +98,18 @@ class NotificationStore {
 }
 
 export const notifications = new NotificationStore();
+
+/** Where a notification leads inside the member or coach app (the club's links point at the management app). */
+export function notificationHref(href: string, portal?: 'parent' | 'coach'): string {
+	if (!portal) return href;
+	const event = href.match(/^\/calendar\/events\/([0-9a-f-]{36})(?:[/?#]|$)/i);
+	if (event) return portal === 'coach' ? `/calendar/events/${event[1]}?view=coach` : `/member?tab=calendar&event=${event[1]}`;
+	const article = href.match(/^\/news\/([0-9a-f-]{36})(?:[/?#]|$)/i);
+	if (article) return `/${portal === 'parent' ? 'member' : 'coach'}?tab=news&article=${article[1]}`;
+	if (portal === 'parent') {
+		if (/^\/forms(?:\/|$)/.test(href)) return '/member/forms';
+		if (/^\/shop(?:\/|$)/.test(href)) return '/member/shop';
+		if (/^\/(registrations|finance)(?:\/|$)/.test(href)) return '/member?tab=payments';
+	}
+	return href;
+}

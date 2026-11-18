@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { Activity, ChartColumn, Flag, ListChecks } from '@lucide/svelte';
 	import PersonFilter from '#lib/components/PersonFilter.svelte';
 	import GameStatsCard from '#lib/components/members/detail/GameStatsCard.svelte';
@@ -26,7 +27,7 @@
 	const person = $derived(data.people.find((candidate) => candidate.id === data.who));
 	const s = $derived(data.stats);
 	$effect(() => {
-		if (who && who !== data.who) void goto(`/parent/stats?who=${who}`, { replaceState: true });
+		if (who && who !== data.who) void goto(`/member/stats?who=${who}`, { replaceState: true });
 	});
 	const loadSeason = async (seasonId: string) => (await api<MyStats>('GET', `/portal/me/stats/${data.who}`, { query: { season: seasonId } })).data?.game_stats ?? null;
 	const referee = $derived(s?.officiating?.referee ?? null);
@@ -41,7 +42,7 @@
 	<h2 class="flex items-center gap-2 font-display text-sm font-bold tracking-[.12em] text-muted uppercase"><Icon size={16} aria-hidden="true" /> {label}</h2>
 {/snippet}
 
-<div class="grid min-w-0 gap-4">
+<div class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4">
 	<PersonFilter people={data.people} bind:selected={who} all={false} viewer={data.people.find((p) => p.is_self)?.id ?? ''} />
 	{#if data.available && person}<StatsShare {person} banner />{/if}
 	{#if empty}

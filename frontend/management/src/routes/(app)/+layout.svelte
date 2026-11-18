@@ -3,6 +3,7 @@
 	import { Menu } from '@lucide/svelte';
 	import { header } from '#lib/header.svelte.ts';
 	import AppSwitcher from '#lib/components/AppSwitcher.svelte';
+	import PhoneHeader from '#lib/components/mobile/PhoneHeader.svelte';
 	import PortalNav from '#lib/components/PortalNav.svelte';
 	import PortalRail from '#lib/components/PortalRail.svelte';
 	import { rememberApp } from '#lib/landing.ts';
@@ -22,12 +23,12 @@
 	const email = $derived(a.status === 'anonymous' || a.status === 'mfa_pending' ? '' : a.user.email);
 	// The full club shell needs the /me payload; pickers, no-access and MFA enrolment get the plain top bar only.
 	const club = $derived(data.mode === 'club' && a.status === 'authenticated' ? data.branding : null);
-	const parent = $derived(page.url.pathname === '/parent' || page.url.pathname.startsWith('/parent/'));
+	const parent = $derived(page.url.pathname === '/member' || page.url.pathname.startsWith('/member/'));
 	const coach = $derived(page.url.pathname === '/coach' || page.url.pathname.startsWith('/coach/') || page.url.searchParams.get('view') === 'coach');
 	const portal = $derived(parent ? 'parent' : coach ? 'coach' : null);
 	const clubShell = $derived(club && (data.me || portal));
 	const management = $derived(clubShell && !portal);
-	const home = $derived(parent ? '/parent' : coach ? '/coach' : '/');
+	const home = $derived(parent ? '/member' : coach ? '/coach' : '/');
 	const season = $derived(parent ? page.data.home?.season : page.data.coach?.season);
 	const shopEnabled = $derived(parent && (data.me ? data.shopOpen === true : a.status === 'authenticated' && a.memberShopEnabled === true));
 	let navOpen = $state(false);
@@ -52,7 +53,9 @@
 	{/if}
 
 	<div class="flex min-w-0 flex-1 flex-col">
-		{#if clubShell && club}
+		{#if clubShell && club && portal}
+			<PhoneHeader mode={parent ? 'parent' : 'coach'} title={header.title} context={header.context} actions={header.actions} canSwitch={!!data.me?.has_member_portal_role} />
+		{:else if clubShell && club}
 			<div class="sticky top-0 z-30 bg-sidebar-bg text-sidebar-fg {portal ? 'md:hidden' : 'lg:hidden'}" class:portal-masthead={!!portal}>
 				<div class="flex items-start justify-between gap-2 px-3 pt-3 pb-2 sm:px-5">
 					<div class="grid min-w-0 content-start gap-2">
@@ -62,7 +65,7 @@
 								<span class="block truncate font-display text-lg leading-tight font-extrabold tracking-[.06em] uppercase">{club.name}</span>
 								{#if portal && (coach || season)}
 									<span class="portal-mode-label flex flex-wrap items-center gap-x-2 text-xs">
-										{#if coach}<strong class="font-display tracking-wider uppercase">{t('portal.coach')}</strong>{/if}
+										{#if coach}<strong class="rounded-full bg-club px-2 py-0.5 font-display text-[11px] tracking-wider text-club-content uppercase">{t('portal.coach_view')}</strong>{/if}
 										{#if season}<span>{season}</span>{/if}
 									</span>
 								{/if}
@@ -90,7 +93,7 @@
 			</div>
 		{/if}
 
-		<header class="z-10 min-h-14 shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-line bg-white px-3 py-2 sm:px-5 {portal ? 'md:sticky md:top-0 md:min-h-16 md:gap-4 md:px-7' : 'lg:sticky lg:top-0 lg:min-h-16 lg:gap-4 lg:px-7'} {portal && page.url.pathname === home ? 'hidden md:flex' : 'flex'}" class:portal-topbar={!!portal}>
+		<header class="z-10 min-h-14 shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-line bg-white px-3 py-2 sm:px-5 {portal ? 'md:sticky md:top-0 md:min-h-16 md:gap-4 md:px-7' : 'lg:sticky lg:top-0 lg:min-h-16 lg:gap-4 lg:px-7'} {portal ? 'hidden md:flex' : 'flex'}" class:portal-topbar={!!portal}>
 			{#if !clubShell}
 				<a class="flex shrink-0 items-center gap-2.5" href={home}>
 					{#if data.mode === 'club' && data.branding}

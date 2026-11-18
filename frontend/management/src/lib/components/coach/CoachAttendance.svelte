@@ -7,6 +7,7 @@
 	import { t } from '#lib/i18n.svelte.ts';
 	import Avatar from '#lib/components/Avatar.svelte';
 	import Sheet from '#lib/components/portal/Sheet.svelte';
+	import Toast from '#lib/components/Toast.svelte';
 
 	type Answer = 'present' | 'maybe' | 'absent';
 	/** The coach's attendance screen: replies and check-in, saved together. Shown in the event page's Attendance tab on phones. */
@@ -55,7 +56,7 @@
 		{ answer: 'absent', label: 'coach.answer_out', on: 'bg-club border-club text-club-content' }
 	];
 	const subline = (row: AttendanceRow) => {
-		const base = [row.jersey_number != null ? `#${row.jersey_number}` : '', row.position].filter(Boolean).join(' · ');
+		const base = [row.position].filter(Boolean).join(' · ');
 		if (current(row) === 'absent') return [t('coach.seg_out'), row.note, noteOf(row)].filter(Boolean).join(' · ');
 		return current(row) === '' ? [base, t('coach.no_reply_note')].filter(Boolean).join(' · ') : base;
 	};
@@ -127,33 +128,32 @@
 <div class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
 	<section class="card overflow-hidden">
 		<div class="grid gap-3 border-b border-line px-3.5 py-3">
-			<div class="grid grid-cols-2 gap-1 rounded-box bg-subhead p-1" role="group" aria-label={t('events.tab.attendance')}>
+			<div class="grid grid-cols-2 gap-2" role="group" aria-label={t('events.tab.attendance')}>
 				{#each [['answers', t('coach.mode_replies')], ['checkin', `${t('coach.check_in_mode')} ${list.checked_in}/${counts.in}`]] as [key, label] (key)}
-					<button type="button" class="min-h-10 rounded-md px-3 font-display text-sm font-bold tracking-wide uppercase {mode === key ? 'bg-(--portal-panel) text-ink shadow-sm' : 'text-muted'}" aria-pressed={mode === key} onclick={() => (mode = key as typeof mode)}>{label}</button>
+					<button type="button" class="min-h-11 rounded-full border px-3 font-display text-sm font-bold tracking-wide uppercase {mode === key ? 'border-ink bg-ink text-paper' : 'border-line bg-(--portal-panel) text-ink'}" aria-pressed={mode === key} onclick={() => (mode = key as typeof mode)}>{label}</button>
 				{/each}
 			</div>
 			<div class="flex items-center gap-2">
-				<div class="flex min-w-0 flex-1 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="group" aria-label={t('portal.all')}>
+				<div class="flex min-w-0 flex-1 gap-1.5" role="group" aria-label={t('portal.all')}>
 					{#each SEGMENTS as [key, label] (key)}
-						<button type="button" class="portal-person compact text shrink-0 !px-3" aria-pressed={filter === key} onclick={() => (filter = key)}>{key === 'unknown' ? '?' : t(label)} {counts[key]}</button>
+						<button type="button" class="inline-flex h-[38px] min-w-0 flex-1 items-center justify-center gap-1 rounded-full border px-1.5 text-[14px] font-semibold {filter === key ? 'border-ink bg-ink text-paper' : 'border-line bg-(--portal-panel) text-ink'}" aria-pressed={filter === key} onclick={() => (filter = key)}>{key === 'unknown' ? t('coach.waiting') : t(label)} <span class="tabular-nums {filter === key ? '' : 'text-muted'}">{counts[key]}</span></button>
 					{/each}
 				</div>
-				{#if mode === 'answers' && upcoming}<button type="button" class="btn btn-primary btn-sm min-h-9 shrink-0" disabled={busy === 'remind' || counts.unknown === 0} onclick={nudge}>{t('coach.remind')}</button>{/if}
 			</div>
 		</div>
 		<div class="border-b border-line px-3.5 py-2">
 			<label class="sr-only" for="att-search">{t('portal.search_players')}</label>
 			<input id="att-search" type="search" class="input w-full sm:max-w-xs" placeholder={t('portal.search_players')} bind:value={query} />
 		</div>
-		{#if message}<p class="border-b border-line px-3.5 py-2 text-sm {failed ? 'text-danger' : 'text-ok-text'}" role={failed ? 'alert' : 'status'}>{message}</p>{/if}
 		<ul class="divide-y divide-rule">
 			{#each rows as row (row.member.id)}
 				{@const answer = current(row)}
 				<li class="flex min-h-14 items-center gap-3 px-3.5 py-2">
-					<Avatar first_name={row.first_name} last_name={row.last_name} size="size-9" text="text-xs" />
+					<span class="grid size-7 shrink-0 place-items-center rounded-full {answer === 'present' ? 'bg-ok text-[#fff]' : answer === 'absent' ? 'bg-club text-club-content' : answer === 'maybe' ? 'bg-warn text-[#1b1400]' : 'border-2 border-line text-transparent'}" aria-hidden="true">{#if answer === 'present'}<Check size={15} />{:else if answer === 'absent'}<Minus size={15} />{:else if answer === 'maybe'}<CircleHelp size={15} />{/if}</span>
+					<span class="grid size-9 shrink-0 place-items-center rounded-box bg-subhead font-display text-base font-extrabold text-ink">{row.jersey_number ?? '–'}</span>
 					<div class="min-w-0 flex-1">
-						<p class="truncate text-sm font-semibold text-ink">{row.last_name}, {row.first_name}</p>
-						<p class="truncate text-xs {answer === 'absent' ? 'text-club-dark' : 'text-muted'}">{subline(row)}{#if mode === 'answers' && shownUp(row) !== null} · {t(shownUp(row) ? 'events.att.checked_in' : 'events.att.no_show')}{/if}</p>
+						<p class="truncate text-base font-semibold text-ink">{row.first_name} {row.last_name}</p>
+						<p class="truncate text-sm {answer === 'absent' ? 'text-club-dark' : 'text-muted'}">{subline(row)}{#if mode === 'answers' && shownUp(row) !== null} · {t(shownUp(row) ? 'events.att.checked_in' : 'events.att.no_show')}{/if}</p>
 					</div>
 					{#if mode === 'answers'}
 						<div class="inline-flex shrink-0 gap-1" role="group" aria-label={row.last_name + ', ' + row.first_name}>
@@ -177,10 +177,14 @@
 		</ul>
 	</section>
 
-	<div class="sticky bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-10 flex items-center gap-2 rounded-box border border-line bg-(--portal-panel) p-2.5 shadow-sm md:bottom-2">
-		<button type="button" class="btn btn-primary min-h-12 flex-1" disabled={saving || !pending} onclick={save}>{t('coach.save_attendance')}{#if pending} ({pending}){/if}</button>
-	</div>
+	<div class="action-dock md:sticky md:bottom-2 md:z-10 md:rounded-box md:border md:border-line md:bg-(--portal-panel) md:p-2.5 md:shadow-sm"><div class="flex w-full items-center gap-2">
+		{#if mode === 'answers' && upcoming}<button type="button" class="btn btn-primary min-h-12 flex-1" disabled={busy === 'remind' || counts.unknown === 0} onclick={nudge}>{t('coach.remind_n', { n: counts.unknown })}</button>{/if}
+		<button type="button" class="btn {mode === 'answers' && upcoming ? 'btn-outline' : 'btn-primary'} min-h-12 flex-1" disabled={saving || !pending} onclick={save}>{t('coach.save_attendance')}{#if pending} ({pending}){/if}</button>
+	</div></div>
+	<div class="h-[4.75rem] md:hidden" aria-hidden="true"></div>
 </div>
+
+<Toast {message} error={failed} aboveBand onhide={() => (message = '')} />
 
 <Sheet open={!!noting} title={noting ? `${noting.last_name}, ${noting.first_name}` : ''} onclose={() => (noting = null)}>
 	{#if noting}

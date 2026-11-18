@@ -211,7 +211,7 @@ class EventsApiTests(TestCase):
         body = r.json()
         self.assertEqual(body["invited_member_ids"], [str(self.stranger.pk)])
         self.assertEqual(body["excluded_member_ids"], [str(self.p3.pk)])
-        self.assertEqual(body["location"], {"id": str(self.location.pk), "name": "Sporthal", "city": "Gent", "address": "Straat 1", "is_home": False})
+        self.assertEqual(body["location"], {"id": str(self.location.pk), "name": "Sporthal", "city": "Gent", "address": "Straat 1", "zip_code": "", "latitude": None, "longitude": None, "is_home": False})
         self.assertEqual(body["lineup"]["available"], False)
         self.assertIsNone(body["series"])
         self.assertEqual(body["season"]["id"], str(self.season.pk))

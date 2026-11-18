@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { ArrowLeft, Bell, CalendarDays, ChartColumn, Check, CircleQuestionMark, Clock, X, Shirt, Info, ListChecks, MapPin, Users, ChevronRight, CircleCheck, ClipboardList, FileText, Handshake, KeyRound, List, UserRound, UsersRound, Wallet, Whistle } from '@lucide/svelte';
+	import { ArrowLeft, Bell, CalendarDays, ChartColumn, Check, CircleQuestionMark, Clock, X, Shirt, Info, ListChecks, MapPin, Users, ChevronRight, CircleCheck, ClipboardList, FileText, Handshake, KeyRound, List, ListOrdered, UserRound, UsersRound, Wallet, Whistle } from '@lucide/svelte';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
-	import { formatDateTime, formatLongDay, formatTime, kindLabelKey, kindStyle, statusLabelKey, statusStyle } from '#lib/events/types.ts';
+	import { addressLine, formatDateTime, formatLongDay, formatTime, kindLabelKey, kindStyle, mapsHref, statusLabelKey, statusStyle } from '#lib/events/types.ts';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { api } from '#lib/management-api.ts';
@@ -25,6 +25,11 @@
 	import GameTimelineDialog from '#lib/components/portal/GameTimelineDialog.svelte';
 	import RequirementsCard from '#lib/components/portal/RequirementsCard.svelte';
 	import PortalAgenda from '#lib/components/portal/PortalAgenda.svelte';
+	import MobileHome from '#lib/components/mobile/MobileHome.svelte';
+	import HeaderChip from '#lib/components/mobile/HeaderChip.svelte';
+	import MobileAgenda from '#lib/components/mobile/MobileAgenda.svelte';
+	import MeHub from '#lib/components/mobile/MeHub.svelte';
+	import MobilePayments from '#lib/components/mobile/MobilePayments.svelte';
 	import PortalWeekGrid from '#lib/components/portal/PortalWeekGrid.svelte';
 	import Sheet from '#lib/components/portal/Sheet.svelte';
 
@@ -56,7 +61,7 @@
 	let weekStart = $state(mondayOf(new Date()));
 	const weekDays = $derived(Array.from({ length: 7 }, (_, i) => new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + i)));
 	const moveWeek = (step: number) => (weekStart = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 7 * step));
-	const labels: Record<string, string> = { home: 'portal.home', calendar: 'shell.nav.calendar', news: 'shell.nav.news', me: 'portal.me', forms: 'portal.forms', payments: 'portal.payments' };
+	const labels: Record<string, string> = { home: 'portal.home', calendar: 'shell.nav.calendar', news: 'shell.nav.news', me: 'portal.me', forms: 'portal.forms', payments: 'portal.payments', documents: 'portal.tile_documents' };
 	// `data.home` is briefly gone while the app navigates away (to the manage app, say): the header code below still runs then, so these reads must not throw.
 	const people = $derived(data.home?.people ?? []);
 	const viewer = $derived(people.find((person) => person.id === data.home?.viewer));
@@ -67,7 +72,7 @@
 	const memberName = (id: string) => people.find((person) => person.id === id)?.name ?? '';
 	const crest = $derived(data.branding?.logo_url);
 	const background = $derived(data.home.event_background);
-	const canReply = (event: PortalEvent) => !event.cancelled && event.blocked !== 'not_invited' && Date.parse(event.start) > Date.now() && (event.status === 'selected' || !event.deadline || Date.parse(event.deadline) >= Date.now());
+	const canReply = (event: PortalEvent) => !event.cancelled && event.blocked !== 'not_invited' && Date.parse(event.start) > Date.now() && (event.status === 'selected' || event.status === 'present' || !event.deadline || Date.parse(event.deadline) >= Date.now());
 	const going = (event: PortalEvent) => event.status === 'present' || event.status === 'selected';
 	/**
 	 * The cards on top of Home: one per coming event that someone still has to answer for (or is going to), soonest first. A card lists everyone
@@ -106,10 +111,10 @@
 
 	/** What "Next 14 days" lists: the family's games and practices, plus the officiating duties someone signed up for or was assigned (open invitations have their own card). */
 	const weekItems = $derived.by(() => {
-		const items: { key: string; event: PortalEventDisplay; badges: { text: string; cls: string }[] }[] = upcomingTwoWeeks.map((event) => ({
+		const items: { key: string; event: PortalEventDisplay; badges: { text: string; cls: string; status: string; who: string }[] }[] = upcomingTwoWeeks.map((event) => ({
 			key: event.event_id,
 			event,
-			badges: events.filter((row) => row.event_id === event.event_id).map((row) => ({ text: `${people.length > 1 ? `${firstName(row.member_id)} · ` : ''}${t(statusLabelKey(row.status))}`, cls: statusStyle(row.status) }))
+			badges: events.filter((row) => row.event_id === event.event_id).map((row) => ({ text: `${people.length > 1 ? `${firstName(row.member_id)} · ` : ''}${t(statusLabelKey(row.status))}`, cls: statusStyle(row.status), status: row.status, who: firstName(row.member_id) }))
 		}));
 		const now = new Date();
 		const end = new Date(now);
@@ -118,7 +123,7 @@
 			if (offer.status !== 'signed_up' && offer.status !== 'assigned') continue;
 			const start = new Date(offer.start);
 			if (offer.cancelled || start <= now || start >= end) continue;
-			items.push({ key: `duty-${offer.event_id}-${offer.member_id}`, event: offer, badges: [{ text: `${people.length > 1 ? `${firstName(offer.member_id)} · ` : ''}${t(`portal.crew_${offer.role}`)} · ${t(`portal.week_duty_${offer.status}`)}`, cls: 'border-line bg-subhead text-ink' }] });
+			items.push({ key: `duty-${offer.event_id}-${offer.member_id}`, event: offer, badges: [{ text: `${people.length > 1 ? `${firstName(offer.member_id)} · ` : ''}${t(`portal.crew_${offer.role}`)} · ${t(`portal.week_duty_${offer.status}`)}`, cls: 'border-line bg-subhead text-ink', status: 'duty', who: firstName(offer.member_id) }] });
 		}
 		return items.sort((a, b) => Date.parse(a.event.start) - Date.parse(b.event.start));
 	});
@@ -160,6 +165,9 @@
 		return [...grouped.values()].sort((a, b) => Date.parse(a.event.start) - Date.parse(b.event.start));
 	}
 	const calendar = $derived(calendarEntries(events, offers));
+	// The phone list can be narrowed to games, practices or the duties the family was asked to do.
+	let kindFilter = $state('all');
+	const listEntries = $derived(calendar.filter(({ event, officiating }) => kindFilter === 'all' || (kindFilter === 'crew' ? officiating.length > 0 : event.kind === kindFilter)));
 	const eventDays = $derived.by(() => {
 		const days = new Map<string, string[]>();
 		for (const { event } of calendar) {
@@ -213,15 +221,22 @@
 	);
 	// From tablet width the Me tab is the profile page with the notification settings beside it; on a phone it stays the short list of links.
 	$effect(() => {
-		if (tab === 'forms') void goto('/parent/forms', { replaceState: true });
-		if (tab === 'me' && typeof matchMedia === 'function' && matchMedia('(min-width: 48rem)').matches) void goto('/parent/profile', { replaceState: true });
+		if (tab === 'forms') void goto('/member/forms', { replaceState: true });
+		if (tab === 'me' && typeof matchMedia === 'function' && matchMedia('(min-width: 48rem)').matches) void goto('/member/profile', { replaceState: true });
 	});
 	const openTasks = $derived<OpenTask[]>(data.home?.tasks ?? []);
 	const hasAttention = $derived(!!(needsReply.length || filteredForms.length || officiatingInvites.length || openTasks.length));
 	const attentionCount = $derived(needsReply.length + filteredForms.length + officiatingInvites.length + openTasks.length);
-	const viewLink = (v: string) => `/parent?tab=calendar&view=${v}`;
-	const calendarLink = $derived(crewOnly ? '/parent?tab=calendar&crew=1' : viewLink(view));
-	const eventLink = (id: string) => tab === 'calendar' ? `${calendarLink}&event=${id}` : `/parent?event=${id}`;
+	// The four shortcuts on the phone Home: how many answers, documents, payments and forms are waiting.
+	const homeCounts = $derived({
+		replies: events.filter((event) => ['no_response', 'maybe'].includes(event.status) && canReply(event)).length + officiatingInvites.length,
+		documents: (data.overview?.memberships ?? []).filter((row) => !selected || row.member_id === selected).reduce((sum, row) => sum + row.requirements.filter((item) => ['missing', 'expired', 'declined', 'requested'].includes(item.state)).length, 0),
+		payments: openFees.length + openCharges.length,
+		forms: filteredForms.length
+	});
+	const viewLink = (v: string) => `/member?tab=calendar&view=${v}`;
+	const calendarLink = $derived(crewOnly ? '/member?tab=calendar&crew=1' : viewLink(view));
+	const eventLink = (id: string) => tab === 'calendar' ? `${calendarLink}&event=${id}` : `/member?event=${id}`;
 
 	// The event drawer's line-up, tasks and attachments: read when it opens.
 	let extras = $state<EventExtras | null>(null);
@@ -251,7 +266,12 @@
 	}
 	const sizeText = (bytes: number) => (bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 
-	usePageHeader(() => ({ title, context: tab === 'home' ? formatLongDay(new Date()) : undefined, actions: tab === 'home' && people.length > 1 ? headerPeople : tab === 'calendar' ? calendarActions : undefined }));
+	// The phone header is the board's: "Hi Bernard" with the short date above it, "Agenda", "News" ...; tablets and desktops keep the longer titles.
+	const shortDay = (date: Date) => new Intl.DateTimeFormat(getLang(), { weekday: 'short', day: 'numeric', month: 'short' }).format(date);
+	const headerTitle = $derived(phone ? (tab === 'home' ? t('portal.hi', { name: viewer?.first_name || viewer?.name || '' }) : tab === 'calendar' ? t('portal.agenda') : tab === 'payments' ? t('portal.tile_payments') : title) : title);
+	const headerContext = $derived(tab === 'home' ? (phone ? shortDay(new Date()) : formatLongDay(new Date())) : undefined);
+	const chipOptions = $derived(people.map((person) => ({ id: person.id, name: person.name, short: person.first_name || person.name, photo: person.photo_url })));
+	usePageHeader(() => ({ title: headerTitle, context: headerContext, actions: pageActions }));
 
 	async function reply(event: PortalEvent, status: string, note: string): Promise<boolean> {
 		if (busy) return false;
@@ -288,11 +308,18 @@
 <svelte:head><title>{pageTitle(title)}</title></svelte:head>
 
 {#snippet peoplePicker()}
-	<PersonFilter {people} bind:selected viewer={data.home.viewer} />
+	<div class="hidden md:block"><PersonFilter {people} bind:selected viewer={data.home.viewer} /></div>
 {/snippet}
 
-{#snippet rsvp(event: PortalEvent, quick = false, dark = false)}
-	<ReplyRow {event} name={memberName(event.member_id)} photo={people.find((person) => person.id === event.member_id)?.photo_url} canReply={canReply(event)} {quick} {dark} busy={busy === event.id} error={errors[event.id] ?? ''} onreply={(status, note) => reply(event, status, note)} />
+<!-- What the header carries: the desktop buttons as before, and on a phone the person chip (everyone / one child) on the pages that show a family's data. -->
+{#snippet pageActions()}
+	{#if tab === 'home' && people.length > 1}{@render headerPeople()}{/if}
+	{#if tab === 'calendar'}{@render calendarActions()}{/if}
+	{#if people.length > 1 && ['home', 'calendar'].includes(tab)}<div class="md:hidden"><HeaderChip options={chipOptions} bind:value={selected} allLabel={t('portal.everyone')} /></div>{/if}
+{/snippet}
+
+{#snippet rsvp(event: PortalEvent, quick = false, dark = false, seg = false)}
+	<ReplyRow {event} name={seg && people.length > 1 ? firstName(event.member_id) : memberName(event.member_id)} photo={people.find((person) => person.id === event.member_id)?.photo_url} canReply={canReply(event)} {quick} {dark} {seg} busy={busy === event.id} error={errors[event.id] ?? ''} onreply={(status, note) => reply(event, status, note)} />
 {/snippet}
 
 {#snippet officiating(offer: OfficiatingOpportunity)}
@@ -418,7 +445,7 @@
 {#snippet week()}
 	{#if weekItems.length}
 		<section class="card card-body" aria-label={t('portal.next_fourteen_days')}>
-			<h2 class="card-title"><CalendarDays size={16} aria-hidden="true" />{t('portal.next_fourteen_days')}<a class="link ml-auto text-sm font-semibold" href="/parent?tab=calendar">{calendarLabel} →</a></h2>
+			<h2 class="card-title"><CalendarDays size={16} aria-hidden="true" />{t('portal.next_fourteen_days')}<a class="link ml-auto text-sm font-semibold" href="/member?tab=calendar">{calendarLabel} →</a></h2>
 			<div class="divide-y divide-rule">
 				{#each weekItems as { key, event, badges } (key)}
 					<a class="flex items-center gap-3 border-l-4 py-2 pr-1 pl-3 hover:bg-subhead {kindStyle(event.kind).bar}" href={eventLink(event.event_id)} data-sveltekit-reset="false">
@@ -452,14 +479,14 @@
 				</div>
 			{/each}
 			{#each openFees as fee (`${fee.member_id}-${fee.season}`)}
-				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href="/parent?tab=payments">
+				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href="/member?tab=payments">
 					<Wallet size={18} class="shrink-0 text-muted" aria-hidden="true" />
 					<span class="min-w-0 flex-1"><span class="block font-semibold">{t(fee.next_installment ? 'portal.membership_installment' : 'portal.payments')}</span><span class="block text-xs {fee.next_installment?.late ? 'text-danger' : 'text-muted'}">{memberName(fee.member_id)}{fee.next_installment ? ' · ' + t('portal.due_by', { when: day(fee.next_installment.due_date) }) : ' · ' + fee.season}</span></span>
 					<span class="shrink-0 font-semibold">{money(fee.next_installment?.remaining ?? fee.balance)}</span>
 				</a>
 			{/each}
 		</div>
-		<a class="link-more self-end" href="/parent?tab=payments">{t('portal.pay_how')} →</a>
+		<a class="link-more self-end" href="/member?tab=payments">{t('portal.pay_how')} →</a>
 	</section>
 {/snippet}
 
@@ -490,7 +517,7 @@
 			{/each}
 			
 			{#each filteredForms as form (`${form.id}-${form.member_id}`)}
-				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href="/parent/forms?fill={form.id}.{form.member_id}">
+				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href="/member/forms?fill={form.id}.{form.member_id}">
 					<ClipboardList size={18} class="shrink-0 text-muted" aria-hidden="true" />
 					<span class="min-w-0 flex-1"><span class="block font-semibold">{form.title}</span><span class="block text-xs text-muted">{memberName(form.member_id)}{form.closes_at ? ' · ' + t('pubform.closes', { date: formatDateTime(form.closes_at) }) : ''}</span></span>
 					<span class="badge badge-warn">{t('portal.forms')}</span>
@@ -499,8 +526,8 @@
 		</div>
 		{#if officiatingInvites.length > 4 || needsReply.length > 4}
 			<div class="flex flex-wrap justify-end gap-x-4 border-t border-rule pt-1">
-				{#if officiatingInvites.length > 4}<a class="link-more" href="/parent?tab=calendar&view=list">{t('portal.crew_title')} →</a>{/if}
-				{#if needsReply.length > 4}<a class="link-more" href="/parent?tab=calendar">{calendarLabel} →</a>{/if}
+				{#if officiatingInvites.length > 4}<a class="link-more" href="/member?tab=calendar&view=list">{t('portal.crew_title')} →</a>{/if}
+				{#if needsReply.length > 4}<a class="link-more" href="/member?tab=calendar">{calendarLabel} →</a>{/if}
 			</div>
 		{/if}
 	</section>
@@ -509,7 +536,7 @@
 {#snippet family()}
 	{#if people.length > 1}
 		<section class="card card-body">
-			<h2 class="card-title"><UsersRound size={16} aria-hidden="true" />{t('portal.family')}<a class="link ml-auto text-sm font-semibold" href="/parent/profile">{t('portal.profile')} →</a></h2>
+			<h2 class="card-title"><UsersRound size={16} aria-hidden="true" />{t('portal.family')}<a class="link ml-auto text-sm font-semibold" href="/member/profile">{t('portal.profile')} →</a></h2>
 			<ul class="grid gap-3">
 				{#each people.filter((person) => person.id !== data.home.viewer) as person (person.id)}
 					{@const open = data.home.fees.filter((fee) => fee.member_id === person.id).reduce((sum, fee) => sum + Number(fee.balance), 0)}
@@ -533,11 +560,23 @@
 	{#if sponsor.url && /^https?:\/\//i.test(sponsor.url)}<a class="grid size-full place-items-center p-2 hover:bg-subhead" href={sponsor.url} target="_blank" rel="noopener noreferrer" tabindex={hidden ? -1 : undefined}>{@render logo()}</a>{:else}<div class="grid size-full place-items-center p-2">{@render logo()}</div>{/if}
 {/snippet}
 
+{#snippet followingLive()}
+	<FollowedGames games={data.followed ?? []} crest={data.branding?.logo_url} clubName={data.branding?.name ?? ''} {background} show="live" />
+{/snippet}
+
+{#snippet followingRest()}
+	<FollowedGames games={data.followed ?? []} crest={data.branding?.logo_url} clubName={data.branding?.name ?? ''} {background} show="rest" />
+{/snippet}
+
+{#snippet following()}
+	<FollowedGames games={data.followed ?? []} crest={data.branding?.logo_url} clubName={data.branding?.name ?? ''} {background} />
+{/snippet}
+
 {#snippet sponsors()}
 	{#if data.home.sponsors?.length}
 		{@const all = data.home.sponsors}
-		<section class="grid min-w-0 gap-2">
-			<h2 class="font-mono text-[11px] tracking-[.14em] text-muted uppercase">{t('portal.partners')}</h2>
+		<section class="grid min-w-0 gap-3 max-md:mt-6">
+			<h2 class="px-0.5 font-display text-xl font-extrabold tracking-[.02em] text-ink uppercase">{t('portal.partners')}</h2>
 			<!-- Phones: every sponsor scrolls past in a loop (pauses on touch/hover; plain swipeable row when motion is reduced). -->
 			<div class="sponsor-carousel -mx-3 overflow-x-auto md:hidden" aria-label={t('sponsors.title')} role="group">
 				<ul class="sponsor-track flex w-max gap-2 px-3" style="--sponsor-duration: {Math.max(all.length * 4, 16)}s">
@@ -558,26 +597,16 @@
 	{/if}
 {/snippet}
 
-{#if tab !== 'home'}
-	<div class="flex items-center justify-between gap-2 md:hidden">
-		<h1 class="font-display text-2xl font-extrabold text-ink uppercase">{title}</h1>
-		{#if tab === 'calendar' && !crewOnly}
-			<a class="btn btn-outline gap-2 md:hidden" href={viewLink(view === 'list' ? 'month' : 'list')}>
-				{#if view === 'list'}<CalendarDays size={16} aria-hidden="true" />{t('portal.month_view')}{:else}<List size={16} aria-hidden="true" />{t('portal.schedule')}{/if}
-			</a>
-		{/if}
-	</div>
-{/if}
-
 {#if tab === 'calendar'}
 	{@render peoplePicker()}
 	{#if view === 'month'}
 		<div class="grid min-w-0 items-start gap-4 md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-			<div class="grid gap-3">
+			<div data-sticky-top class="grid gap-3 max-md:sticky max-md:top-[calc(4rem+env(safe-area-inset-top))] max-md:z-10 max-md:-mx-3 max-md:bg-paper max-md:px-3 max-md:pb-2">
 				<MonthPicker bind:month bind:selected={pickedDay} events={eventDays} />
-				<p class="flex flex-wrap gap-x-4 gap-y-1 px-1 text-xs text-muted">{#each kindsPresent as kind (kind)}<span class="inline-flex items-center gap-1.5"><span class="size-2 rounded-full {kindStyle(kind).dot}"></span>{t(kindLabelKey(kind))}</span>{/each}</p>
+				<p class="flex flex-wrap gap-x-4 gap-y-1 px-1 text-xs text-muted max-md:hidden">{#each kindsPresent as kind (kind)}<span class="inline-flex items-center gap-1.5"><span class="size-2 rounded-full {kindStyle(kind).dot}"></span>{t(kindLabelKey(kind))}</span>{/each}</p>
 			</div>
-			<section class="card card-body min-w-0">
+			<div class="md:hidden"><MobileAgenda entries={agenda} href={eventLink} {people} {firstName} kind="all" switchHref={viewLink('list')} switchMonth={false} chips={false} past focusKey={`${month.getFullYear()}-${month.getMonth()}-${pickedDay}`} /></div>
+			<section class="card card-body hidden min-w-0 md:block">
 				<h2 class="card-title"><CalendarDays size={16} aria-hidden="true" />{pickedDay ? formatLongDay(new Date(`${pickedDay}T12:00:00`)) : t('portal.schedule')}</h2>
 				<div class="divide-y divide-rule">
 					{#each agenda as entry (entry.event.event_id)}{@render eventRow(entry)}{:else}<p class="py-2 text-sm text-muted">{t('portal.no_events')}</p>{/each}
@@ -610,55 +639,34 @@
 			</div>
 		</section>
 	{:else}
-		<PortalAgenda entries={calendar} href={eventLink} replies={replyStack} score={scoreMark} />
+		<div class="md:hidden"><MobileAgenda entries={calendar} href={eventLink} {people} {firstName} bind:kind={kindFilter} switchHref={viewLink('month')} past /></div>
+		<div class="hidden md:block"><PortalAgenda entries={calendar} href={eventLink} replies={replyStack} score={scoreMark} /></div>
 	{/if}
 {:else if tab === 'news'}
 	<News articles={data.home.news} />
 {:else if tab === 'me'}
-	<div class="grid min-w-0 items-start gap-4 md:grid-cols-[minmax(0,5fr)_minmax(0,4fr)]">
-		<div class="grid gap-4">
-			<section class="card card-body flex-row items-center gap-3">
-				<ClubCrest name={viewer?.name ?? ''} logoUrl={viewer?.photo_url} size={48} />
-				<h2 class="font-display text-xl font-extrabold text-ink uppercase">{viewer?.name}</h2>
-				<div class="ml-auto"><AccountMenu email={data.auth.status === 'authenticated' ? data.auth.user.email : ''} /></div>
-			</section>
-			{#if people.length > 1}
-				<section class="card card-body">
-					<h2 class="card-title"><UsersRound size={16} aria-hidden="true" />{t('portal.family')}</h2>
-					<ul class="divide-y divide-rule">
-						{#each people.filter((person) => person.id !== data.home.viewer) as person (person.id)}
-							<li class="flex min-h-12 items-center gap-3 py-2"><ClubCrest name={person.name} logoUrl={person.photo_url} size={32} /><span class="font-semibold">{person.name}</span></li>
-						{/each}
-					</ul>
-				</section>
-			{/if}
-		</div>
-		<div class="grid gap-4">
-			<section class="card divide-y divide-rule overflow-hidden">
-				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/parent/profile"><UserRound size={17} aria-hidden="true" />{t('portal.profile_details')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
-				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/parent/notifications"><Bell size={17} aria-hidden="true" />{t('portal.notifications')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
-				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/parent/profile#follow"><Shirt size={17} aria-hidden="true" />{t('portal.follow_title')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
-				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/parent/stats"><ChartColumn size={17} aria-hidden="true" />{t('portal.stats_page')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
-				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/parent?tab=payments"><Wallet size={17} aria-hidden="true" />{t('portal.payments')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
-				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/account/security"><KeyRound size={17} aria-hidden="true" />{t('shell.menu.security')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
-			</section>
-			<InstallPush />
-		</div>
-	</div>
+	<MeHub viewer={viewer} {people} email={data.auth.status === 'authenticated' ? data.auth.user.email : ''} counts={homeCounts} shop={data.home.shop_enabled} coach={!!data.me?.has_member_portal_role} />
+{:else if tab === 'documents'}
+	{@render peoplePicker()}
+	{#if data.overview}<RequirementsCard memberships={data.overview.memberships.filter((row) => phone || !selected || row.member_id === selected)} {people} />{/if}
 {:else if tab === 'payments'}
+	<div class="md:hidden"><MobilePayments home={data.home} {people} {memberName} /></div>
+	<div class="hidden md:contents">
 	{@render peoplePicker()}
 	<div class="grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
 		<div class="grid min-w-0 content-start gap-4">{@render payments()}</div>
-		<div class="grid min-w-0 content-start gap-4">
+		<div class="hidden min-w-0 content-start gap-4 md:grid">
 			{#if data.overview}<RequirementsCard memberships={data.overview.memberships.filter((row) => !selected || row.member_id === selected)} {people} />{/if}
 		</div>
 	</div>
-{:else}
-	<div class="flex flex-wrap items-baseline justify-between gap-2 md:hidden">
-		<h1 class="font-display text-2xl font-extrabold text-ink uppercase">{title}</h1>
-		<p class="text-sm text-muted">{formatLongDay(new Date())}</p>
 	</div>
-	<FollowedGames games={data.followed ?? []} crest={data.branding?.logo_url} clubName={data.branding?.name ?? ''} />
+{:else}
+	<div class="md:hidden">
+		<MobileHome {people} {nextEvents} {background} crest={data.branding?.logo_url} counts={homeCounts} {weekItems} news={data.home.news} {eventLink} {firstName} {rsvp} following={followingRest} live={followingLive} />
+		{@render sponsors()}
+	</div>
+	<div class="hidden md:contents">
+	<FollowedGames games={data.followed ?? []} crest={data.branding?.logo_url} clubName={data.branding?.name ?? ''} {background} />
 	<div class="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] xl:items-start xl:gap-5">
 		<div class="grid min-w-0 grid-cols-1 content-start gap-4">
 			<div class="xl:hidden">{@render peoplePicker()}</div>
@@ -695,9 +703,10 @@
 			{@render sponsors()}
 		</aside>
 	</div>
+	</div>
 {/if}
 
-<Sheet open={!!detail} title={detail?.event.title ?? calendarLabel} onclose={() => void goto(tab === 'calendar' ? calendarLink : '/parent', { reset: false, replace: true })}>
+<Sheet open={!!detail} title={detail?.event.title ?? calendarLabel} onclose={() => void goto(tab === 'calendar' ? calendarLink : '/member', { reset: false, replace: true })}>
 	{#if detail}
 		{@const event = detail.event}
 		{@const audience = detail.attendance.length > 0}
@@ -711,13 +720,55 @@
 				{#if event.location}
 					<div class="mt-1 flex items-center gap-3">
 						<MapPin size={18} class="shrink-0 text-muted" aria-hidden="true" />
-						<span class="min-w-0 flex-1 font-semibold text-ink">{event.location}</span>
-						<a class="btn btn-outline btn-sm md:h-8" href="https://www.google.com/maps/search/?api=1&query={encodeURIComponent(event.location)}" target="_blank" rel="noopener noreferrer">{t('portal.open_maps')}</a>
+						<span class="min-w-0 flex-1"><span class="block font-semibold text-ink">{event.location}</span>{#if addressLine(event.location_detail)}<span class="block text-sm text-muted">{addressLine(event.location_detail)}</span>{/if}</span>
+						<a class="btn btn-outline btn-sm md:h-8" href={mapsHref(event.location_detail, event.location)} target="_blank" rel="noopener noreferrer">{t('portal.open_maps')}</a>
 					</div>
 				{/if}
-				{#if event.score_for != null && event.score_against != null}<p class="font-display text-2xl font-extrabold">{event.score_for}–{event.score_against}</p>{/if}
 				{#if event.notes}<p class="mt-1 border-t border-line pt-2 text-sm whitespace-pre-line text-slate">{event.notes}</p>{/if}
 			</div>
+			{#if audience && extras?.tasks.length && Date.parse(event.end ?? event.start) > Date.now()}
+				<section class="card card-body">
+					<h2 class="card-title"><ListChecks size={16} aria-hidden="true" />{t('portal.duties')}</h2>
+					<div class="divide-y divide-rule">
+						{#each extras.tasks as task (task.id)}
+							<div class="grid gap-1 py-2">
+								<div class="flex items-center gap-3">
+									<span class="min-w-0 flex-1">
+										<span class="block font-semibold text-ink">{task.title}</span>
+										<span class="block text-xs text-muted">{task.open_slots ? t('portal.task_taken', { claimed: task.claimed, needed: task.needed }) : t('portal.task_covered')}{task.claimed_by.length ? ` · ${task.claimed_by.join(', ')}` : ''}</span>
+									</span>
+									{#if task.claimed_by_me}
+										<button class="btn btn-outline btn-sm min-h-11 md:h-8 md:min-h-0" type="button" disabled={!!busy} onclick={() => claim(event.event_id, task.id, false)}>{t('portal.task_give_back')}</button>
+									{:else if task.open_slots}
+										<button class="btn btn-primary btn-sm min-h-11 md:h-8 md:min-h-0" type="button" disabled={!!busy} onclick={() => claim(event.event_id, task.id, true)}>{t('portal.duty_volunteer')}</button>
+									{/if}
+								</div>
+								{#if task.description}<p class="text-xs text-slate">{task.description}</p>{/if}
+								{#if errors[task.id]}<p class="text-sm text-error" role="alert">{errors[task.id]}</p>{/if}
+							</div>
+						{/each}
+					</div>
+				</section>
+			{/if}
+			{#if audience && (extras?.roster?.length || extras?.game)}
+				<div class="card divide-y divide-rule overflow-hidden">
+					{#if extras?.roster?.length}
+						{@const counted = extras.roster}
+						<a class="flex min-h-14 items-center gap-3 px-4 py-2" href="#who-going">
+							<span class="grid size-10 shrink-0 place-items-center rounded-box bg-ok-bg text-ok-text"><Users size={18} aria-hidden="true" /></span>
+							<span class="min-w-0 flex-1"><b class="block text-ink">{t('portal.who_going')}</b><span class="block truncate text-sm text-muted">{t('portal.going_summary', { going: counted.filter((p) => p.state === 'going').length, out: counted.filter((p) => p.state === 'out').length, waiting: counted.filter((p) => p.state === 'waiting' || p.state === 'maybe').length })}</span></span>
+							<ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" />
+						</a>
+					{/if}
+					{#if extras?.game}
+						<button type="button" class="flex min-h-14 w-full items-center gap-3 px-4 py-2 text-left" onclick={() => (timelineOpen = true)}>
+							<span class="grid size-10 shrink-0 place-items-center rounded-box bg-subhead text-ink"><ListOrdered size={18} aria-hidden="true" /></span>
+							<span class="min-w-0 flex-1"><b class="block text-ink">{t('portal.timeline_view')}</b>{#if extras.game.score}<span class="block truncate text-sm text-muted">{extras.game.score}</span>{/if}</span>
+							<ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" />
+						</button>
+					{/if}
+				</div>
+			{/if}
 			{#if event.kind === 'game' && extras?.follow}
 				<div class="flex items-center gap-3 rounded-box border border-line px-4 py-2.5">
 					<span class="min-w-0 flex-1 text-sm"><b class="text-ink">{extras.follow.directly ? t('portal.following_game') : extras.follow.via_team ? t('portal.following_team') : t('portal.follow_game')}</b><span class="block text-xs text-muted">{t('portal.follow_help')}</span></span>
@@ -729,7 +780,7 @@
 			{#if audience}
 				<section class="card card-body">
 					<h2 class="card-title"><UserRound size={16} aria-hidden="true" />{t('portal.reply')}</h2>
-					<div class="divide-y divide-rule">{#each detail.attendance as row (row.id)}{@render rsvp(row)}{/each}</div>
+					<div class="divide-y divide-rule">{#each detail.attendance as row (row.id)}{@render rsvp(row, false, false, phone)}{/each}</div>
 				</section>
 			{/if}
 			{#if detail.officiating.length}
@@ -740,8 +791,8 @@
 			<!-- A request to referee or officiate is only that: line-up, tasks and files are for the people invited to play. -->
 			{#if audience && extras?.roster?.length}
 				{@const roster = extras.roster}
-				<section class="card card-body">
-					<h2 class="card-title"><Users size={16} aria-hidden="true" />{t('portal.roster_title')}</h2>
+				<section class="card card-body" id="who-going">
+					<h2 class="card-title"><Users size={16} aria-hidden="true" />{t('portal.who_going')}</h2>
 					<div class="grid gap-4">
 						{#each rosterGroups as group (group.key)}
 							<div>
@@ -752,6 +803,7 @@
 										<li class="flex min-h-10 items-center gap-2 border-b border-rule py-1.5">
 											<span class="w-7 shrink-0 text-right font-mono text-xs text-muted">{player.number !== null ? `#${player.number}` : ''}</span>
 											<span class="min-w-0 flex-1 leading-tight {player.mine ? 'font-semibold text-club-dark' : 'text-ink'}">{player.name}{#if player.extra && player.position}<span class="block text-xs font-normal text-muted">{player.team ? t('portal.roster_extra_from', { team: player.team }) : t('portal.roster_extra')}</span>{/if}</span>
+											{#if player.selected === true}<span class="badge badge-xs badge-success">{t('portal.picked')}</span>{:else if player.selected === false}<span class="badge badge-xs badge-ghost">{t('portal.not_picked')}</span>{/if}
 											<span class="grid size-6 shrink-0 place-items-center rounded-full border {statusStyle(status.code)}" title={t(statusLabelKey(status.code))} role="img" aria-label={t(statusLabelKey(status.code))}><status.icon size={13} aria-hidden="true" /></span>
 										</li>
 									{/each}
@@ -759,7 +811,7 @@
 							</div>
 						{/each}
 					</div>
-					<p class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+					<p class="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs text-muted">
 						{#each Object.values(rosterStatus) as status (status.code)}
 							<span class="inline-flex items-center gap-1.5"><span class="grid size-5 place-items-center rounded-full border {statusStyle(status.code)}"><status.icon size={11} aria-hidden="true" /></span>{t(statusLabelKey(status.code))}</span>
 						{/each}
@@ -788,7 +840,7 @@
 				{@const game = extras.game}
 				{@const mine = new Set(people.map((person) => person.id))}
 				<section class="card card-body">
-					<h2 class="card-title"><Users size={16} aria-hidden="true" />{t('portal.lineup_dressed')}<button class="btn btn-outline btn-sm ml-auto md:h-8" type="button" onclick={() => (timelineOpen = true)}>{t('portal.timeline_view')}</button></h2>
+					<h2 class="card-title"><Users size={16} aria-hidden="true" />{t('portal.lineup_dressed')}</h2>
 					<p class="text-center font-display text-4xl leading-none font-extrabold tabular-nums text-ink">{game.score}</p>
 					{#if game.lineup?.ours.length}
 						<div class="flex flex-wrap gap-1.5">
@@ -809,30 +861,6 @@
 						{/each}
 					</div>
 					<p class="text-xs text-muted">{t('portal.lineup_counts', { going: extras.lineup.going, out: extras.lineup.out, waiting: extras.lineup.waiting })}</p>
-				</section>
-			{/if}
-			{#if audience && extras?.tasks.length}
-				<section class="card card-body">
-					<h2 class="card-title"><ListChecks size={16} aria-hidden="true" />{t('portal.duties')}</h2>
-					<div class="divide-y divide-rule">
-						{#each extras.tasks as task (task.id)}
-							<div class="grid gap-1 py-2">
-								<div class="flex items-center gap-3">
-									<span class="min-w-0 flex-1">
-										<span class="block font-semibold text-ink">{task.title}</span>
-										<span class="block text-xs text-muted">{task.open_slots ? t('portal.task_taken', { claimed: task.claimed, needed: task.needed }) : t('portal.task_covered')}{task.claimed_by.length ? ` · ${task.claimed_by.join(', ')}` : ''}</span>
-									</span>
-									{#if task.claimed_by_me}
-										<button class="btn btn-outline btn-sm min-h-11 md:h-8 md:min-h-0" type="button" disabled={!!busy} onclick={() => claim(event.event_id, task.id, false)}>{t('portal.task_give_back')}</button>
-									{:else if task.open_slots}
-										<button class="btn btn-primary btn-sm min-h-11 md:h-8 md:min-h-0" type="button" disabled={!!busy} onclick={() => claim(event.event_id, task.id, true)}>{t('portal.duty_volunteer')}</button>
-									{/if}
-								</div>
-								{#if task.description}<p class="text-xs text-slate">{task.description}</p>{/if}
-								{#if errors[task.id]}<p class="text-sm text-error" role="alert">{errors[task.id]}</p>{/if}
-							</div>
-						{/each}
-					</div>
 				</section>
 			{/if}
 			{#if audience && extras?.attachments.length}

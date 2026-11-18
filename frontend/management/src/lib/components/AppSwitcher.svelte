@@ -22,7 +22,7 @@
 	});
 
 	const options = $derived([
-		{ key: 'member', href: '/parent', label: t('portal.parent'), hint: t('portal.parent_hint'), icon: UsersRound, current: member },
+		{ key: 'member', href: '/member', label: t('portal.parent'), hint: t('portal.parent_hint'), icon: UsersRound, current: member },
 		{ key: 'management', href: desktop ? '/' : '/coach', label: t('portal.management'), hint: t('portal.management_hint'), icon: LayoutDashboard, current: !member }
 	]);
 	const current = $derived(options.find((o) => o.current) ?? options[0]);

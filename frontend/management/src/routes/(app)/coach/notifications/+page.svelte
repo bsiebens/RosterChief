@@ -1,13 +1,13 @@
 <script lang="ts">
-	import NotificationSettings from '#lib/components/portal/NotificationSettings.svelte';
+	import InboxList from '#lib/components/mobile/InboxList.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
 
-	let { data } = $props();
+	// The coach side's bell opens the same notification list as the member side (on a phone; larger screens keep the bell's drop-down).
 	usePageHeader(() => ({ title: t('portal.notifications') }));
 </script>
 
 <svelte:head><title>{pageTitle(t('portal.notifications'))}</title></svelte:head>
 
-<NotificationSettings settings={data.settings} />
+<InboxList portal="coach" />

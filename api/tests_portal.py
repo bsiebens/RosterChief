@@ -13,7 +13,7 @@ from django_tenants.utils import schema_context
 from club.models import Club, Domain
 from club.services import create_club, ensure_member_for_user
 from controlpanel.tests import PASSWORD, login_session, make_user
-from events.models import Attendance, Event
+from events.models import Attendance, Event, Season
 from members.models import Family, FamilyMembership, Member
 from notifications.models import WebPushSubscription
 from sponsoring.models import Sponsor
@@ -175,6 +175,20 @@ class PortalProfileTests(ParentPortalTests):
         self.assertEqual(data["quiet_hours"]["start"], "22:00")
         self.assertEqual(self.call("put", "/portal/me/notifications", token, {"categories": {"admin": {"push": False}}}).status_code, 422)
 
+    def test_home_lists_the_whole_current_season_not_just_90_days_either_side(self):
+        token = self.token()
+        today = timezone.localdate()
+        with schema_context(self.club.schema_name):
+            old = Event.objects.create(title="Season opener", kind=Event.EventKind.TRAINING, start=timezone.now() - datetime.timedelta(days=150))
+            old.invited_members.add(self.child)
+            Attendance.objects.get_or_create(event=old, member=self.child)
+        titles = [row["title"] for row in self.call("get", "/portal/home", token).json()["events"]]
+        self.assertNotIn("Season opener", titles)
+        with schema_context(self.club.schema_name):
+            Season.objects.create(start_date=today - datetime.timedelta(days=200), end_date=today + datetime.timedelta(days=100))
+        titles = [row["title"] for row in self.call("get", "/portal/home", token).json()["events"]]
+        self.assertIn("Season opener", titles)
+
     def test_home_says_why_a_reply_is_not_possible_instead_of_offering_it(self):
         token = self.token()
         [row] = self.call("get", "/portal/home", token).json()["events"]
@@ -259,12 +273,47 @@ class PortalProfileTests(ParentPortalTests):
         extras = self.call("get", f"/portal/events/{event.pk}", token).json()
         roster = extras["roster"]
         self.assertEqual([(row["state"], row["mine"]) for row in roster], [("going", True), ("out", False)])  # coming first, then the others
-        self.assertEqual(set(roster[0]), {"id", "name", "number", "position", "position_order", "extra", "team", "state", "mine"})  # no note, reason or status detail
+        self.assertEqual(set(roster[0]), {"id", "name", "number", "position", "position_order", "extra", "team", "state", "selected", "mine"})  # no note, reason or status detail
         for secret in ("Dentist", "Sick with flu", "Private"):
             self.assertNotIn(secret, str(extras))
         with schema_context(self.club.schema_name):
             Event.objects.filter(pk=event.pk).update(kind=Event.EventKind.TRAINING)
         self.assertEqual(len(self.call("get", f"/portal/events/{event.pk}", token).json()["roster"]), 2)  # every kind of event, not only games
+
+    def test_everyone_sees_who_was_picked_once_the_lineup_is_published_but_no_lines(self):
+        token = self.token()
+        with schema_context(self.club.schema_name):
+            event = self.child_reply.event
+            Event.objects.filter(pk=event.pk).update(kind=Event.EventKind.GAME)
+        before = self.call("get", f"/portal/events/{event.pk}", token).json()["roster"]
+        self.assertEqual({row["selected"] for row in before}, {None})  # nothing is decided before publishing
+        with schema_context(self.club.schema_name):
+            Attendance.objects.filter(pk=self.child_reply.pk).update(status="selected", status_before_lineup="present")
+            Attendance.objects.filter(pk=self.other_reply.pk).update(status="not_selected", status_before_lineup="present")
+        after = self.call("get", f"/portal/events/{event.pk}", token).json()["roster"]
+        self.assertEqual(sorted(row["selected"] for row in after), [False, True])
+        self.assertNotIn("slot", str(after))
+
+    def test_home_rows_carry_how_many_are_going_but_no_names(self):
+        token = self.token()
+        with schema_context(self.club.schema_name):
+            event = self.child_reply.event
+            Attendance.objects.filter(pk=self.child_reply.pk).update(status="present")
+            Attendance.objects.filter(pk=self.other_reply.pk).update(status="absent", note="Sick")
+        row = next(r for r in self.call("get", "/portal/home", token).json()["events"] if r["event_id"] == str(event.pk))
+        self.assertEqual((row["going_count"], row["invited_count"]), (1, 2))
+
+    def test_events_carry_the_exact_address_and_map_pin(self):
+        from events.models import Location
+
+        token = self.token()
+        with schema_context(self.club.schema_name):
+            event = self.child_reply.event
+            event.location = Location.objects.create(name="Eagles Arena", address="Stationsstraat 12", zip_code="2800", city="Mechelen", latitude=51.0259, longitude=4.4776)
+            event.save(update_fields=["location"])
+        rows = [row for row in self.call("get", "/portal/home", token).json()["events"] if row["event_id"] == str(event.pk)]
+        self.assertEqual(rows[0]["location_detail"], {"name": "Eagles Arena", "address": "Stationsstraat 12", "zip_code": "2800", "city": "Mechelen", "latitude": 51.0259, "longitude": 4.4776})
+        self.assertEqual(rows[0]["location"], "Eagles Arena")
 
     def test_roster_follows_the_audience_extras_included_and_dropped_players_gone(self):
         from events.models import Season
@@ -416,6 +465,18 @@ class PortalProfileTests(ParentPortalTests):
         self.assertTrue(state["teams"][0]["followed"])
         state = self.call("delete", f"/portal/me/follows/teams/{team.pk}", token).json()
         self.assertFalse(state["teams"][0]["followed"])
+
+
+    def test_followable_teams_come_in_the_clubs_team_order(self):
+        from teams.models import Team
+
+        token = self.token()
+        with schema_context(self.club.schema_name):
+            Team.objects.create(name="Alpha", short_name="AL")
+            Team.objects.create(name="Zulu", short_name="ZU", ordering=1)
+            Team.objects.create(name="Mike", short_name="MI", ordering=2)
+        names = [t["name"] for t in self.call("get", "/portal/me/follows", token).json()["teams"]]
+        self.assertEqual(names, ["Zulu", "Mike", "Alpha"])
 
 
     def test_requirement_hand_in_waits_for_review_then_locks(self):

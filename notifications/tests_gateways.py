@@ -180,7 +180,19 @@ class FcmTests(TestCase):
         self.assertEqual((len(client.posts), self.credentials.refreshed), (2, 1))
 
 
-@override_settings(**{**NO_CREDENTIALS, "DJANGO_VAPID_PUBLIC_KEY": "pub", "DJANGO_VAPID_PRIVATE_KEY": "priv"})
+def _vapid_pair() -> tuple[str, str]:
+    """A real key pair as ``generate_vapid_keys`` prints it: the public key and the PEM private key with escaped newlines."""
+    from py_vapid import Vapid
+
+    vapid = Vapid()
+    vapid.generate_keys()
+    return gateways._vapid_public_key(vapid), vapid.private_pem().decode().strip().replace("\n", "\\n")
+
+
+VAPID_PUBLIC, VAPID_PRIVATE = _vapid_pair()
+
+
+@override_settings(**{**NO_CREDENTIALS, "DJANGO_VAPID_PUBLIC_KEY": VAPID_PUBLIC, "DJANGO_VAPID_PRIVATE_KEY": VAPID_PRIVATE})
 class WebPushTests(TestCase):
     def setUp(self):
         self.sub = make_subscription(make_user())
@@ -198,9 +210,16 @@ class WebPushTests(TestCase):
         result, webpush = self.send()
         self.assertEqual(result.outcome, SENT)
         kwargs = webpush.call_args.kwargs
-        self.assertEqual(kwargs["vapid_private_key"], "priv")
+        # pywebpush only reads a raw key from a string, so the PEM from the environment is loaded first and passed as a key object
+        self.assertEqual(gateways._vapid_public_key(kwargs["vapid_private_key"]), VAPID_PUBLIC)
         payload = json.loads(kwargs["data"])
         self.assertEqual((payload["title"], payload["kind"], payload["club"]), ("Hello", "notification", "sharks"))
+
+    @override_settings(DJANGO_VAPID_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\\nMIIB\\n-----END PRIVATE KEY-----")
+    def test_a_malformed_key_fails_the_delivery_without_contacting_the_service(self):
+        result, webpush = self.send()
+        self.assertEqual(result.outcome, FAILED)
+        webpush.assert_not_called()
 
     def test_gone_is_dead(self):
         for status in (404, 410):

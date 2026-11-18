@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
+	import { page } from '$app/state';
 	import { ChartColumn, Check, Copy, Link2, RefreshCw } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -14,7 +15,7 @@
 	let busy = $state(false);
 	let copied = $state(false);
 	let failed = $state(false);
-	const url = $derived(person.share_token ? `${location.origin}/stats/${person.share_token}` : '');
+	const url = $derived(person.share_token ? `${page.url.origin}/stats/${person.share_token}` : '');
 
 	async function set(on: boolean, rotate = false) {
 		busy = true;
@@ -36,18 +37,18 @@
 </script>
 
 {#if banner}
-	<section class="card" aria-labelledby="stats-share-title">
-		<div class="flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3 sm:px-5">
+	<section class="card min-w-0 max-w-full" aria-labelledby="stats-share-title">
+		<div class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3 sm:px-5">
 			<div class="flex min-w-0 flex-1 basis-60 items-center gap-3">
 				<Link2 size={18} class="shrink-0 text-muted" aria-hidden="true" />
 				<div class="min-w-0"><b id="stats-share-title" class="block text-ink">{t('portal.stats_public')}</b><span class="block text-xs text-muted">{t('portal.stats_public_help', { name: person.first_name })}</span></div>
 			</div>
 			<input type="checkbox" class="toggle order-2 shrink-0 sm:order-3" aria-labelledby="stats-share-title" checked={!!person.share_token} disabled={busy} onchange={(e) => set(e.currentTarget.checked)} />
 			{#if person.share_token}
-				<div class="order-last flex w-full min-w-0 flex-wrap items-center gap-2 sm:order-2 sm:w-auto sm:flex-1 sm:flex-nowrap">
-					<div class="input flex min-w-0 flex-1 basis-48 items-center gap-2 bg-subhead text-sm"><span class="truncate" title={url}>{url}</span></div>
-					<button class="btn btn-outline btn-sm gap-1.5" type="button" onclick={copy}>{#if copied}<Check size={14} aria-hidden="true" />{t('portal.stats_copied')}{:else}<Copy size={14} aria-hidden="true" />{t('portal.stats_copy')}{/if}</button>
-					<button class="btn btn-outline btn-sm gap-1.5" type="button" disabled={busy} onclick={() => set(true, true)}><RefreshCw size={13} aria-hidden="true" />{t('portal.stats_replace_short')}</button>
+				<div class="order-last grid w-full min-w-0 grid-cols-2 gap-2 sm:order-2 sm:flex sm:w-auto sm:flex-1 sm:flex-nowrap sm:items-center">
+					<div class="input col-span-2 flex min-w-0 items-center gap-2 bg-subhead text-sm sm:flex-1 sm:basis-48"><span class="truncate" title={url}>{url}</span></div>
+					<button class="btn btn-outline btn-sm w-full gap-1.5 sm:w-auto" type="button" onclick={copy}>{#if copied}<Check size={14} aria-hidden="true" />{t('portal.stats_copied')}{:else}<Copy size={14} aria-hidden="true" />{t('portal.stats_copy')}{/if}</button>
+					<button class="btn btn-outline btn-sm w-full gap-1.5 sm:w-auto" type="button" disabled={busy} onclick={() => set(true, true)}><RefreshCw size={13} aria-hidden="true" />{t('portal.stats_replace_short')}</button>
 				</div>
 			{/if}
 		</div>
@@ -55,7 +56,7 @@
 	</section>
 {:else}
 <section class="card" aria-labelledby="stats-share-title">
-	<div class="card-h"><ChartColumn size={17} aria-hidden="true" /><h2 id="stats-share-title">{t('portal.stats_title')}</h2><a class="link-more ml-auto" href="/parent/stats?who={person.id}">{t('portal.stats_open')} →</a></div>
+	<div class="card-h"><ChartColumn size={17} aria-hidden="true" /><h2 id="stats-share-title">{t('portal.stats_title')}</h2><a class="link-more ml-auto" href="/member/stats?who={person.id}">{t('portal.stats_open')} →</a></div>
 	<div class="grid gap-3 p-5">
 		<label class="flex items-center gap-3">
 			<input type="checkbox" class="toggle" checked={!!person.share_token} disabled={busy} onchange={(e) => set(e.currentTarget.checked)} />

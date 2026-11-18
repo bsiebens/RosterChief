@@ -34,3 +34,13 @@ export async function remind(eventId: string): Promise<{ ok: boolean; count: num
 	const response = await api<{ reminded: number }>('POST', `/events/${eventId}/attendance/remind`);
 	return { ok: response.ok, count: response.data?.reminded ?? 0, message: response.message ?? '' };
 }
+
+/** The line-up chip of a game in the coach lists: draft, going out on a date, or not started. Published ones need no chip. */
+export function lineupChip(event: { lineup: boolean; lineup_published: boolean; lineup_status?: string; lineup_scheduled_at?: string | null; start: string; cancelled: boolean }, when: (iso: string) => string): { key: string; text?: string; cls: string } | null {
+	if (!event.lineup || event.cancelled || Date.parse(event.start) < Date.now()) return null;
+	const status = event.lineup_status ?? (event.lineup_published ? 'published' : 'none');
+	if (status === 'published') return null;
+	if (status === 'scheduled' && event.lineup_scheduled_at) return { key: 'coach.lineup_scheduled', text: when(event.lineup_scheduled_at), cls: 'badge-info' };
+	if (status === 'draft') return { key: 'coach.lineup_draft', cls: 'badge-warning' };
+	return { key: 'coach.lineup_none', cls: 'badge-ghost' };
+}

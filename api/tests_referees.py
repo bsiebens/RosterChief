@@ -306,7 +306,7 @@ class RefereeManagementTests(TestCase):
         with mock.patch("features.entitlements.resolve_entitlements", return_value=WITH_FEATURE):
             self.assertEqual(notify_new_opportunities(self.club), 4)
             self.assertEqual(notify_new_opportunities(self.club), 0)
-        href = f"/parent?tab=calendar&event={game.pk}"
+        href = f"/member?tab=calendar&event={game.pk}"
         self.assertEqual(set(InboxNotification.objects.filter(club=self.club, href=href).values_list("user_id", flat=True)), {
             self.plain_user.pk, *(users[member.pk].pk for member in people[:3]),
         })

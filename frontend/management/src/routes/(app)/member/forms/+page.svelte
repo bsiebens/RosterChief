@@ -16,12 +16,12 @@
 	import type { SharedEvaluation } from '#lib/portal.ts';
 
 	let { data } = $props();
-	usePageHeader(() => ({ title: t('portal.forms') }));
-
 	let selected = $state('');
 	const people = $derived(data.home.people);
+	usePageHeader(() => ({ title: t('portal.forms_evaluations') }));
 	const person = (id: string) => people.find((candidate) => candidate.id === id);
 	const forms = $derived(data.home.forms.filter((form) => !selected || form.member_id === selected));
+	const submitted = $derived((data.home.submitted_forms ?? []).filter((form) => !selected || form.member_id === selected));
 	const evaluations = $derived(data.evaluations.filter((evaluation) => !selected || evaluation.member_id === selected));
 	let opened = $state<SharedEvaluation | null>(null);
 
@@ -37,7 +37,7 @@
 	}
 	const closeForm = () => {
 		filling = null;
-		if (page.url.searchParams.has('fill')) void goto('/parent/forms', { replaceState: true });
+		if (page.url.searchParams.has('fill')) void goto('/member/forms', { replaceState: true });
 	};
 	// Done: let the thank-you show for a moment, then close and refresh the list.
 	function filled() {
@@ -56,7 +56,7 @@
 </script>
 
 <div class="grid min-w-0 gap-4">
-	<PersonFilter {people} bind:selected viewer={data.home.viewer} />
+	<div class="hidden md:block"><PersonFilter {people} bind:selected viewer={data.home.viewer} /></div>
 	<div class="grid min-w-0 items-start gap-4 {data.evaluations.length ? 'xl:grid-cols-2' : 'max-w-3xl'}">
 		<section class="card" aria-labelledby="forms-title">
 			<div class="card-h"><ClipboardList size={17} aria-hidden="true" /><h2 id="forms-title">{t('portal.forms_open')}</h2>{#if forms.length}<span class="badge badge-sm badge-error ml-auto">{t('portal.forms_to_fill', { n: forms.length })}</span>{/if}</div>
@@ -72,6 +72,17 @@
 				{/each}
 			</div>
 		</section>
+
+		{#if submitted.length}
+			<section class="card" aria-labelledby="done-title">
+				<div class="card-h"><CircleCheck size={17} aria-hidden="true" /><h2 id="done-title">{t('portal.forms_done')}</h2></div>
+				<div class="divide-y divide-rule">
+					{#each submitted as form (form.id)}
+						<div class="flex min-h-14 items-center gap-3 px-5 py-2"><CircleCheck size={18} class="shrink-0 text-ok" aria-hidden="true" /><span class="min-w-0 flex-1"><b class="block truncate text-ink">{form.title}</b><span class="block text-xs text-muted">{person(form.member_id)?.name} · {formatDateTime(form.submitted_at)}</span></span></div>
+					{/each}
+				</div>
+			</section>
+		{/if}
 
 		{#if evaluations.length}
 			<section class="card" aria-labelledby="evals-title">

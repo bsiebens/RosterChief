@@ -1,22 +1,29 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
-	import { Camera, Check, Shirt, Trash2, UserRound } from '@lucide/svelte';
+	import { page } from '$app/state';
+	import { Camera, Check, ChevronRight, Shirt, Trash2, UserRound } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import FollowTeams from '#lib/components/portal/FollowTeams.svelte';
 	import SaveStatus from '#lib/components/portal/SaveStatus.svelte';
 	import StatsShare from '#lib/components/portal/StatsShare.svelte';
 	import ProfileOverview from '#lib/components/portal/ProfileOverview.svelte';
+	import { formatDay, parseIsoDate } from '#lib/events/types.ts';
 	import PersonFilter from '#lib/components/PersonFilter.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
+	import { formatPhone } from '#lib/phone.ts';
 	import { api } from '#lib/management-api.ts';
 	import type { ProfilePerson } from '#lib/portal.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
 
 	let { data } = $props();
-	usePageHeader(() => ({ title: t('portal.profile') }));
+	// Me > Follow teams opens this page on that one block (`?view=follow`); the phone profile itself no longer carries it.
+	// On a phone each of these is its own menu on Me and opens the profile page on just that block: `?view=follow|memberships|vouchers|clubs`.
+	const view = $derived(page.url.searchParams.get('view') ?? '');
+	const VIEW_TITLE: Record<string, string> = { follow: 'portal.follow_title', memberships: 'portal.mem_title', vouchers: 'portal.vouchers', clubs: 'portal.switch_club' };
+	usePageHeader(() => ({ title: t(VIEW_TITLE[view] ?? 'portal.profile') }));
 
 	// svelte-ignore state_referenced_locally
 	let who = $state(data.people.find((person) => person.is_self)?.id ?? data.people[0]?.id ?? '');
@@ -28,6 +35,8 @@
 		drafts = seed();
 	});
 	let busy = $state('');
+	let editing = $state(false);
+	const teamLine = (person: ProfilePerson) => person.teams.map((team) => `${team.name}${team.jersey_number !== null ? ` · #${team.jersey_number}` : ''}`).join(', ');
 	let saved = $state('');
 	let errors = $state<Record<string, Record<string, string>>>({});
 	let messages = $state<Record<string, string>>({});
@@ -81,11 +90,8 @@
 
 <svelte:head><title>{pageTitle(t('portal.profile'))}</title></svelte:head>
 
-<div class="mb-4"><PersonFilter people={data.people.map((person) => ({ id: person.id, name: person.name, first_name: person.first_name, photo_url: person.photo_url }))} bind:selected={who} viewer={data.people.find((person) => person.is_self)?.id} all={false} /></div>
-<div class="grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
-	<div class="grid min-w-0 content-start gap-4">
-	{#each data.people.filter((person) => person.id === who) as person (person.id)}
-		{@const d = draft(person)}
+{#snippet editor(person: ProfilePerson)}
+	{@const d = draft(person)}
 		<form class="card overflow-hidden" onsubmit={(e) => { e.preventDefault(); void save(person); }}>
 			<div class="flex flex-wrap items-center gap-4 border-b border-line bg-subhead px-5 py-4">
 				<ClubCrest name={person.name} logoUrl={person.photo_url} size={64} />
@@ -128,9 +134,63 @@
 				</div>
 			</div>
 		</form>
+{/snippet}
+
+<div class="grid min-w-0 gap-5 md:hidden">
+	{#if view === 'follow'}
+		{#if data.follows}<FollowTeams initial={data.follows} />{/if}
+	{:else if view === 'memberships' || view === 'vouchers' || view === 'clubs'}
+		{#if data.overview}<ProfileOverview overview={data.overview} people={data.people} show={[view]} />{/if}
+	{:else}
+	<section class="grid gap-2" aria-label={t('portal.family')}>
+		<h2 class="font-display text-lg font-extrabold tracking-[.02em] text-ink uppercase">{t('portal.family_people')}</h2>
+		<div class="card divide-y divide-rule overflow-hidden">
+			{#each data.people as person (person.id)}
+				<button type="button" class="flex min-h-17 w-full items-center gap-3 px-4 py-2 text-left" aria-pressed={who === person.id} onclick={() => { who = person.id; editing = false; }}>
+					<ClubCrest name={person.name} logoUrl={person.photo_url} size={44} />
+					<span class="min-w-0 flex-1"><b class="block truncate text-ink">{person.name}</b><span class="block truncate text-sm text-muted">{person.is_self ? t('portal.profile_you') : teamLine(person) || t('portal.profile_child')}</span></span>
+					{#if who === person.id}<span class="grid size-6 place-items-center rounded-full bg-club text-club-content"><Check size={14} aria-hidden="true" /></span>{:else}<ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" />{/if}
+				</button>
+			{/each}
+		</div>
+	</section>
+
+	{#each data.people.filter((person) => person.id === who) as person (person.id)}
+		<section class="grid gap-2" aria-label={t('portal.details_of', { name: person.first_name })}>
+			<h2 class="flex items-baseline font-display text-lg font-extrabold tracking-[.02em] text-ink uppercase">{t('portal.details_of', { name: person.first_name })}<button type="button" class="link-more ml-auto" onclick={() => (editing = !editing)}>{editing ? t('common.cancel') : t('common.edit')}</button></h2>
+			{#if editing}
+				{@render editor(person)}
+			{:else}
+				<div class="card divide-y divide-rule overflow-hidden">
+					{#each [[t('portal.date_of_birth'), person.date_of_birth ? formatDay(parseIsoDate(person.date_of_birth) ?? person.date_of_birth) : '–'], [t('portal.email'), person.email || t('portal.email_managed')], [t('portal.phone'), formatPhone(person.phone) || '–'], [t('portal.emergency_phone'), formatPhone(person.emergency_phone) || '–']] as [label, value] (label)}
+						<div class="flex min-h-14 flex-col justify-center px-4 py-2"><span class="text-sm text-muted">{label}</span><b class="break-words text-ink">{value}</b></div>
+					{/each}
+				</div>
+				{#if teamLine(person)}<p class="px-0.5 text-sm text-muted">{teamLine(person)}</p>{/if}
+			{/if}
+		</section>
+
+		<section class="grid gap-2">
+			<h2 class="font-display text-lg font-extrabold tracking-[.02em] text-ink uppercase">{t('portal.permissions')}</h2>
+			<div class="card overflow-hidden">
+				<label class="flex min-h-16 items-center gap-3 px-4 py-2"><span class="min-w-0 flex-1"><b class="block text-ink">{t('portal.photo_consent_short')}</b><span class="block text-sm text-muted">{draft(person).photo_consent ? t('portal.allowed') : t('portal.not_allowed')}</span></span><input type="checkbox" class="toggle" checked={draft(person).photo_consent} disabled={busy === person.id} onchange={(e) => { drafts[person.id].photo_consent = e.currentTarget.checked; void save(person); }} /></label>
+			</div>
+		</section>
+	{/each}
+
+	{/if}
+</div>
+
+<div class="hidden md:block">
+<div class="mb-4"><PersonFilter people={data.people.map((person) => ({ id: person.id, name: person.name, first_name: person.first_name, photo_url: person.photo_url }))} bind:selected={who} viewer={data.people.find((person) => person.is_self)?.id} all={false} /></div>
+<div class="grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+	<div class="grid min-w-0 content-start gap-4">
+	{#each data.people.filter((person) => person.id === who) as person (person.id)}
+		{@render editor(person)}
 	{/each}
 		{#if data.stats?.available}{@const mine = data.stats.people.find((candidate) => candidate.id === who)}{#if mine}<StatsShare person={mine} />{/if}{/if}
 	</div>
 	<div class="grid min-w-0 gap-4">{#if data.overview}<ProfileOverview overview={data.overview} people={data.people} />{/if}</div>
 </div>
 {#if data.follows}<div class="mt-4"><FollowTeams initial={data.follows} /></div>{/if}
+</div>
