@@ -750,20 +750,24 @@
 					</div>
 				</section>
 			{/if}
-			{#if audience && extras?.roster?.length}
-				{@const counted = extras.roster}
-				<a class="card flex min-h-14 items-center gap-3 px-4 py-2" href="#who-going">
-					<span class="grid size-10 shrink-0 place-items-center rounded-box bg-ok-bg text-ok-text"><Users size={18} aria-hidden="true" /></span>
-					<span class="min-w-0 flex-1"><b class="block text-ink">{t('portal.who_going')}</b><span class="block truncate text-sm text-muted">{t('portal.going_summary', { going: counted.filter((p) => p.state === 'going').length, out: counted.filter((p) => p.state === 'out').length, waiting: counted.filter((p) => p.state === 'waiting' || p.state === 'maybe').length })}</span></span>
-					<ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" />
-				</a>
-			{/if}
-			{#if audience && extras?.game}
-				<button type="button" class="card flex min-h-14 w-full items-center gap-3 px-4 py-2 text-left" onclick={() => (timelineOpen = true)}>
-					<span class="grid size-10 shrink-0 place-items-center rounded-box bg-subhead text-ink"><ListOrdered size={18} aria-hidden="true" /></span>
-					<span class="min-w-0 flex-1"><b class="block text-ink">{t('portal.timeline_view')}</b>{#if extras.game.score}<span class="block truncate text-sm text-muted">{extras.game.score}</span>{/if}</span>
-					<ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" />
-				</button>
+			{#if audience && (extras?.roster?.length || extras?.game)}
+				<div class="card divide-y divide-rule overflow-hidden">
+					{#if extras?.roster?.length}
+						{@const counted = extras.roster}
+						<a class="flex min-h-14 items-center gap-3 px-4 py-2" href="#who-going">
+							<span class="grid size-10 shrink-0 place-items-center rounded-box bg-ok-bg text-ok-text"><Users size={18} aria-hidden="true" /></span>
+							<span class="min-w-0 flex-1"><b class="block text-ink">{t('portal.who_going')}</b><span class="block truncate text-sm text-muted">{t('portal.going_summary', { going: counted.filter((p) => p.state === 'going').length, out: counted.filter((p) => p.state === 'out').length, waiting: counted.filter((p) => p.state === 'waiting' || p.state === 'maybe').length })}</span></span>
+							<ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" />
+						</a>
+					{/if}
+					{#if extras?.game}
+						<button type="button" class="flex min-h-14 w-full items-center gap-3 px-4 py-2 text-left" onclick={() => (timelineOpen = true)}>
+							<span class="grid size-10 shrink-0 place-items-center rounded-box bg-subhead text-ink"><ListOrdered size={18} aria-hidden="true" /></span>
+							<span class="min-w-0 flex-1"><b class="block text-ink">{t('portal.timeline_view')}</b>{#if extras.game.score}<span class="block truncate text-sm text-muted">{extras.game.score}</span>{/if}</span>
+							<ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" />
+						</button>
+					{/if}
+				</div>
 			{/if}
 			{#if event.kind === 'game' && extras?.follow}
 				<div class="flex items-center gap-3 rounded-box border border-line px-4 py-2.5">
