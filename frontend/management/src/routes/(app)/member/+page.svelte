@@ -575,8 +575,8 @@
 {#snippet sponsors()}
 	{#if data.home.sponsors?.length}
 		{@const all = data.home.sponsors}
-		<section class="grid min-w-0 gap-2">
-			<h2 class="font-mono text-[11px] tracking-[.14em] text-muted uppercase">{t('portal.partners')}</h2>
+		<section class="grid min-w-0 gap-3 max-md:mt-6">
+			<h2 class="px-0.5 font-display text-xl font-extrabold tracking-[.02em] text-ink uppercase">{t('portal.partners')}</h2>
 			<!-- Phones: every sponsor scrolls past in a loop (pauses on touch/hover; plain swipeable row when motion is reduced). -->
 			<div class="sponsor-carousel -mx-3 overflow-x-auto md:hidden" aria-label={t('sponsors.title')} role="group">
 				<ul class="sponsor-track flex w-max gap-2 px-3" style="--sponsor-duration: {Math.max(all.length * 4, 16)}s">

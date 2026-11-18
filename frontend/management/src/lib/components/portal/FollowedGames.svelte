@@ -34,6 +34,19 @@
 	const onscroll = () => {
 		if (strip) slide = Math.round(strip.scrollLeft / (strip.scrollWidth / shown.length));
 	};
+	function goTo(index: number) {
+		if (!strip || !shown.length) return;
+		const next = (index + shown.length) % shown.length;
+		const card = strip.children[next] as HTMLElement | undefined;
+		if (card) strip.scrollTo({ left: card.offsetLeft - (strip.clientWidth - card.offsetWidth) / 2, behavior: 'smooth' });
+	}
+	// Moves on by itself every few seconds; stops for good once the person touches or hovers it.
+	let paused = $state(false);
+	$effect(() => {
+		if (!carousel || paused) return;
+		const id = setInterval(() => goTo(slide + 1), 6000);
+		return () => clearInterval(id);
+	});
 	async function refresh() {
 		if (document.hidden) return;
 		const result = await api<FollowedGame[]>('GET', '/portal/followed');
@@ -83,7 +96,7 @@
 </script>
 
 {#if shown.length}
-	<section bind:this={strip} {onscroll} class={carousel ? 'flex snap-x snap-mandatory gap-2 overflow-x-auto' : 'grid gap-2'} aria-label={t('portal.following')}>
+	<section bind:this={strip} {onscroll} onpointerdown={() => (paused = true)} onmouseenter={() => (paused = true)} class={carousel ? 'flex min-w-0 snap-x snap-mandatory gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden' : 'grid gap-2'} aria-label={t('portal.following')}>
 		{#each shown as game (game.event_id)}
 			{@const [left, right] = sides(game)}
 			{@const live = game.status === 'live'}
@@ -116,7 +129,13 @@
 			</button>
 		{/each}
 	</section>
-	{#if carousel}<div class="flex justify-center gap-1.5" aria-hidden="true">{#each shown as game, i (game.event_id)}<span class="size-1.5 rounded-full {i === slide ? 'bg-club' : 'bg-line'}"></span>{/each}</div>{/if}
+	{#if carousel}
+		<div class="flex items-center justify-center gap-2">
+			<button type="button" class="btn btn-ghost btn-xs btn-square" onclick={() => { paused = true; goTo(slide - 1); }} aria-label={t('common.previous')}>‹</button>
+			{#each shown as game, i (game.event_id)}<button type="button" class="size-2.5 rounded-full {i === slide ? 'bg-club' : 'bg-line'}" onclick={() => { paused = true; goTo(i); }} aria-label={game.title}></button>{/each}
+			<button type="button" class="btn btn-ghost btn-xs btn-square" onclick={() => { paused = true; goTo(slide + 1); }} aria-label={t('common.next')}>›</button>
+		</div>
+	{/if}
 {/if}
 
 {#if opened && sheet}
