@@ -130,10 +130,10 @@
 		{/each}
 	</section>
 	{#if carousel}
-		<div class="flex items-center justify-center gap-2">
-			<button type="button" class="btn btn-ghost btn-xs btn-square" onclick={() => { paused = true; goTo(slide - 1); }} aria-label={t('common.previous')}>‹</button>
-			{#each shown as game, i (game.event_id)}<button type="button" class="size-2.5 rounded-full {i === slide ? 'bg-club' : 'bg-line'}" onclick={() => { paused = true; goTo(i); }} aria-label={game.title}></button>{/each}
-			<button type="button" class="btn btn-ghost btn-xs btn-square" onclick={() => { paused = true; goTo(slide + 1); }} aria-label={t('common.next')}>›</button>
+		<div class="flex items-center justify-center gap-4">
+			<button type="button" class="btn btn-outline size-11 rounded-full p-0 text-2xl leading-none" onclick={() => { paused = true; goTo(slide - 1); }} aria-label={t('common.previous')}>‹</button>
+			<div class="flex items-center gap-2">{#each shown as game, i (game.event_id)}<button type="button" class="h-3 rounded-full transition-all {i === slide ? 'w-6 bg-club' : 'w-3 bg-line'}" onclick={() => { paused = true; goTo(i); }} aria-label={game.title}></button>{/each}</div>
+			<button type="button" class="btn btn-outline size-11 rounded-full p-0 text-2xl leading-none" onclick={() => { paused = true; goTo(slide + 1); }} aria-label={t('common.next')}>›</button>
 		</div>
 	{/if}
 {/if}
