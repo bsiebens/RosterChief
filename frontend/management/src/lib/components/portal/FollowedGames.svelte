@@ -44,8 +44,8 @@
 	let paused = $state(false);
 	$effect(() => {
 		if (!carousel || paused) return;
-		const id = setInterval(() => goTo(slide + 1), 6000);
-		return () => clearInterval(id);
+		const id = setTimeout(() => goTo(slide + 1), 6000);
+		return () => clearTimeout(id);
 	});
 	async function refresh() {
 		if (document.hidden) return;
@@ -130,10 +130,12 @@
 		{/each}
 	</section>
 	{#if carousel}
-		<div class="flex items-center justify-center gap-4">
-			<button type="button" class="btn btn-outline size-11 rounded-full p-0 text-2xl leading-none" onclick={() => { paused = true; goTo(slide - 1); }} aria-label={t('common.previous')}>‹</button>
-			<div class="flex items-center gap-2">{#each shown as game, i (game.event_id)}<button type="button" class="h-3 rounded-full transition-all {i === slide ? 'w-6 bg-club' : 'w-3 bg-line'}" onclick={() => { paused = true; goTo(i); }} aria-label={game.title}></button>{/each}</div>
-			<button type="button" class="btn btn-outline size-11 rounded-full p-0 text-2xl leading-none" onclick={() => { paused = true; goTo(slide + 1); }} aria-label={t('common.next')}>›</button>
+		<div class="flex items-center justify-center gap-2">
+			{#each shown as game, i (game.event_id)}
+				<button type="button" class="relative h-3 overflow-hidden rounded-full transition-all {i === slide ? 'w-10 bg-line' : 'w-3 bg-line'}" onclick={() => { paused = true; goTo(i); }} aria-label={game.title}>
+					{#if i === slide}{#key slide}<span class="absolute inset-y-0 left-0 rounded-full bg-club {paused ? 'w-full' : 'dot-countdown'}"></span>{/key}{/if}
+				</button>
+			{/each}
 		</div>
 	{/if}
 {/if}

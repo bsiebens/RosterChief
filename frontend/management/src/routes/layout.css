@@ -1622,3 +1622,7 @@ textarea[name="note"] {
 @media (min-width: 48rem) {
     .phone-top { display: none; }
 }
+
+.dot-countdown { width: 0; animation: dot-countdown 6s linear forwards; }
+@keyframes dot-countdown { to { width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .dot-countdown { width: 100%; animation: none; } }
