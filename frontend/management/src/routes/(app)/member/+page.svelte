@@ -726,6 +726,30 @@
 				{/if}
 				{#if event.notes}<p class="mt-1 border-t border-line pt-2 text-sm whitespace-pre-line text-slate">{event.notes}</p>{/if}
 			</div>
+			{#if audience && extras?.tasks.length && Date.parse(event.end ?? event.start) > Date.now()}
+				<section class="card card-body">
+					<h2 class="card-title"><ListChecks size={16} aria-hidden="true" />{t('portal.duties')}</h2>
+					<div class="divide-y divide-rule">
+						{#each extras.tasks as task (task.id)}
+							<div class="grid gap-1 py-2">
+								<div class="flex items-center gap-3">
+									<span class="min-w-0 flex-1">
+										<span class="block font-semibold text-ink">{task.title}</span>
+										<span class="block text-xs text-muted">{task.open_slots ? t('portal.task_taken', { claimed: task.claimed, needed: task.needed }) : t('portal.task_covered')}{task.claimed_by.length ? ` · ${task.claimed_by.join(', ')}` : ''}</span>
+									</span>
+									{#if task.claimed_by_me}
+										<button class="btn btn-outline btn-sm min-h-11 md:h-8 md:min-h-0" type="button" disabled={!!busy} onclick={() => claim(event.event_id, task.id, false)}>{t('portal.task_give_back')}</button>
+									{:else if task.open_slots}
+										<button class="btn btn-primary btn-sm min-h-11 md:h-8 md:min-h-0" type="button" disabled={!!busy} onclick={() => claim(event.event_id, task.id, true)}>{t('portal.duty_volunteer')}</button>
+									{/if}
+								</div>
+								{#if task.description}<p class="text-xs text-slate">{task.description}</p>{/if}
+								{#if errors[task.id]}<p class="text-sm text-error" role="alert">{errors[task.id]}</p>{/if}
+							</div>
+						{/each}
+					</div>
+				</section>
+			{/if}
 			{#if audience && extras?.roster?.length}
 				{@const counted = extras.roster}
 				<a class="card flex min-h-14 items-center gap-3 px-4 py-2" href="#who-going">
@@ -833,30 +857,6 @@
 						{/each}
 					</div>
 					<p class="text-xs text-muted">{t('portal.lineup_counts', { going: extras.lineup.going, out: extras.lineup.out, waiting: extras.lineup.waiting })}</p>
-				</section>
-			{/if}
-			{#if audience && extras?.tasks.length}
-				<section class="card card-body">
-					<h2 class="card-title"><ListChecks size={16} aria-hidden="true" />{t('portal.duties')}</h2>
-					<div class="divide-y divide-rule">
-						{#each extras.tasks as task (task.id)}
-							<div class="grid gap-1 py-2">
-								<div class="flex items-center gap-3">
-									<span class="min-w-0 flex-1">
-										<span class="block font-semibold text-ink">{task.title}</span>
-										<span class="block text-xs text-muted">{task.open_slots ? t('portal.task_taken', { claimed: task.claimed, needed: task.needed }) : t('portal.task_covered')}{task.claimed_by.length ? ` · ${task.claimed_by.join(', ')}` : ''}</span>
-									</span>
-									{#if task.claimed_by_me}
-										<button class="btn btn-outline btn-sm min-h-11 md:h-8 md:min-h-0" type="button" disabled={!!busy} onclick={() => claim(event.event_id, task.id, false)}>{t('portal.task_give_back')}</button>
-									{:else if task.open_slots}
-										<button class="btn btn-primary btn-sm min-h-11 md:h-8 md:min-h-0" type="button" disabled={!!busy} onclick={() => claim(event.event_id, task.id, true)}>{t('portal.duty_volunteer')}</button>
-									{/if}
-								</div>
-								{#if task.description}<p class="text-xs text-slate">{task.description}</p>{/if}
-								{#if errors[task.id]}<p class="text-sm text-error" role="alert">{errors[task.id]}</p>{/if}
-							</div>
-						{/each}
-					</div>
 				</section>
 			{/if}
 			{#if audience && extras?.attachments.length}
