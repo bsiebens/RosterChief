@@ -82,6 +82,8 @@ deploy/rc deploy production v1.4.0
 
 A release has four files: `rosterchief-vX-backend.tar.gz` (source and `uv.lock`), `…-frontend.tar.gz` (built SvelteKit apps and production `node_modules`), `…-host.tar.gz` (these scripts, systemd units, Caddyfiles) and `SHA256SUMS`. Servers verify every checksum before unpacking and build nothing: backends run `uv sync --locked`, frontends are ready to start.
 
+On production (any environment whose name contains `prod`), `rc deploy` first puts the platform in maintenance mode (503 everywhere except the control panel and sign-in, through the release running on the first backend host; skipped when nothing has completed there yet). It stays on through the whole deploy, and when every host is done `rc` asks before taking it out of maintenance. If a host fails, or you answer no, the platform stays in maintenance; switch it with `deploy/rc maintenance production on|off`.
+
 `rc deploy production` refuses a version that has not run on every host of `PROMOTE_FROM` (staging). `--force` overrides it.
 
 ### What a host does for a release
