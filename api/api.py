@@ -36,10 +36,12 @@ from .routers import portal as portal_router
 from .routers import portal_calendar as portal_calendar_router
 from .routers import portal_profile as portal_profile_router
 from .routers import portal_shop as portal_shop_router
+from .routers import portal_tournaments as portal_tournaments_router
 from .routers import public_forms as public_forms_router
 from .routers import public_news as public_news_router
 from .routers import public_registration as public_registration_router
 from .routers import public_stats as public_stats_router
+from .routers import public_tournaments as public_tournaments_router
 from .routers import referees as referees_router
 from .routers import registrations as registrations_router
 from .routers import requirements as requirements_router
@@ -57,6 +59,11 @@ from .routers import signups as signups_router
 from .routers import sponsors as sponsors_router
 from .routers import team_settings as team_settings_router
 from .routers import teams as teams_router
+from .routers import tournaments as tournaments_router
+from .routers import tournaments_competition as tournaments_competition_router
+from .routers import tournaments_logistics as tournaments_logistics_router
+from .routers import tournaments_roster as tournaments_roster_router
+from .routers import tournaments_setup as tournaments_setup_router
 from .routers import web_push as web_push_router
 from .schemas import BrandingOut, MeOut, MyClubOut
 
@@ -72,6 +79,7 @@ api = NinjaAPI(
 register_error_handlers(api)
 api.add_router("/portal", portal_router.router, tags=["club app"])
 api.add_router("/portal/shop", portal_shop_router.router, tags=["club app"])
+api.add_router("/portal/tournaments", portal_tournaments_router.router, tags=["club app"])
 api.add_router("/portal/me", portal_profile_router.router, tags=["club app"])
 api.add_router("/portal/me", portal_calendar_router.router, tags=["club app"])
 api.add_router("/members", members_router.router, tags=["members"])
@@ -101,6 +109,13 @@ api.add_router("/shop/production", shop_production_router.router, tags=["shop"])
 api.add_router("/shop/pickup", shop_pickup_router.router, tags=["shop"])
 api.add_router("/shop/delivery", shop_delivery_router.router, tags=["shop"])
 api.add_router("/public/shop", shop_payments_router.public_router, tags=["public"])
+api.add_router("/tournaments", tournaments_router.router, tags=["tournaments"])
+api.add_router("/tournaments", tournaments_roster_router.router, tags=["tournaments"])
+api.add_router("/tournaments", tournaments_competition_router.router, tags=["tournaments"])
+api.add_router("/tournaments", tournaments_setup_router.router, tags=["tournaments"])
+api.add_router("/tournaments", tournaments_logistics_router.router, tags=["tournaments"])
+api.add_router("/dressing-rooms", tournaments_logistics_router.rooms_router, tags=["tournaments"])
+api.add_router("/public/tournaments", public_tournaments_router.router, tags=["public"])
 api.add_router("/notifications", notifications_router.router, tags=["notifications"])
 api.add_router("/web-push", web_push_router.router, tags=["notifications"])
 api.add_router("/overview", overview_router.router, tags=["overview"])
@@ -150,6 +165,7 @@ def me(request):
         roles = sorted(user.tenant_perms.groups.values_list("name", flat=True))
     except ObjectDoesNotExist:
         raise PermissionDenied from None  # signed in, but not a user of this club
+    tournaments_on = club.schema_name != get_public_schema_name() and request.features.has("tournaments")
     member = _member_profile(user, club)
     return {
         "id": str(user.pk),
@@ -178,6 +194,8 @@ def me(request):
         "can_manage_shop_orders": shop_on and access.can_manage_shop_orders(user),
         "can_manage_shop_discounts": shop_on and access.can_manage_shop_discounts(user),
         "can_manage_shop_invoices": shop_on and access.can_manage_shop_invoices(user),
+        "can_manage_tournaments": tournaments_on and access.can_manage_tournaments(user),
+        "can_operate_tournaments": tournaments_on and access.can_operate_tournaments(user),
         "can_add_news": club.schema_name != get_public_schema_name() and access.can_add_news(user),
         # The shop's VAT setting, so the product form shows a VAT rate only while VAT is on ("off" when the club has no shop).
         "shop_vat_mode": ShopSettings.current().vat_mode if shop_on else "off",

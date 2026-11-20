@@ -59,6 +59,8 @@ class MeOut(Schema):
     can_manage_shop_orders: bool = False
     can_manage_shop_discounts: bool = False
     can_manage_shop_invoices: bool = False
+    can_manage_tournaments: bool = False
+    can_operate_tournaments: bool = False
     shop_vat_mode: str = "off"
     managed_team_ids: list[str] = []
     admin_group_ids: list[str] = []
