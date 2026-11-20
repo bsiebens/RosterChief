@@ -958,7 +958,7 @@ def group_standings_preview(group: TournamentGroup) -> list[dict]:
 
 
 def resolve_group_slots(group: TournamentGroup, *, team_order: list | None = None) -> tuple[list[Match], list[str]]:
-    """"Start next phase"'s own confirm step: pushes ``group``'s final
+    """ "Start next phase"'s own confirm step: pushes ``group``'s final
     standings into every downstream slot that sources from it (the
     resolution ``resolve_match_slots`` used to do automatically the instant
     the group's last match completed -- now only ever run once staff have

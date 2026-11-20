@@ -158,8 +158,7 @@ class Tournament(UUIDModel):
         verbose_name = _("tournament")
         verbose_name_plural = _("tournaments")
         ordering = ["-start_date"]
-        constraints = [
-        ]
+        constraints = []
 
     def __str__(self):
         return self.name

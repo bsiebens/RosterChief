@@ -1,27 +1,23 @@
 import datetime
 import itertools
-from decimal import Decimal
+from unittest import mock
 
-from django.contrib import admin, messages
-from django.contrib.messages.storage.fallback import FallbackStorage
 from django.core import mail
-from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import IntegrityError, models
-from django.test import RequestFactory, TestCase, override_settings
-from django.urls import reverse
+from django.db import IntegrityError, connection, models
+from django.test import TestCase
 from django.utils import timezone
-from waffle import get_waffle_flag_model
+from django_tenants.utils import schema_context
 
-from authentication.models import User
-from club.models import Club
-from events.models import Attendance, Event, Location
+from club.models import Club, Domain
+from club.services import create_club, grant_login
+from controlpanel.tests import make_user
+from events.models import Attendance, Event, Location, Season
 from members.models import Member
-from rosterchief.test_support import make_club, make_season
+from notifications.models import InboxNotification
 from teams.models import Position, Team, TeamMembership
 
-from .admin import TournamentAdmin, TournamentStageAdmin
 from .models import (
     BreakRule,
     DressingRoom,
@@ -72,22 +68,41 @@ from .services.tasks import TaskClaimError, claim_task, generate_task_shifts, un
 
 
 class TournamentsTestCase(TestCase):
-    # Shared read-only scaffolding for every tournaments test -- one club, one
-    # season, one real team/member for the "linked entity" side of the various
-    # xor pairs, one tournament. Mirrors TeamsTestCase/EventsTestBase's own shape.
+    """Shared scaffolding for every tournaments test: one club (its own schema) with a season, a team, a member and a tournament."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._mfa = mock.patch("authorization.middleware.is_local_development", return_value=True)
+        cls._mfa.start()
+        super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        connection.set_schema_to_public()
+        cls._mfa.stop()
+
     @classmethod
     def setUpTestData(cls):
-        cls.club = make_club()
-        cls.season = make_season(cls.club)
-        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
-        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
-        cls.tournament = Tournament.objects.create(
-            club=cls.club,
-            name="Summer Cup",
-            season=cls.season,
-            start_date=datetime.date(2026, 9, 19),
-            end_date=datetime.date(2026, 9, 20),
-        )
+        owner = make_user("owner@tournaments.test", first="Olivia", last="Owner")
+        public = Club(schema_name="public", name="Platform", owner=owner)
+        public.auto_create_schema = False
+        public.save()
+        Domain.objects.create(domain="testserver", tenant=public, is_primary=True)
+        cls.club = create_club("Tournament FC", owner)
+        with schema_context(cls.club.schema_name):
+            cls.season = Season.objects.create(start_date=datetime.date(2026, 7, 1), end_date=datetime.date(2027, 6, 30))
+            cls.team = Team.objects.create(name="First Team", short_name="1st")
+            cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
+            cls.tournament = Tournament.objects.create(name="Summer Cup", season=cls.season, start_date=datetime.date(2026, 9, 19), end_date=datetime.date(2026, 9, 20))
+        # Subclasses' own setUpTestData and every test run inside the club's schema (tearDownClass goes back to public).
+        connection.set_tenant(cls.club)
+
+    def set_club_logo(self):
+        """Give the current tenant a crest (``TournamentTeam.display_logo`` reads it live); restored afterwards."""
+        tenant = connection.tenant
+        self.addCleanup(setattr, tenant, "logo", tenant.logo)
+        tenant.logo = SimpleUploadedFile("crest.png", b"fake-logo-bytes", content_type="image/png")
 
 
 class TournamentModelTests(TournamentsTestCase):
@@ -126,7 +141,7 @@ class TournamentModelTests(TournamentsTestCase):
         self.tournament.status = Tournament.Status.PUBLISHED
         self.tournament.max_teams = 2
         self.tournament.save()
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Team A")
+        TournamentTeam.objects.create(tournament=self.tournament, foreign_name="Team A")
 
         self.assertTrue(self.tournament.accepts_registrations)
 
@@ -134,7 +149,7 @@ class TournamentModelTests(TournamentsTestCase):
         self.tournament.status = Tournament.Status.PUBLISHED
         self.tournament.max_teams = 1
         self.tournament.save()
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Team A")
+        TournamentTeam.objects.create(tournament=self.tournament, foreign_name="Team A")
 
         self.assertFalse(self.tournament.accepts_registrations)
 
@@ -142,7 +157,7 @@ class TournamentModelTests(TournamentsTestCase):
         self.tournament.status = Tournament.Status.PUBLISHED
         self.tournament.max_teams = 1
         self.tournament.save()
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Team A", withdrawn_at=timezone.now())
+        TournamentTeam.objects.create(tournament=self.tournament, foreign_name="Team A", withdrawn_at=timezone.now())
 
         self.assertTrue(self.tournament.accepts_registrations)
 
@@ -150,16 +165,16 @@ class TournamentModelTests(TournamentsTestCase):
         self.assertIsNone(self.tournament.location)
 
     def test_location_falls_back_to_the_clubs_home_location(self):
-        home = Location.objects.create(club=self.club, name="Ajax Arena", address="1 Main St", city="Mechelen", zip_code="2800", country="BE", is_home=True)
-        away = Location.objects.create(club=self.club, name="Away Ground", address="2 Side St", city="Elsewhere", zip_code="1000", country="BE", is_home=False)
+        home = Location.objects.create(name="Ajax Arena", address="1 Main St", city="Mechelen", zip_code="2800", country="BE", is_home=True)
+        away = Location.objects.create(name="Away Ground", address="2 Side St", city="Elsewhere", zip_code="1000", country="BE", is_home=False)
 
         self.assertEqual(self.tournament.location, home)
         self.assertNotEqual(self.tournament.location, away)
 
     def test_location_prefers_the_linked_events_own_location(self):
-        home = Location.objects.create(club=self.club, name="Ajax Arena", address="1 Main St", city="Mechelen", zip_code="2800", country="BE", is_home=True)
-        event_location = Location.objects.create(club=self.club, name="Neutral Venue", address="3 Other St", city="Neutral City", zip_code="3000", country="BE")
-        event = Event.objects.create(club=self.club, kind=Event.EventKind.TOURNAMENT, title="Cup", start=timezone.now(), location=event_location)
+        home = Location.objects.create(name="Ajax Arena", address="1 Main St", city="Mechelen", zip_code="2800", country="BE", is_home=True)
+        event_location = Location.objects.create(name="Neutral Venue", address="3 Other St", city="Neutral City", zip_code="3000", country="BE")
+        event = Event.objects.create(kind=Event.EventKind.TOURNAMENT, title="Cup", start=timezone.now(), location=event_location)
         self.tournament.event = event
         self.tournament.save()
 
@@ -167,8 +182,8 @@ class TournamentModelTests(TournamentsTestCase):
         self.assertNotEqual(self.tournament.location, home)
 
     def test_location_falls_back_to_home_location_when_event_has_none(self):
-        home = Location.objects.create(club=self.club, name="Ajax Arena", address="1 Main St", city="Mechelen", zip_code="2800", country="BE", is_home=True)
-        event = Event.objects.create(club=self.club, kind=Event.EventKind.TOURNAMENT, title="Cup", start=timezone.now())
+        home = Location.objects.create(name="Ajax Arena", address="1 Main St", city="Mechelen", zip_code="2800", country="BE", is_home=True)
+        event = Event.objects.create(kind=Event.EventKind.TOURNAMENT, title="Cup", start=timezone.now())
         self.tournament.event = event
         self.tournament.save()
 
@@ -232,29 +247,13 @@ class TournamentModelTests(TournamentsTestCase):
         self.assertTrue(self.tournament.age_out_of_range(datetime.date(2013, 9, 19)))  # 13
         self.assertFalse(self.tournament.age_out_of_range(datetime.date(2021, 9, 19)))  # 5, no lower bound
 
-    def test_slug_is_unique_per_club(self):
+    def test_slug_is_unique(self):
         with self.assertRaises(IntegrityError):
-            Tournament.objects.create(club=self.club, name="Other Cup", slug="summer-cup", season=self.season, start_date=self.tournament.start_date, end_date=self.tournament.end_date)
-
-    def test_same_slug_allowed_in_a_different_club(self):
-        other = make_club(name="Rival FC", slug="rival-fc")
-        other_season = make_season(other)
-        Tournament.objects.create(club=other, name="Other Cup", slug="summer-cup", season=other_season, start_date=self.tournament.start_date, end_date=self.tournament.end_date)
-
-        self.assertEqual(Tournament.objects.filter(slug="summer-cup").count(), 2)
-
-    def test_clean_rejects_an_event_from_another_club(self):
-        other = make_club(name="Rival FC", slug="rival-fc")
-        event = Event.objects.create(club=other, kind=Event.EventKind.TOURNAMENT, title="Cup", start=timezone.now())
-        self.tournament.event = event
-
-        with self.assertRaises(ValidationError) as ctx:
-            self.tournament.full_clean()
-        self.assertIn("event", ctx.exception.error_dict)
+            Tournament.objects.create(name="Other Cup", slug="summer-cup", season=self.season, start_date=self.tournament.start_date, end_date=self.tournament.end_date)
 
     def test_clean_rejects_an_event_from_another_season(self):
-        other_season = make_season(self.club, start_year=2020)
-        event = Event.objects.create(club=self.club, season=other_season, kind=Event.EventKind.TOURNAMENT, title="Cup", start=timezone.now())
+        other_season = Season.objects.create(start_date=datetime.date(2020, 7, 1), end_date=datetime.date(2021, 6, 30))
+        event = Event.objects.create(season=other_season, kind=Event.EventKind.TOURNAMENT, title="Cup", start=timezone.now())
         self.tournament.event = event
 
         with self.assertRaises(ValidationError) as ctx:
@@ -262,13 +261,13 @@ class TournamentModelTests(TournamentsTestCase):
         self.assertIn("event", ctx.exception.error_dict)
 
     def test_clean_accepts_an_event_with_no_season_set(self):
-        event = Event.objects.create(club=self.club, season=None, kind=Event.EventKind.TOURNAMENT, title="Cup", start=timezone.now())
+        event = Event.objects.create(season=None, kind=Event.EventKind.TOURNAMENT, title="Cup", start=timezone.now())
         self.tournament.event = event
 
         self.tournament.full_clean()
 
-    def test_clean_accepts_an_event_in_the_same_club_and_season(self):
-        event = Event.objects.create(club=self.club, season=self.season, kind=Event.EventKind.TOURNAMENT, title="Cup", start=timezone.now())
+    def test_clean_accepts_an_event_in_the_same_season(self):
+        event = Event.objects.create(season=self.season, kind=Event.EventKind.TOURNAMENT, title="Cup", start=timezone.now())
         self.tournament.event = event
 
         self.tournament.full_clean()
@@ -364,107 +363,96 @@ class TournamentRegistrationPlayerModelTests(TournamentsTestCase):
 
 class TournamentTeamModelTests(TournamentsTestCase):
     def test_str_and_display_name_for_a_real_team(self):
-        entry = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, team=self.team)
+        entry = TournamentTeam.objects.create(tournament=self.tournament, team=self.team)
 
         self.assertEqual(entry.display_name, "First Team")
         self.assertEqual(str(entry), "First Team")
 
     def test_payment_status_defaults_to_unpaid(self):
-        entry = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, team=self.team)
+        entry = TournamentTeam.objects.create(tournament=self.tournament, team=self.team)
 
         self.assertEqual(entry.payment_status, TournamentTeam.PaymentStatus.UNPAID)
 
     def test_display_logo_is_none_for_a_foreign_team_with_no_logo_uploaded(self):
-        entry = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Guest FC")
+        entry = TournamentTeam.objects.create(tournament=self.tournament, foreign_name="Guest FC")
 
         self.assertIsNone(entry.display_logo)
 
     def test_display_logo_is_none_for_a_club_team_when_the_club_has_no_logo(self):
-        entry = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, team=self.team)
+        entry = TournamentTeam.objects.create(tournament=self.tournament, team=self.team)
 
         self.assertIsNone(entry.display_logo)
 
     def test_display_logo_falls_back_to_the_clubs_own_logo_for_a_club_team(self):
-        self.club.logo = SimpleUploadedFile("crest.png", b"fake-logo-bytes", content_type="image/png")
-        self.club.save()
-        entry = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, team=self.team)
+        self.set_club_logo()
+        entry = TournamentTeam.objects.create(tournament=self.tournament, team=self.team)
 
-        self.assertEqual(entry.display_logo, self.club.logo)
+        self.assertEqual(entry.display_logo, connection.tenant.logo)
 
     def test_display_logo_prefers_its_own_foreign_logo_over_the_clubs(self):
-        self.club.logo = SimpleUploadedFile("crest.png", b"fake-logo-bytes", content_type="image/png")
-        self.club.save()
+        self.set_club_logo()
         own_logo = SimpleUploadedFile("guest.png", b"guest-logo-bytes", content_type="image/png")
         # A club-linked team with its own uploaded logo is an edge case (manual
         # add only ever sets one or the other today), but display_logo should
         # still prefer it over the club fallback if it's ever set.
-        entry = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, team=self.team, foreign_logo=own_logo)
+        entry = TournamentTeam.objects.create(tournament=self.tournament, team=self.team, foreign_logo=own_logo)
 
         self.assertEqual(entry.display_logo, entry.foreign_logo)
 
     def test_str_and_display_name_for_a_foreign_team(self):
-        entry = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Guest FC")
+        entry = TournamentTeam.objects.create(tournament=self.tournament, foreign_name="Guest FC")
 
         self.assertEqual(entry.display_name, "Guest FC")
         self.assertEqual(str(entry), "Guest FC")
 
     def test_team_xor_foreign_name_rejects_neither_set(self):
         with self.assertRaises(IntegrityError):
-            TournamentTeam.objects.create(club=self.club, tournament=self.tournament)
+            TournamentTeam.objects.create(tournament=self.tournament)
 
     def test_team_xor_foreign_name_rejects_both_set(self):
         with self.assertRaises(IntegrityError):
-            TournamentTeam.objects.create(club=self.club, tournament=self.tournament, team=self.team, foreign_name="Guest FC")
+            TournamentTeam.objects.create(tournament=self.tournament, team=self.team, foreign_name="Guest FC")
 
     def test_team_xor_foreign_name_accepts_team_only(self):
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, team=self.team)
+        TournamentTeam.objects.create(tournament=self.tournament, team=self.team)
 
     def test_team_xor_foreign_name_accepts_foreign_name_only(self):
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Guest FC")
+        TournamentTeam.objects.create(tournament=self.tournament, foreign_name="Guest FC")
 
     def test_real_team_is_unique_per_tournament(self):
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, team=self.team)
+        TournamentTeam.objects.create(tournament=self.tournament, team=self.team)
 
         with self.assertRaises(IntegrityError):
-            TournamentTeam.objects.create(club=self.club, tournament=self.tournament, team=self.team)
+            TournamentTeam.objects.create(tournament=self.tournament, team=self.team)
 
     def test_several_foreign_entries_are_allowed_in_the_same_tournament(self):
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Guest FC")
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Other FC")
+        TournamentTeam.objects.create(tournament=self.tournament, foreign_name="Guest FC")
+        TournamentTeam.objects.create(tournament=self.tournament, foreign_name="Other FC")
 
         self.assertEqual(self.tournament.teams.count(), 2)
 
     def test_slug_is_generated_from_display_name(self):
-        entry = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Guest FC")
+        entry = TournamentTeam.objects.create(tournament=self.tournament, foreign_name="Guest FC")
 
         self.assertEqual(entry.slug, "guest-fc")
 
     def test_same_slug_allowed_in_a_different_tournament(self):
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Guest FC")
-        other_tournament = Tournament.objects.create(club=self.club, name="Winter Cup", season=self.season, start_date=self.tournament.start_date, end_date=self.tournament.end_date)
+        TournamentTeam.objects.create(tournament=self.tournament, foreign_name="Guest FC")
+        other_tournament = Tournament.objects.create(name="Winter Cup", season=self.season, start_date=self.tournament.start_date, end_date=self.tournament.end_date)
 
-        other_entry = TournamentTeam.objects.create(club=self.club, tournament=other_tournament, foreign_name="Guest FC")
+        other_entry = TournamentTeam.objects.create(tournament=other_tournament, foreign_name="Guest FC")
 
         self.assertEqual(other_entry.slug, "guest-fc")
 
     def test_slug_is_unique_within_the_same_tournament(self):
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Guest FC")
+        TournamentTeam.objects.create(tournament=self.tournament, foreign_name="Guest FC")
 
-        second = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Guest FC")
+        second = TournamentTeam.objects.create(tournament=self.tournament, foreign_name="Guest FC")
 
         self.assertEqual(second.slug, "guest-fc-2")
 
-    def test_clean_rejects_a_team_from_another_club(self):
-        other = make_club(name="Rival FC", slug="rival-fc")
-        other_team = Team.objects.create(club=other, name="Rival Team", short_name="RT")
-        entry = TournamentTeam(club=self.club, tournament=self.tournament, team=other_team)
-
-        with self.assertRaises(ValidationError) as ctx:
-            entry.full_clean()
-        self.assertIn("team", ctx.exception.error_dict)
-
-    def test_clean_accepts_a_team_from_the_same_club(self):
-        entry = TournamentTeam(club=self.club, tournament=self.tournament, team=self.team)
+    def test_clean_accepts_a_team(self):
+        entry = TournamentTeam(tournament=self.tournament, team=self.team)
 
         entry.full_clean()
 
@@ -473,7 +461,7 @@ class TournamentRosterEntryModelTests(TournamentsTestCase):
     @classmethod
     def setUpTestData(cls):
         super().setUpTestData()
-        cls.tournament_team = TournamentTeam.objects.create(club=cls.club, tournament=cls.tournament, team=cls.team)
+        cls.tournament_team = TournamentTeam.objects.create(tournament=cls.tournament, team=cls.team)
 
     def test_str_and_display_name_for_a_member(self):
         entry = TournamentRosterEntry.objects.create(tournament_team=self.tournament_team, member=self.member, jersey_number=9)
@@ -552,8 +540,8 @@ class MatchModelTests(TournamentsTestCase):
     def setUpTestData(cls):
         super().setUpTestData()
         cls.stage = TournamentStage.objects.create(tournament=cls.tournament, name="Bracket", format=TournamentStage.Format.SINGLE_ELIM)
-        cls.home = TournamentTeam.objects.create(club=cls.club, tournament=cls.tournament, foreign_name="Home Squad")
-        cls.away = TournamentTeam.objects.create(club=cls.club, tournament=cls.tournament, foreign_name="Away Squad")
+        cls.home = TournamentTeam.objects.create(tournament=cls.tournament, foreign_name="Home Squad")
+        cls.away = TournamentTeam.objects.create(tournament=cls.tournament, foreign_name="Away Squad")
 
     def test_str_and_display_with_teams_set(self):
         match = Match.objects.create(stage=self.stage, home_team=self.home, away_team=self.away)
@@ -755,7 +743,7 @@ class MatchOfficialModelTests(TournamentsTestCase):
 
 class DressingRoomModelTests(TournamentsTestCase):
     def test_str(self):
-        room = DressingRoom.objects.create(club=self.club, name="Room 1")
+        room = DressingRoom.objects.create(name="Room 1")
         self.assertEqual(str(room), "Room 1")
 
 
@@ -763,8 +751,8 @@ class DressingRoomAssignmentModelTests(TournamentsTestCase):
     @classmethod
     def setUpTestData(cls):
         super().setUpTestData()
-        cls.room = DressingRoom.objects.create(club=cls.club, name="Room 1")
-        cls.tournament_team = TournamentTeam.objects.create(club=cls.club, tournament=cls.tournament, team=cls.team)
+        cls.room = DressingRoom.objects.create(name="Room 1")
+        cls.tournament_team = TournamentTeam.objects.create(tournament=cls.tournament, team=cls.team)
 
     def test_str(self):
         assignment = DressingRoomAssignment.objects.create(dressing_room=self.room, tournament_team=self.tournament_team)
@@ -777,7 +765,7 @@ class DressingRoomAssignmentModelTests(TournamentsTestCase):
             DressingRoomAssignment.objects.create(dressing_room=self.room, tournament_team=self.tournament_team)
 
     def test_the_same_team_can_be_assigned_a_different_room(self):
-        other_room = DressingRoom.objects.create(club=self.club, name="Room 2")
+        other_room = DressingRoom.objects.create(name="Room 2")
         DressingRoomAssignment.objects.create(dressing_room=self.room, tournament_team=self.tournament_team)
 
         DressingRoomAssignment.objects.create(dressing_room=other_room, tournament_team=self.tournament_team)
@@ -785,7 +773,7 @@ class DressingRoomAssignmentModelTests(TournamentsTestCase):
         self.assertEqual(self.tournament_team.dressing_room_assignments.count(), 2)
 
     def test_the_same_room_can_be_assigned_a_different_team(self):
-        other_entry = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Guest FC")
+        other_entry = TournamentTeam.objects.create(tournament=self.tournament, foreign_name="Guest FC")
         DressingRoomAssignment.objects.create(dressing_room=self.room, tournament_team=self.tournament_team)
 
         DressingRoomAssignment.objects.create(dressing_room=self.room, tournament_team=other_entry)
@@ -857,7 +845,7 @@ class TournamentTaskClaimModelTests(TournamentsTestCase):
 
 class ApproveRegistrationServiceTests(TournamentsTestCase):
     def test_approving_a_foreign_registration_creates_a_team_and_copies_players(self):
-        reviewer = User.objects.create_user(email="staff@example.com", password="pw-secret-123")
+        reviewer = make_user("staff@example.com")
         registration = TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Visiting FC", foreign_contact_email="visitors@example.com")
         TournamentRegistrationPlayer.objects.create(registration=registration, first_name="Sam", last_name="Striker", jersey_number=9)
         TournamentRegistrationPlayer.objects.create(registration=registration, first_name="Dee", last_name="Fender")
@@ -869,7 +857,6 @@ class ApproveRegistrationServiceTests(TournamentsTestCase):
         self.assertEqual(registration.reviewed_by, reviewer)
         self.assertIsNotNone(registration.reviewed_at)
         self.assertEqual(team.tournament, self.tournament)
-        self.assertEqual(team.club, self.club)
         self.assertEqual(team.foreign_name, "Visiting FC")
         self.assertEqual(team.registration, registration)
         roster = {entry.display_name: entry for entry in team.roster_entries.all()}
@@ -878,8 +865,8 @@ class ApproveRegistrationServiceTests(TournamentsTestCase):
         self.assertIsNone(roster["Dee Fender"].jersey_number)
 
     def test_approving_a_club_team_registration_snapshots_the_season_roster(self):
-        reviewer = User.objects.create_user(email="staff@example.com", password="pw-secret-123")
-        position = Position.objects.create(club=self.club, name="Forward", short_name="FW")
+        reviewer = make_user("staff@example.com")
+        position = Position.objects.create(name="Forward", short_name="FW")
         TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, position=position, jersey_number=7)
         registration = TournamentRegistration.objects.create(tournament=self.tournament, team=self.team)
 
@@ -892,8 +879,8 @@ class ApproveRegistrationServiceTests(TournamentsTestCase):
         self.assertEqual(roster[0].position_label, "Forward")
 
     def test_approving_a_club_team_registration_does_not_use_another_seasons_roster(self):
-        reviewer = User.objects.create_user(email="staff@example.com", password="pw-secret-123")
-        other_season = make_season(self.club, start_year=2020)
+        reviewer = make_user("staff@example.com")
+        other_season = Season.objects.create(start_date=datetime.date(2020, 7, 1), end_date=datetime.date(2021, 6, 30))
         TeamMembership.objects.create(team=self.team, member=self.member, season=other_season)
         registration = TournamentRegistration.objects.create(tournament=self.tournament, team=self.team)
 
@@ -902,7 +889,7 @@ class ApproveRegistrationServiceTests(TournamentsTestCase):
         self.assertEqual(team.roster_entries.count(), 0)
 
     def test_approving_a_foreign_registration_copies_the_extra_roster_fields(self):
-        reviewer = User.objects.create_user(email="staff@example.com", password="pw-secret-123")
+        reviewer = make_user("staff@example.com")
         registration = TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Visiting FC")
         TournamentRegistrationPlayer.objects.create(
             registration=registration,
@@ -925,7 +912,7 @@ class ApproveRegistrationServiceTests(TournamentsTestCase):
         self.assertEqual(entry.lunch_days, ["2026-09-19"])
 
     def test_cannot_approve_an_already_decided_registration(self):
-        reviewer = User.objects.create_user(email="staff@example.com", password="pw-secret-123")
+        reviewer = make_user("staff@example.com")
         registration = TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Visiting FC")
         approve_registration(registration, reviewed_by=reviewer)
 
@@ -935,7 +922,7 @@ class ApproveRegistrationServiceTests(TournamentsTestCase):
 
 class RejectRegistrationServiceTests(TournamentsTestCase):
     def test_rejecting_sets_status_and_reason(self):
-        reviewer = User.objects.create_user(email="staff@example.com", password="pw-secret-123")
+        reviewer = make_user("staff@example.com")
         registration = TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Visiting FC")
 
         reject_registration(registration, reviewed_by=reviewer, reason="Tournament is full.")
@@ -947,7 +934,7 @@ class RejectRegistrationServiceTests(TournamentsTestCase):
         self.assertFalse(TournamentTeam.objects.filter(registration=registration).exists())
 
     def test_cannot_reject_an_already_decided_registration(self):
-        reviewer = User.objects.create_user(email="staff@example.com", password="pw-secret-123")
+        reviewer = make_user("staff@example.com")
         registration = TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Visiting FC")
         reject_registration(registration, reviewed_by=reviewer)
 
@@ -957,8 +944,8 @@ class RejectRegistrationServiceTests(TournamentsTestCase):
 
 class WithdrawTeamServiceTests(TournamentsTestCase):
     def test_withdrawing_sets_withdrawn_at_and_reason(self):
-        staff = User.objects.create_user(email="staff@example.com", password="pw-secret-123")
-        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Visiting FC")
+        staff = make_user("staff@example.com")
+        team = TournamentTeam.objects.create(tournament=self.tournament, foreign_name="Visiting FC")
 
         withdraw_team(team, reason="No-show.", withdrawn_by=staff)
 
@@ -967,7 +954,7 @@ class WithdrawTeamServiceTests(TournamentsTestCase):
         self.assertEqual(team.withdrawal_reason, "No-show.")
 
     def test_cannot_withdraw_an_already_withdrawn_team(self):
-        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Visiting FC")
+        team = TournamentTeam.objects.create(tournament=self.tournament, foreign_name="Visiting FC")
         withdraw_team(team)
 
         with self.assertRaises(TeamWithdrawalError):
@@ -993,7 +980,7 @@ class DeleteManualTeamServiceTests(TournamentsTestCase):
 
     def test_a_registration_backed_team_cannot_be_deleted(self):
         registration = TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Visiting FC")
-        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=registration, foreign_name="Visiting FC")
+        team = TournamentTeam.objects.create(tournament=self.tournament, registration=registration, foreign_name="Visiting FC")
 
         with self.assertRaises(TeamDeletionError):
             delete_manual_team(team)
@@ -1011,7 +998,7 @@ class DeleteManualTeamServiceTests(TournamentsTestCase):
         self.assertTrue(TournamentTeam.objects.filter(pk=team.pk).exists())
 
     def test_a_non_home_manually_added_club_team_can_still_be_deleted(self):
-        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        other_team = Team.objects.create(name="Second Team", short_name="2nd")
         self.tournament.home_team = self.team
         self.tournament.save(update_fields=["home_team"])
         team = create_manual_team(self.tournament, club_team=other_team)
@@ -1023,13 +1010,12 @@ class DeleteManualTeamServiceTests(TournamentsTestCase):
 
 class CreateManualTeamServiceTests(TournamentsTestCase):
     def test_a_club_team_gets_created_with_registration_left_null_and_its_roster_snapshotted(self):
-        position = Position.objects.create(club=self.club, name="Forward", short_name="FW")
+        position = Position.objects.create(name="Forward", short_name="FW")
         TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, position=position, jersey_number=7)
 
         team = create_manual_team(self.tournament, club_team=self.team)
 
         self.assertEqual(team.tournament, self.tournament)
-        self.assertEqual(team.club, self.club)
         self.assertEqual(team.team, self.team)
         self.assertIsNone(team.registration)
         roster = list(team.roster_entries.all())
@@ -1068,7 +1054,7 @@ class EnsureHomeTeamServiceTests(TournamentsTestCase):
         # Attendance-driven sync (tournaments/signals.py) ever adds to it,
         # so a team member with no qualifying Attendance yet must not show
         # up here just because ensure_home_team ran.
-        position = Position.objects.create(club=self.club, name="Forward", short_name="FW")
+        position = Position.objects.create(name="Forward", short_name="FW")
         TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, position=position, jersey_number=7)
         self.tournament.home_team = self.team
         self.tournament.save(update_fields=["home_team"])
@@ -1134,6 +1120,8 @@ class EnsureHomeTeamServiceTests(TournamentsTestCase):
         # Attendance row for every team member (events.signals' own audience
         # sync) -- update it rather than create(), which would collide with
         # the (event, member) unique constraint.
+        # (No row exists yet when the tournament is already in the past: events.services.attendance only syncs future events.)
+        Attendance.objects.get_or_create(event=self.tournament.event, member=self.member)
         Attendance.objects.filter(event=self.tournament.event, member=self.member).update(status=Attendance.AttendanceStatus.SELECTED)
 
         ensure_home_team(self.tournament)
@@ -1141,7 +1129,7 @@ class EnsureHomeTeamServiceTests(TournamentsTestCase):
         self.assertEqual(list(team.roster_entries.values_list("member_id", flat=True)), [self.member.pk])
 
     def test_does_not_overwrite_an_already_linked_event(self):
-        other_event = Event.objects.create(club=self.club, season=self.season, kind=Event.EventKind.OTHER, title="Something else", start=timezone.now())
+        other_event = Event.objects.create(season=self.season, kind=Event.EventKind.OTHER, title="Something else", start=timezone.now())
         self.tournament.home_team = self.team
         self.tournament.event = other_event
         self.tournament.save(update_fields=["home_team", "event"])
@@ -1152,7 +1140,7 @@ class EnsureHomeTeamServiceTests(TournamentsTestCase):
         self.assertEqual(self.tournament.event_id, other_event.pk)
 
     def test_changing_home_team_re_points_the_existing_event_at_the_new_team(self):
-        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        other_team = Team.objects.create(name="Second Team", short_name="2nd")
         self.tournament.home_team = self.team
         self.tournament.save(update_fields=["home_team"])
         ensure_home_team(self.tournament)
@@ -1181,7 +1169,7 @@ class WithdrawHomeTeamGuardTests(TournamentsTestCase):
         self.assertIsNone(team.withdrawn_at)
 
     def test_a_non_home_club_team_can_still_be_withdrawn(self):
-        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        other_team = Team.objects.create(name="Second Team", short_name="2nd")
         self.tournament.home_team = self.team  # some other team is home, not this one
         self.tournament.save(update_fields=["home_team"])
         team = create_manual_team(self.tournament, club_team=other_team)
@@ -1229,7 +1217,7 @@ class HomeTeamRosterSyncSignalTests(TournamentsTestCase):
 
     def test_a_normal_events_attendance_is_unaffected(self):
         other_member = Member.objects.create(first_name="Sam", last_name="Smith")
-        plain_event = Event.objects.create(club=self.club, season=self.season, kind=Event.EventKind.TRAINING, title="Training", start=timezone.now())
+        plain_event = Event.objects.create(season=self.season, kind=Event.EventKind.TRAINING, title="Training", start=timezone.now())
 
         Attendance.objects.create(event=plain_event, member=other_member, status=Attendance.AttendanceStatus.PRESENT)
 
@@ -1277,11 +1265,13 @@ class NotifyTournamentShiftsOpenServiceTests(TournamentsTestCase):
     def test_notifies_the_home_teams_whole_squad(self):
         self.member.email = "jane@example.com"
         self.member.save()
+        user, _created = grant_login(self.club, self.member)
         TournamentTask.objects.create(tournament=self.tournament, title="Gate duty", starts_at=timezone.now(), ends_at=timezone.now() + datetime.timedelta(hours=1))
 
         result = notify_tournament_shifts_open(str(self.tournament.pk))
 
         self.assertIn("Notified 1", result)
+        self.assertEqual(list(InboxNotification.objects.filter(user=user).values_list("title", flat=True)), ["Volunteer shifts open: Summer Cup"])
 
     def test_notifies_the_whole_squad_even_before_anyone_has_been_selected(self):
         # This is the entire point of the notification: it fires the moment
@@ -1293,608 +1283,13 @@ class NotifyTournamentShiftsOpenServiceTests(TournamentsTestCase):
         self.assertEqual(self.tournament_team.roster_entries.count(), 0)
         self.member.email = "jane@example.com"
         self.member.save()
+        user, _created = grant_login(self.club, self.member)
         TournamentTask.objects.create(tournament=self.tournament, title="Gate duty", starts_at=timezone.now(), ends_at=timezone.now() + datetime.timedelta(hours=1))
 
         result = notify_tournament_shifts_open(str(self.tournament.pk))
 
         self.assertIn("Notified 1", result)
-
-
-@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
-class TournamentRegistrationViewTests(TournamentsTestCase):
-    """tournaments:register -- the public, unauthenticated tournament-entry
-    page for a visiting (foreign) team (tournaments.views.TournamentRegistrationView)."""
-
-    @classmethod
-    def setUpTestData(cls):
-        super().setUpTestData()
-        cls.tournament.status = Tournament.Status.PUBLISHED
-        cls.tournament.save()
-
-    def setUp(self):
-        # waffle caches Flag lookups outside the DB transaction each test
-        # rolls back -- see management/tests.py's own FeatureGatedSectionsTests
-        # for the same reasoning. The "tournaments" flag row itself already
-        # exists (seeded by 0002_create_tournaments_flag), disabled
-        # everywhere -- get_or_create finds it rather than colliding on name.
-        cache.clear()
-        self.addCleanup(cache.clear)
-        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
-
-    def _url(self):
-        return reverse("tournaments:register", kwargs={"tournament_slug": self.tournament.slug})
-
-    def formset_management(self, total=1, prefix="players"):
-        return {f"{prefix}-TOTAL_FORMS": str(total), f"{prefix}-INITIAL_FORMS": "0", f"{prefix}-MIN_NUM_FORMS": "0", f"{prefix}-MAX_NUM_FORMS": "1000"}
-
-    def player_data(self, index=0, prefix="players", **overrides):
-        data = {f"{prefix}-{index}-first_name": "Sam", f"{prefix}-{index}-last_name": "Striker", f"{prefix}-{index}-jersey_number": "9"}
-        data.update({f"{prefix}-{index}-{key}": value for key, value in overrides.items()})
-        return data
-
-    def contact_data(self, **overrides):
-        data = {"foreign_name": "Visiting FC", "foreign_contact_name": "Casey Coach", "foreign_contact_email": "casey@example.com", "foreign_contact_phone": ""}
-        data.update(overrides)
-        return data
-
-    def test_get_renders_the_form(self):
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Roster")
-
-    def test_post_with_valid_data_creates_a_pending_registration_and_players(self):
-        data = self.contact_data() | self.formset_management() | self.player_data()
-
-        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
-
-        registration = TournamentRegistration.objects.get()
-        self.assertEqual(registration.tournament, self.tournament)
-        self.assertEqual(registration.foreign_name, "Visiting FC")
-        self.assertEqual(registration.foreign_contact_email, "casey@example.com")
-        self.assertEqual(registration.status, TournamentRegistration.Status.PENDING)
-        self.assertRedirects(response, reverse("tournaments:registration_status", kwargs={"tournament_slug": self.tournament.slug, "token": registration.status_token}))
-
-        player = registration.players.get()
-        self.assertEqual(player.first_name, "Sam")
-        self.assertEqual(player.last_name, "Striker")
-        self.assertEqual(player.jersey_number, 9)
-
-        self.assertEqual(len(mail.outbox), 1)
-        self.assertIn("casey@example.com", mail.outbox[0].to)
-
-    def test_post_with_invalid_data_rerenders_with_errors_and_creates_nothing(self):
-        data = self.contact_data(foreign_name="") | self.formset_management() | self.player_data()
-
-        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(TournamentRegistration.objects.exists())
-        self.assertEqual(len(mail.outbox), 0)
-
-    def test_post_with_no_players_still_creates_a_pending_registration(self):
-        data = self.contact_data() | self.formset_management()
-
-        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
-
-        registration = TournamentRegistration.objects.get()
-        self.assertEqual(registration.status, TournamentRegistration.Status.PENDING)
-        self.assertFalse(registration.players.exists())
-        self.assertRedirects(response, reverse("tournaments:registration_status", kwargs={"tournament_slug": self.tournament.slug, "token": registration.status_token}))
-
-    def test_a_staff_role_drops_a_submitted_date_of_birth(self):
-        data = self.contact_data() | self.formset_management() | self.player_data(role="staff", date_of_birth="1980-01-01", position_label="Coach")
-
-        self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
-
-        player = TournamentRegistrationPlayer.objects.get()
-        self.assertEqual(player.role, TournamentRosterRole.STAFF)
-        self.assertIsNone(player.date_of_birth)
-        self.assertEqual(player.position_label, "Coach")
-
-    def test_lunch_days_are_not_stored_when_the_tournament_has_no_lunch(self):
-        data = self.contact_data() | self.formset_management() | self.player_data()
-
-        self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(TournamentRegistrationPlayer.objects.get().lunch_days, [])
-
-    def test_optional_lunch_stores_only_the_days_ticked(self):
-        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
-        self.tournament.save()
-        data = self.contact_data() | self.formset_management() | self.player_data(**{"lunch_days": "2026-09-19"})
-
-        self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(TournamentRegistrationPlayer.objects.get().lunch_days, ["2026-09-19"])
-
-    def test_mandatory_lunch_stores_every_tournament_day_regardless_of_input(self):
-        self.tournament.lunch_mode = Tournament.LunchMode.MANDATORY
-        self.tournament.save()
-        data = self.contact_data() | self.formset_management() | self.player_data()
-
-        self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(TournamentRegistrationPlayer.objects.get().lunch_days, ["2026-09-19", "2026-09-20"])
-
-    def test_a_tournament_in_progress_404s(self):
-        self.tournament.status = Tournament.Status.IN_PROGRESS
-        self.tournament.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
-
-    def test_a_cancelled_tournament_404s(self):
-        self.tournament.status = Tournament.Status.CANCELLED
-        self.tournament.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
-
-    def test_a_draft_tournament_still_accepts_entries(self):
-        self.tournament.status = Tournament.Status.DRAFT
-        self.tournament.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 200)
-
-    def test_an_unknown_tournament_slug_404s(self):
-        response = self.client.get(reverse("tournaments:register", kwargs={"tournament_slug": "no-such-tournament"}), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
-
-    def test_404s_when_the_feature_flag_is_off(self):
-        get_waffle_flag_model().objects.get(name="tournaments").clubs.remove(self.club)
-        cache.clear()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
-
-    def test_closed_registration_shows_a_note_not_a_404(self):
-        self.tournament.registration_open = False
-        self.tournament.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Registration is closed")
-        self.assertNotContains(response, "Add another player")
-
-    def test_closed_registration_rejects_a_post_without_creating_anything(self):
-        self.tournament.registration_open = False
-        self.tournament.save()
-        data = self.contact_data() | self.formset_management() | self.player_data()
-
-        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(TournamentRegistration.objects.exists())
-
-    def test_shows_the_tournaments_contact_email_when_set(self):
-        self.tournament.contact_email = "organiser@example.com"
-        self.tournament.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "organiser@example.com")
-
-
-@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
-class TournamentRegistrationStatusViewTests(TournamentsTestCase):
-    """tournaments:registration_status -- the token-gated status page
-    (tournaments.views.TournamentRegistrationStatusView), roster edits
-    included while the registration is still pending."""
-
-    @classmethod
-    def setUpTestData(cls):
-        super().setUpTestData()
-        cls.registration = TournamentRegistration.objects.create(tournament=cls.tournament, foreign_name="Visiting FC", foreign_contact_email="casey@example.com")
-        cls.player = TournamentRegistrationPlayer.objects.create(registration=cls.registration, first_name="Sam", last_name="Striker", jersey_number=9)
-
-    def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
-        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
-
-    def _url(self, token=None):
-        return reverse("tournaments:registration_status", kwargs={"tournament_slug": self.tournament.slug, "token": token or self.registration.status_token})
-
-    def formset_management(self, total, prefix="players"):
-        return {f"{prefix}-TOTAL_FORMS": str(total), f"{prefix}-INITIAL_FORMS": "0", f"{prefix}-MIN_NUM_FORMS": "0", f"{prefix}-MAX_NUM_FORMS": "1000"}
-
-    def test_shows_pending_status(self):
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Pending review")
-
-    def test_shows_approved_status(self):
-        self.registration.status = TournamentRegistration.Status.APPROVED
-        self.registration.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "Approved")
-
-    def test_shows_a_withdrawal_banner_when_the_team_was_withdrawn(self):
-        self.registration.status = TournamentRegistration.Status.APPROVED
-        self.registration.save()
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=self.registration, foreign_name="Visiting FC", withdrawn_at=timezone.now(), withdrawal_reason="No-show.")
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "Team withdrawn")
-        self.assertContains(response, "No-show.")
-        # Withdrawal doesn't change the registration's own status -- it's the
-        # linked TournamentTeam that carries it (see withdraw_team's own docstring).
-        self.assertContains(response, "Approved")
-
-    def test_no_withdrawal_banner_for_an_approved_team_still_in(self):
-        self.registration.status = TournamentRegistration.Status.APPROVED
-        self.registration.save()
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=self.registration, foreign_name="Visiting FC")
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertNotContains(response, "Team withdrawn")
-
-    def test_shows_rejected_status_with_reason(self):
-        self.registration.status = TournamentRegistration.Status.REJECTED
-        self.registration.rejection_reason = "Tournament is full."
-        self.registration.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "Not accepted")
-        self.assertContains(response, "Tournament is full.")
-
-    def test_shows_the_payment_section_once_approved_with_a_team(self):
-        self.registration.status = TournamentRegistration.Status.APPROVED
-        self.registration.save()
-        self.tournament.deposit_amount = Decimal("50.00")
-        self.tournament.entry_fee_amount = Decimal("150.00")
-        self.tournament.save()
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=self.registration, foreign_name="Visiting FC", payment_status=TournamentTeam.PaymentStatus.DEPOSIT_RECEIVED)
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "Deposit received")
-        self.assertContains(response, "50.00")
-        self.assertContains(response, "150.00")
-
-    def test_no_payment_section_while_pending(self):
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertNotContains(response, "Payment")
-
-    def test_payment_section_also_shows_the_lunch_total(self):
-        self.registration.status = TournamentRegistration.Status.APPROVED
-        self.registration.save()
-        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=self.registration, foreign_name="Visiting FC")
-        TournamentRosterEntry.objects.create(tournament_team=team, foreign_first_name="Robin", foreign_last_name="Newcomer", lunch_days=["2026-09-19", "2026-09-20"])
-        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
-        self.tournament.lunch_price_per_day = Decimal("10.00")
-        self.tournament.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-        content = response.content.decode()
-
-        self.assertIn("Payment", content)
-        self.assertLess(content.index("Payment"), content.index("20.00"))
-
-    def test_amount_owed_is_the_full_fee_when_unpaid(self):
-        self.registration.status = TournamentRegistration.Status.APPROVED
-        self.registration.save()
-        self.tournament.entry_fee_amount = Decimal("150.00")
-        self.tournament.save()
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=self.registration, foreign_name="Visiting FC", payment_status=TournamentTeam.PaymentStatus.UNPAID)
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.context["amount_owed"], Decimal("150.00"))
-
-    def test_amount_owed_subtracts_the_deposit_once_received(self):
-        self.registration.status = TournamentRegistration.Status.APPROVED
-        self.registration.save()
-        self.tournament.deposit_amount = Decimal("50.00")
-        self.tournament.entry_fee_amount = Decimal("150.00")
-        self.tournament.save()
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=self.registration, foreign_name="Visiting FC", payment_status=TournamentTeam.PaymentStatus.DEPOSIT_RECEIVED)
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.context["amount_owed"], Decimal("100.00"))
-
-    def test_amount_owed_is_zero_once_fully_paid(self):
-        self.registration.status = TournamentRegistration.Status.APPROVED
-        self.registration.save()
-        self.tournament.entry_fee_amount = Decimal("150.00")
-        self.tournament.save()
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=self.registration, foreign_name="Visiting FC", payment_status=TournamentTeam.PaymentStatus.FULLY_PAID)
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.context["amount_owed"], Decimal("0"))
-
-    def test_amount_owed_includes_lunch_when_billed_with_the_fee(self):
-        self.registration.status = TournamentRegistration.Status.APPROVED
-        self.registration.save()
-        self.tournament.entry_fee_amount = Decimal("150.00")
-        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
-        self.tournament.lunch_price_per_day = Decimal("10.00")
-        self.tournament.lunch_billed_with_fee = True
-        self.tournament.save()
-        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=self.registration, foreign_name="Visiting FC", payment_status=TournamentTeam.PaymentStatus.UNPAID)
-        TournamentRosterEntry.objects.create(tournament_team=team, foreign_first_name="Robin", foreign_last_name="Newcomer", lunch_days=["2026-09-19"])
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.context["amount_owed"], Decimal("160.00"))
-
-    def test_amount_owed_excludes_lunch_when_billed_separately(self):
-        self.registration.status = TournamentRegistration.Status.APPROVED
-        self.registration.save()
-        self.tournament.entry_fee_amount = Decimal("150.00")
-        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
-        self.tournament.lunch_price_per_day = Decimal("10.00")
-        self.tournament.lunch_billed_with_fee = False
-        self.tournament.save()
-        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=self.registration, foreign_name="Visiting FC", payment_status=TournamentTeam.PaymentStatus.UNPAID)
-        TournamentRosterEntry.objects.create(tournament_team=team, foreign_first_name="Robin", foreign_last_name="Newcomer", lunch_days=["2026-09-19"])
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.context["amount_owed"], Decimal("150.00"))
-        self.assertContains(response, "billed separately")
-
-    def test_no_lunch_section_when_lunch_mode_is_none(self):
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertNotContains(response, "Lunch")
-
-    def test_lunch_section_shows_days_before_dietary_restrictions(self):
-        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
-        self.tournament.lunch_price_per_day = Decimal("10.00")
-        self.tournament.save()
-        self.player.lunch_days = ["2026-09-19"]
-        self.player.dietary_restrictions = "Nut allergy"
-        self.player.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-        content = response.content.decode()
-
-        self.assertIn("Sat 19 Sep", content)
-        self.assertIn("Nut allergy", content)
-        self.assertLess(content.index("Sat 19 Sep"), content.index("Nut allergy"))
-
-    def test_lunch_table_shows_the_players_name(self):
-        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
-        self.tournament.lunch_price_per_day = Decimal("10.00")
-        self.tournament.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "Sam")
-        self.assertContains(response, "Striker")
-
-    def test_lunch_table_shows_the_roster_before_the_lunch_section(self):
-        self.registration.status = TournamentRegistration.Status.APPROVED
-        self.registration.save()
-        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, registration=self.registration, foreign_name="Visiting FC")
-        TournamentRosterEntry.objects.create(tournament_team=team, foreign_first_name="Robin", foreign_last_name="Newcomer", lunch_days=["2026-09-19"])
-        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
-        self.tournament.lunch_price_per_day = Decimal("10.00")
-        self.tournament.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-        content = response.content.decode()
-
-        # "Lunch" alone also matches the Payment card's own lunch-total line,
-        # which now legitimately sits above Roster -- "Lunch days" (the
-        # table's own column header) only ever appears in the Lunch section.
-        self.assertLess(content.index("Roster"), content.index("Lunch days"))
-
-    def test_lunch_total_reflects_price_and_selected_days(self):
-        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
-        self.tournament.lunch_price_per_day = Decimal("10.00")
-        self.tournament.save()
-        self.player.lunch_days = ["2026-09-19", "2026-09-20"]
-        self.player.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "20.00")
-
-    def test_mandatory_lunch_shows_included_every_day_and_the_full_total(self):
-        self.tournament.lunch_mode = Tournament.LunchMode.MANDATORY
-        self.tournament.lunch_price_per_day = Decimal("10.00")
-        self.tournament.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "Included every day")
-        # One player, two tournament days, 10.00/day -> 20.00.
-        self.assertContains(response, "20.00")
-
-    def test_an_unknown_token_404s(self):
-        response = self.client.get(self._url(token="not-a-real-token"), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
-
-    def test_404s_when_the_feature_flag_is_off(self):
-        get_waffle_flag_model().objects.get(name="tournaments").clubs.remove(self.club)
-        cache.clear()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
-
-    def test_pending_registration_shows_an_editable_roster_form(self):
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "Save roster")
-        self.assertContains(response, "Sam")
-
-    def test_decided_registration_shows_a_read_only_roster(self):
-        self.registration.status = TournamentRegistration.Status.APPROVED
-        self.registration.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertNotContains(response, "Save roster")
-        self.assertContains(response, "Sam")
-
-    def test_updating_the_roster_while_pending_replaces_the_players(self):
-        data = self.formset_management(total=1) | {"players-0-first_name": "Robin", "players-0-last_name": "Newcomer", "players-0-jersey_number": "11"}
-
-        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertRedirects(response, self._url())
-        self.assertEqual(self.registration.players.count(), 1)
-        player = self.registration.players.get()
-        self.assertEqual(player.first_name, "Robin")
-        self.assertEqual(player.jersey_number, 11)
-
-    def test_saving_from_the_lunch_section_actually_stores_lunch_selections(self):
-        # Regression test: lunch_days/dietary_restrictions used to render in
-        # a <div> entirely outside the Roster <form>, so nothing you ticked
-        # there was ever actually in the POST body no matter which button
-        # was clicked -- both save buttons now submit the same single form
-        # that contains everything, Roster and Lunch fields alike.
-        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
-        self.tournament.lunch_price_per_day = Decimal("10.00")
-        self.tournament.save()
-        data = self.formset_management(total=1) | {
-            "players-0-first_name": "Robin",
-            "players-0-last_name": "Newcomer",
-            "players-0-lunch_days": ["2026-09-19"],
-            "players-0-dietary_restrictions": "Vegetarian",
-        }
-
-        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertRedirects(response, self._url())
-        player = self.registration.players.get()
-        self.assertEqual(player.lunch_days, ["2026-09-19"])
-        self.assertEqual(player.dietary_restrictions, "Vegetarian")
-
-    def test_updating_the_roster_with_no_players_clears_it(self):
-        data = self.formset_management(total=0)
-
-        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertRedirects(response, self._url())
-        self.assertEqual(self.registration.players.count(), 0)
-
-    def test_cannot_update_the_roster_once_approved(self):
-        self.registration.status = TournamentRegistration.Status.APPROVED
-        self.registration.save()
-        data = self.formset_management(total=1) | {"players-0-first_name": "Robin", "players-0-last_name": "Newcomer", "players-0-jersey_number": "11"}
-
-        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertRedirects(response, self._url())
-        self.assertEqual(self.registration.players.get(), self.player)  # untouched
-
-
-@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
-class ApprovedForeignTeamRosterEditingTests(TournamentsTestCase):
-    """TournamentRegistrationStatusView's second editing window -- once
-    APPROVED, against the live TournamentTeam's own roster, until the
-    tournament actually starts. Uses a tournament dated relative to "today"
-    (not TournamentsTestCase's own fixed-date one) so these stay correct
-    regardless of when the suite runs."""
-
-    @classmethod
-    def setUpTestData(cls):
-        super().setUpTestData()
-        today = timezone.localdate()
-        cls.upcoming = Tournament.objects.create(club=cls.club, name="Winter Cup", season=cls.season, start_date=today + datetime.timedelta(days=5), end_date=today + datetime.timedelta(days=6))
-        cls.registration = TournamentRegistration.objects.create(tournament=cls.upcoming, foreign_name="Visiting FC", foreign_contact_email="casey@example.com")
-        cls.team = TournamentTeam.objects.create(club=cls.club, tournament=cls.upcoming, registration=cls.registration, foreign_name="Visiting FC")
-        cls.entry = TournamentRosterEntry.objects.create(tournament_team=cls.team, foreign_first_name="Sam", foreign_last_name="Striker", jersey_number=9)
-        cls.registration.status = TournamentRegistration.Status.APPROVED
-        cls.registration.save()
-
-    def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
-        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
-
-    def _url(self):
-        return reverse("tournaments:registration_status", kwargs={"tournament_slug": self.upcoming.slug, "token": self.registration.status_token})
-
-    def formset_management(self, total, prefix="players"):
-        return {f"{prefix}-TOTAL_FORMS": str(total), f"{prefix}-INITIAL_FORMS": "0", f"{prefix}-MIN_NUM_FORMS": "0", f"{prefix}-MAX_NUM_FORMS": "1000"}
-
-    def test_shows_an_editable_roster_form_before_the_tournament_starts(self):
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "Save roster")
-        self.assertContains(response, "Sam")
-
-    def test_updating_the_live_roster_replaces_its_entries(self):
-        data = self.formset_management(total=1) | {"players-0-first_name": "Robin", "players-0-last_name": "Newcomer", "players-0-jersey_number": "11", "players-0-role": "player"}
-
-        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertRedirects(response, self._url())
-        self.assertEqual(self.team.roster_entries.count(), 1)
-        entry = self.team.roster_entries.get()
-        self.assertEqual(entry.foreign_first_name, "Robin")
-        self.assertEqual(entry.jersey_number, 11)
-        # The original submission (TournamentRegistrationPlayer) is
-        # untouched -- only the live TournamentRosterEntry rows are edited
-        # here once approved.
-        self.assertEqual(self.registration.players.count(), 0)
-
-    def test_updating_the_live_roster_bumps_updated_at(self):
-        # So staff on the management roster screen can see *when* a foreign
-        # team last touched its own roster through this exact page -- the
-        # write itself already lands live (see the test above), this is
-        # purely about that timestamp being visible.
-        original_updated_at = self.entry.updated_at
-        data = self.formset_management(total=1) | {"players-0-first_name": "Robin", "players-0-last_name": "Newcomer", "players-0-role": "player"}
-
-        self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
-
-        new_entry = self.team.roster_entries.get()
-        self.assertGreater(new_entry.updated_at, original_updated_at)
-
-    def test_a_withdrawn_team_cannot_have_its_roster_edited(self):
-        self.team.withdrawn_at = timezone.now()
-        self.team.withdrawal_reason = "No-show."
-        self.team.save()
-        data = self.formset_management(total=1) | {"players-0-first_name": "Robin", "players-0-last_name": "Newcomer"}
-
-        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertRedirects(response, self._url())
-        self.assertEqual(self.team.roster_entries.get(), self.entry)  # untouched
-
-    def test_once_the_tournament_has_started_the_roster_is_read_only_with_a_note(self):
-        self.upcoming.start_date = timezone.localdate()
-        self.upcoming.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertNotContains(response, "Save roster")
-        self.assertContains(response, "Sam")
-        self.assertContains(response, "closed")
-
-    def test_cannot_post_once_the_tournament_has_started(self):
-        self.upcoming.start_date = timezone.localdate()
-        self.upcoming.save()
-        data = self.formset_management(total=1) | {"players-0-first_name": "Robin", "players-0-last_name": "Newcomer"}
-
-        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertRedirects(response, self._url())
-        self.assertEqual(self.team.roster_entries.get(), self.entry)  # untouched
+        self.assertEqual(list(InboxNotification.objects.filter(user=user).values_list("title", flat=True)), ["Volunteer shifts open: Summer Cup"])
 
 
 class RoundRobinPairingsTests(TestCase):
@@ -1996,7 +1391,7 @@ class SingleEliminationPlacementBracketTests(TestCase):
 
 class GenerateStageMatchesTests(TournamentsTestCase):
     def make_teams(self, count):
-        return [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"Team {i}", seed=i) for i in range(1, count + 1)]
+        return [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"Team {i}", seed=i) for i in range(1, count + 1)]
 
     def test_round_robin_creates_every_pairing(self):
         teams = self.make_teams(4)
@@ -2120,15 +1515,15 @@ class GenerateStageMatchesTests(TournamentsTestCase):
 
 class GroupRankSeedTests(TournamentsTestCase):
     def make_group(self, team_count):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"G{i}", seed=i) for i in range(1, team_count + 1)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"G{i}", seed=i) for i in range(1, team_count + 1)]
         group_stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, sequence=0, config={"num_groups": 1})
         generate_stage_matches(group_stage, entries=teams)
         return group_stage, group_stage.groups.get()
 
     def test_a_group_rank_seed_sets_the_source_fields_not_a_direct_team(self):
         _group_stage, group = self.make_group(4)
-        team1 = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Direct 1", seed=1)
-        team2 = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Direct 2", seed=2)
+        team1 = TournamentTeam.objects.create(tournament=self.tournament, foreign_name="Direct 1", seed=1)
+        team2 = TournamentTeam.objects.create(tournament=self.tournament, foreign_name="Direct 2", seed=2)
         stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM, sequence=1)
 
         matches = generate_stage_matches(stage, entries=[team1, team2, GroupRankSeed(group, 1), GroupRankSeed(group, 2)])
@@ -2151,8 +1546,8 @@ class GroupRankSeedTests(TournamentsTestCase):
 
     def test_a_lone_group_rank_seed_bye_slot_is_scheduled_not_a_walkover(self):
         _group_stage, group = self.make_group(2)
-        team1 = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Direct 1", seed=2)
-        team2 = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Direct 2", seed=3)
+        team1 = TournamentTeam.objects.create(tournament=self.tournament, foreign_name="Direct 1", seed=2)
+        team2 = TournamentTeam.objects.create(tournament=self.tournament, foreign_name="Direct 2", seed=3)
         stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM, sequence=1)
 
         # 3 entries pads to a bracket of 4 -- seed order [1, 4, 2, 3] leaves
@@ -2187,7 +1582,7 @@ class GroupRankSeedTests(TournamentsTestCase):
 
 class ResolveMatchSlotsTests(TournamentsTestCase):
     def test_completing_a_match_advances_the_winner(self):
-        teams = self.make_teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        teams = self.make_teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
         stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
         generate_stage_matches(stage, entries=teams)
         semi = Match.objects.get(stage=stage, round_number=1, sequence=0)
@@ -2201,7 +1596,7 @@ class ResolveMatchSlotsTests(TournamentsTestCase):
         self.assertEqual(final.home_team_id or final.away_team_id, semi.home_team_id)
 
     def test_incomplete_match_resolves_nothing(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
         stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
         generate_stage_matches(stage, entries=teams)
         semi = Match.objects.get(stage=stage, round_number=1, sequence=0)
@@ -2211,7 +1606,7 @@ class ResolveMatchSlotsTests(TournamentsTestCase):
 
 class GroupStandingsPreviewTests(TournamentsTestCase):
     def test_each_row_lists_the_slot_it_feeds(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
         group_stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, sequence=0, config={"num_groups": 1})
         generate_stage_matches(group_stage, entries=teams)
         group = group_stage.groups.get()
@@ -2230,7 +1625,7 @@ class GroupStandingsPreviewTests(TournamentsTestCase):
 
 class ResolveGroupSlotsTests(TournamentsTestCase):
     def test_pushes_standings_into_every_downstream_slot(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
         group_stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, sequence=0, config={"num_groups": 1})
         generate_stage_matches(group_stage, entries=teams)
         group = group_stage.groups.get()
@@ -2247,7 +1642,7 @@ class ResolveGroupSlotsTests(TournamentsTestCase):
         self.assertEqual(conflicts, [])
 
     def test_raises_if_the_group_isnt_complete_yet(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
         group_stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, sequence=0, config={"num_groups": 1})
         generate_stage_matches(group_stage, entries=teams)
         group = group_stage.groups.get()
@@ -2261,7 +1656,7 @@ class ResolveGroupSlotsTests(TournamentsTestCase):
         # standings just revealed for it turns out to already be busy
         # elsewhere at that exact time, resolve_group_slots still commits
         # the pairing, but reports the conflict for staff to go fix by hand.
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
         group_stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, sequence=0, config={"num_groups": 1})
         generate_stage_matches(group_stage, entries=teams)
         group = group_stage.groups.get()
@@ -2285,7 +1680,7 @@ class ResolveGroupSlotsTests(TournamentsTestCase):
         # The "Start next phase" review screen's own correction lever --
         # T1 beats T2 head-to-head (so plain standings would rank T1 1st),
         # but team_order says otherwise, and that's what must win.
-        team1, team2 = (TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3))
+        team1, team2 = (TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3))
         group_stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, sequence=0, config={"num_groups": 1})
         generate_stage_matches(group_stage, entries=[team1, team2])
         group = group_stage.groups.get()
@@ -2410,7 +1805,7 @@ class GapForPlacementTests(TournamentsTestCase):
 
 class AllocateScheduleTests(TournamentsTestCase):
     def test_raises_without_any_fields(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
         generate_stage_matches(stage, entries=teams)
 
@@ -2418,7 +1813,7 @@ class AllocateScheduleTests(TournamentsTestCase):
             allocate_schedule(self.tournament)
 
     def test_no_two_matches_share_a_field_and_overlap(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 9)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 9)]
         TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
         generate_stage_matches(stage, entries=teams)
@@ -2430,7 +1825,7 @@ class AllocateScheduleTests(TournamentsTestCase):
             self.assertLessEqual(earlier.scheduled_start + DEFAULT_MATCH_DURATION, later.scheduled_start)
 
     def test_a_team_never_double_booked_across_fields(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
         TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         TournamentField.objects.create(tournament=self.tournament, name="Field 2", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
@@ -2444,7 +1839,7 @@ class AllocateScheduleTests(TournamentsTestCase):
                 self.assertLessEqual(earlier.scheduled_start + DEFAULT_MATCH_DURATION, later.scheduled_start)
 
     def test_break_rule_gap_is_honoured_on_the_field(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 9)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 9)]
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         BreakRule.objects.create(tournament=self.tournament, field=field, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=1, gap_minutes=30, replaces_default_gap=True)
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
@@ -2466,7 +1861,7 @@ class AllocateScheduleTests(TournamentsTestCase):
         # game before its own break fired: "every 3 games" held for the
         # first block (3 games), then drifted to 4 games per block from the
         # second one on.
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 9)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 9)]
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "23:59"}])
         BreakRule.objects.create(tournament=self.tournament, field=field, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=3, gap_minutes=15, replaces_default_gap=True, priority=0)
         BreakRule.objects.create(tournament=self.tournament, field=field, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=1, gap_minutes=5, replaces_default_gap=True, priority=10)
@@ -2485,7 +1880,7 @@ class AllocateScheduleTests(TournamentsTestCase):
         # semifinals' own winners) gets a field/time exactly like any other
         # match: staff and the teams themselves can see *when* it's
         # happening well before who's actually playing it is decided.
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
         TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
         generate_stage_matches(stage, entries=teams)
@@ -2502,7 +1897,7 @@ class AllocateScheduleTests(TournamentsTestCase):
         # different TBD sides (None, None) must never be treated as "the
         # same team" fighting over the same slot the way two matches
         # sharing a real team would.
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
         generate_stage_matches(stage, entries=teams)
@@ -2515,7 +1910,7 @@ class AllocateScheduleTests(TournamentsTestCase):
         self.assertGreaterEqual(final.scheduled_start, max(match.scheduled_start for match in round1) + DEFAULT_MATCH_DURATION)
 
     def test_accepts_a_custom_match_duration(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
         TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
         generate_stage_matches(stage, entries=teams)
@@ -2526,7 +1921,7 @@ class AllocateScheduleTests(TournamentsTestCase):
         self.assertIsNotNone(match.scheduled_start)
 
     def test_a_field_only_schedule_block_reserves_no_match_on_that_field_during_its_window(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         window_start = timezone.make_aware(datetime.datetime(2026, 9, 19, 9, 0))
         ScheduleBlock.objects.create(tournament=self.tournament, title="Lunch", field=field, starts_at=window_start, ends_at=window_start + datetime.timedelta(hours=1))
@@ -2539,7 +1934,7 @@ class AllocateScheduleTests(TournamentsTestCase):
         self.assertGreaterEqual(match.scheduled_start, window_start + datetime.timedelta(hours=1))
 
     def test_a_team_only_schedule_block_leaves_other_teams_unaffected(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
         TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         TournamentField.objects.create(tournament=self.tournament, name="Field 2", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         window_start = timezone.make_aware(datetime.datetime(2026, 9, 19, 9, 0))
@@ -2558,7 +1953,7 @@ class AllocateScheduleTests(TournamentsTestCase):
         self.assertTrue(others_scheduled_in_window.exists())
 
     def test_a_combined_field_and_team_schedule_block_is_respected(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         window_start = timezone.make_aware(datetime.datetime(2026, 9, 19, 9, 0))
         block = ScheduleBlock.objects.create(tournament=self.tournament, title="Opening ceremony", field=field, starts_at=window_start, ends_at=window_start + datetime.timedelta(hours=1))
@@ -2572,7 +1967,7 @@ class AllocateScheduleTests(TournamentsTestCase):
         self.assertGreaterEqual(match.scheduled_start, window_start + datetime.timedelta(hours=1))
 
     def test_a_field_rolls_into_its_next_defined_availability_window(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
         TournamentField.objects.create(
             tournament=self.tournament,
             name="Field 1",
@@ -2596,7 +1991,7 @@ class AllocateScheduleTests(TournamentsTestCase):
                 self.assertGreaterEqual(match.scheduled_start, timezone.make_aware(datetime.datetime(2026, 9, 20, 9, 0)))
 
     def test_a_field_with_only_one_defined_window_keeps_going_once_exhausted(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
         TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "10:00"}])
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
         generate_stage_matches(stage, entries=teams)
@@ -2607,7 +2002,7 @@ class AllocateScheduleTests(TournamentsTestCase):
         self.assertTrue(all(m.scheduled_start.date() == datetime.date(2026, 9, 19) for m in matches))
 
     def test_break_counters_reset_after_rolling_into_a_new_day(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
         field = TournamentField.objects.create(
             tournament=self.tournament,
             name="Field 1",
@@ -2632,7 +2027,7 @@ class AllocateScheduleTests(TournamentsTestCase):
         # the plain DEFAULT_GAP added before it too (nothing had fired yet,
         # so gap_for_placement fell back to that default) -- a field open
         # from 09:00 put its first game at 09:05 for no visible reason.
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
         TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
         generate_stage_matches(stage, entries=teams)
@@ -2647,7 +2042,7 @@ class AllocateScheduleTests(TournamentsTestCase):
         # each field (both fields' clocks tie at their own opening time, so
         # the second match routes to whichever field the first one didn't),
         # each genuinely that field's own first game.
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
         TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         TournamentField.objects.create(tournament=self.tournament, name="Field 2", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
@@ -2660,7 +2055,7 @@ class AllocateScheduleTests(TournamentsTestCase):
         self.assertEqual([match.scheduled_start for match in first_round], [opening, opening])
 
     def test_placed_matches_are_flagged_auto_scheduled(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
         TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
         generate_stage_matches(stage, entries=teams)
@@ -2670,7 +2065,7 @@ class AllocateScheduleTests(TournamentsTestCase):
         self.assertTrue(Match.objects.get(stage=stage).auto_scheduled)
 
     def test_reset_replans_a_previously_auto_placed_match(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
         TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
         generate_stage_matches(stage, entries=teams)
@@ -2689,7 +2084,7 @@ class AllocateScheduleTests(TournamentsTestCase):
         self.assertEqual(match.scheduled_start, first_run_start)
 
     def test_reset_leaves_a_hand_placed_match_alone(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
         generate_stage_matches(stage, entries=teams)
@@ -2705,7 +2100,7 @@ class AllocateScheduleTests(TournamentsTestCase):
         self.assertFalse(match.auto_scheduled)
 
     def test_reset_leaves_a_completed_match_alone(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
         TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
         generate_stage_matches(stage, entries=teams)
@@ -2728,7 +2123,7 @@ class AllocateScheduleTests(TournamentsTestCase):
         # could land right on top of it. _skip_occupied_windows now treats
         # any already-scheduled match the same way a ScheduleBlock already
         # was: a reservation the greedy walk must route around.
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "13:00"}])
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
         generate_stage_matches(stage, entries=teams)
@@ -2754,7 +2149,7 @@ class ScheduleNeedsRegenerationTests(TournamentsTestCase):
     regenerate once."""
 
     def test_manual_reschedule_sets_the_flag(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
         match = Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1])
@@ -2766,7 +2161,7 @@ class ScheduleNeedsRegenerationTests(TournamentsTestCase):
         self.assertTrue(self.tournament.schedule_needs_regeneration)
 
     def test_a_second_manual_reschedule_leaves_the_flag_set(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
         match = Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1])
@@ -2799,7 +2194,7 @@ class ScheduleNeedsRegenerationTests(TournamentsTestCase):
 
 class ClearScheduleTests(TournamentsTestCase):
     def test_unschedules_a_not_yet_played_match_but_keeps_it(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
         TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
         generate_stage_matches(stage, entries=teams)
@@ -2816,7 +2211,7 @@ class ClearScheduleTests(TournamentsTestCase):
         self.assertFalse(match.auto_scheduled)
 
     def test_leaves_a_completed_match_alone(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
         played_start = timezone.make_aware(datetime.datetime(2026, 9, 19, 10, 0))
@@ -2839,7 +2234,7 @@ class FieldTimelineTests(TournamentsTestCase):
         # Tournament default match duration is 45 minutes (the model's own
         # default): 09:15 -> 10:00, then 10:10 -> 10:55, in a 09:00-11:00
         # window -- a 10-minute gap between them, a 5-minute gap after.
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 5)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 5)]
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "11:00"}])
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
         Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1], field=field, scheduled_start=timezone.make_aware(datetime.datetime(2026, 9, 19, 9, 15)))
@@ -2895,7 +2290,7 @@ class FieldTimelineTests(TournamentsTestCase):
 class ValidatePlacementTests(TournamentsTestCase):
     def test_detects_field_double_booking(self):
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 5)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 5)]
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
         start = timezone.now() + datetime.timedelta(days=1)
         existing = Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1], field=field, scheduled_start=start)
@@ -2908,7 +2303,7 @@ class ValidatePlacementTests(TournamentsTestCase):
 
     def test_no_violations_for_a_clean_placement(self):
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
         candidate = Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1])
         start = timezone.now() + datetime.timedelta(days=1)
@@ -2918,7 +2313,7 @@ class ValidatePlacementTests(TournamentsTestCase):
     def test_detects_a_team_already_playing_elsewhere(self):
         field_a = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
         field_b = TournamentField.objects.create(tournament=self.tournament, name="Field 2")
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 5)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 5)]
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
         start = timezone.now() + datetime.timedelta(days=1)
         Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1], field=field_a, scheduled_start=start)
@@ -2931,7 +2326,7 @@ class ValidatePlacementTests(TournamentsTestCase):
     def test_detects_a_blackout_window_overlap(self):
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
         BreakRule.objects.create(tournament=self.tournament, trigger_type=BreakRule.TriggerType.CLOCK_WINDOW, trigger_window_start=datetime.time(12, 0), trigger_window_end=datetime.time(13, 0))
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
         candidate = Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1])
         start = timezone.make_aware(datetime.datetime(2026, 9, 19, 12, 15))
@@ -2949,7 +2344,7 @@ class ValidatePlacementTests(TournamentsTestCase):
         self.tournament.default_match_duration_minutes = 20
         self.tournament.save(update_fields=["default_match_duration_minutes"])
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 5)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 5)]
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
         start = timezone.make_aware(datetime.datetime(2026, 9, 19, 9, 0))
         Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1], field=field, scheduled_start=start)
@@ -2966,7 +2361,7 @@ class ValidatePlacementTests(TournamentsTestCase):
 
 class ComputeStandingsTests(TournamentsTestCase):
     def make_group_stage(self, count):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, count + 1)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, count + 1)]
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
         generate_stage_matches(stage, entries=teams)
         return stage, teams
@@ -3030,7 +2425,7 @@ class ComputeStandingsHeadToHeadTests(TournamentsTestCase):
     but their results against *each other alone* have a clear order."""
 
     def test_a_genuine_three_way_tie_is_broken_by_head_to_head_alone(self):
-        team_a, team_b, team_c, team_d, team_e = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=name, seed=seed) for seed, name in enumerate(["A", "B", "C", "D", "E"], start=1)]
+        team_a, team_b, team_c, team_d, team_e = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=name, seed=seed) for seed, name in enumerate(["A", "B", "C", "D", "E"], start=1)]
         stage = TournamentStage.objects.create(
             tournament=self.tournament,
             name="RR",
@@ -3088,7 +2483,7 @@ class SingleEliminationStressTests(TournamentsTestCase):
     resolves cleanly with no lingering TBD slots."""
 
     def make_teams(self, count):
-        return [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"Team {i}", seed=i) for i in range(1, count + 1)]
+        return [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"Team {i}", seed=i) for i in range(1, count + 1)]
 
     def play_out(self, stage):
         """Plays every real (non-walkover) match to completion, round by
@@ -3171,7 +2566,7 @@ class DoubleEliminationStressTests(TournamentsTestCase):
     and losers brackets alike) as a straight higher-seed-wins simulation."""
 
     def make_teams(self, count):
-        return [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"Team {i}", seed=i) for i in range(1, count + 1)]
+        return [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"Team {i}", seed=i) for i in range(1, count + 1)]
 
     def play_out(self, stage):
         for round_number in sorted(stage.matches.values_list("round_number", flat=True).distinct()):
@@ -3225,7 +2620,7 @@ class SwissStressTests(TournamentsTestCase):
     pairings and for generate_next_swiss_round's own completeness guard."""
 
     def make_teams(self, count):
-        return [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"Team {i}", seed=i) for i in range(1, count + 1)]
+        return [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"Team {i}", seed=i) for i in range(1, count + 1)]
 
     def complete_round(self, stage, round_number):
         for match in stage.matches.filter(round_number=round_number):
@@ -3277,7 +2672,7 @@ class AllocateScheduleStressTests(TournamentsTestCase):
     interleave, and a blackout rule that swallows the entire working day."""
 
     def test_16_teams_one_field_never_overlaps(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 17)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 17)]
         TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
         generate_stage_matches(stage, entries=teams)
@@ -3290,7 +2685,7 @@ class AllocateScheduleStressTests(TournamentsTestCase):
             self.assertLessEqual(earlier.scheduled_start + DEFAULT_MATCH_DURATION, later.scheduled_start)
 
     def test_blackout_spanning_the_whole_working_window_pushes_every_match_past_it(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
         BreakRule.objects.create(tournament=self.tournament, field=field, trigger_type=BreakRule.TriggerType.CLOCK_WINDOW, trigger_window_start=datetime.time(9, 0), trigger_window_end=datetime.time(20, 0))
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
@@ -3303,79 +2698,9 @@ class AllocateScheduleStressTests(TournamentsTestCase):
             self.assertFalse(datetime.time(9, 0) <= local_time < datetime.time(20, 0))
 
 
-class TournamentAdminActionsTests(TournamentsTestCase):
-    """The Django admin actions that make the scheduling engine clickable --
-    called directly on the ModelAdmin instance (RequestFactory + a fallback
-    messages storage), the same message-capturing setup as
-    controlpanel.tests.NotifyTests' own request()."""
-
-    def make_teams(self, count):
-        return [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, count + 1)]
-
-    def make_request(self):
-        request = RequestFactory().get("/")
-        request.session = {}
-        storage = FallbackStorage(request)
-        request._messages = storage
-        return request, storage
-
-    def test_generate_matches_action_creates_matches_and_shows_success(self):
-        self.make_teams(4)
-        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
-        model_admin = TournamentStageAdmin(TournamentStage, admin.site)
-        request, storage = self.make_request()
-
-        model_admin.generate_matches(request, TournamentStage.objects.filter(pk=stage.pk))
-
-        self.assertEqual(stage.matches.count(), 6)  # 4 choose 2
-        [message] = list(storage)
-        self.assertEqual(message.level, messages.SUCCESS)
-
-    def test_generate_matches_action_shows_error_and_creates_nothing_when_already_generated(self):
-        teams = self.make_teams(4)
-        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
-        generate_stage_matches(stage, entries=teams)
-        existing_count = stage.matches.count()
-        model_admin = TournamentStageAdmin(TournamentStage, admin.site)
-        request, storage = self.make_request()
-
-        model_admin.generate_matches(request, TournamentStage.objects.filter(pk=stage.pk))
-
-        self.assertEqual(stage.matches.count(), existing_count)
-        [message] = list(storage)
-        self.assertEqual(message.level, messages.ERROR)
-
-    def test_allocate_schedule_action_schedules_matches(self):
-        teams = self.make_teams(4)
-        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
-        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
-        generate_stage_matches(stage, entries=teams)
-        model_admin = TournamentAdmin(Tournament, admin.site)
-        request, storage = self.make_request()
-
-        model_admin.allocate_schedule_action(request, Tournament.objects.filter(pk=self.tournament.pk))
-
-        self.assertTrue(Match.objects.filter(stage=stage, scheduled_start__isnull=False).exists())
-        [message] = list(storage)
-        self.assertEqual(message.level, messages.SUCCESS)
-
-    def test_allocate_schedule_action_shows_error_when_no_fields_yet(self):
-        teams = self.make_teams(4)
-        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
-        generate_stage_matches(stage, entries=teams)
-        model_admin = TournamentAdmin(Tournament, admin.site)
-        request, storage = self.make_request()
-
-        model_admin.allocate_schedule_action(request, Tournament.objects.filter(pk=self.tournament.pk))
-
-        self.assertFalse(Match.objects.filter(stage=stage, scheduled_start__isnull=False).exists())
-        [message] = list(storage)
-        self.assertEqual(message.level, messages.ERROR)
-
-
 class RescheduleMatchTests(TournamentsTestCase):
     def test_valid_reschedule_saves_field_and_time(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
         match = Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1])
@@ -3388,7 +2713,7 @@ class RescheduleMatchTests(TournamentsTestCase):
         self.assertEqual(match.scheduled_start, start)
 
     def test_conflicting_reschedule_raises_and_does_not_save(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 5)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 5)]
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
         start = timezone.now() + datetime.timedelta(days=1)
@@ -3405,7 +2730,7 @@ class RescheduleMatchTests(TournamentsTestCase):
 
 class RecordResultTests(TournamentsTestCase):
     def test_records_score_and_marks_complete(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
         stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
         match = Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1])
 
@@ -3417,7 +2742,7 @@ class RecordResultTests(TournamentsTestCase):
         self.assertEqual(match.score_away, 1)
 
     def test_recording_a_result_cascades_to_a_dependent_match(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
         stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
         generate_stage_matches(stage, entries=teams)
         semi = Match.objects.get(stage=stage, round_number=1, sequence=0)
@@ -3435,508 +2760,6 @@ class RecordResultTests(TournamentsTestCase):
 # conventions as TournamentRegistrationViewTests/TournamentRegistrationStatusViewTests
 # above.
 # --------------------------------------------------------------------------
-
-
-@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
-class TournamentListViewTests(TournamentsTestCase):
-    """tournaments:list -- the public tournament list (tournaments.views.TournamentListView)."""
-
-    def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
-        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
-
-    def _url(self):
-        return reverse("tournaments:list")
-
-    def test_only_publicly_listable_statuses_show(self):
-        self.tournament.status = Tournament.Status.DRAFT
-        self.tournament.save()
-        cancelled = Tournament.objects.create(club=self.club, name="Cancelled Cup", season=self.season, start_date=datetime.date(2026, 9, 1), end_date=datetime.date(2026, 9, 2), status=Tournament.Status.CANCELLED)
-        published = Tournament.objects.create(club=self.club, name="Autumn Cup", season=self.season, start_date=datetime.date(2026, 10, 1), end_date=datetime.date(2026, 10, 2), status=Tournament.Status.PUBLISHED)
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        tournaments = list(response.context["tournaments"])
-        self.assertIn(published, tournaments)
-        self.assertNotIn(self.tournament, tournaments)
-        self.assertNotIn(cancelled, tournaments)
-
-    def test_splits_upcoming_and_past(self):
-        self.tournament.status = Tournament.Status.PUBLISHED
-        self.tournament.save()
-        completed = Tournament.objects.create(club=self.club, name="Spring Cup", season=self.season, start_date=datetime.date(2026, 4, 1), end_date=datetime.date(2026, 4, 2), status=Tournament.Status.COMPLETED)
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertIn(self.tournament, response.context["upcoming_tournaments"])
-        self.assertIn(completed, response.context["past_tournaments"])
-        self.assertNotIn(completed, response.context["upcoming_tournaments"])
-
-    def test_scoped_to_the_current_club(self):
-        self.tournament.status = Tournament.Status.PUBLISHED
-        self.tournament.save()
-        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
-        Tournament.objects.create(club=other_club, name="Rival Cup", season=make_season(other_club), start_date=datetime.date(2026, 9, 1), end_date=datetime.date(2026, 9, 2), status=Tournament.Status.PUBLISHED)
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(list(response.context["tournaments"]), [self.tournament])
-
-    def test_404s_when_the_feature_flag_is_off(self):
-        get_waffle_flag_model().objects.get(name="tournaments").clubs.remove(self.club)
-        cache.clear()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
-
-
-@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
-class TournamentDetailViewTests(TournamentsTestCase):
-    """tournaments:detail -- the tournament "home" page (tournaments.views.TournamentDetailView)."""
-
-    def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
-        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
-
-    def _url(self, tournament=None):
-        return reverse("tournaments:detail", kwargs={"slug": (tournament or self.tournament).slug})
-
-    def test_renders_for_a_published_tournament(self):
-        self.tournament.status = Tournament.Status.PUBLISHED
-        self.tournament.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, self.tournament.name)
-
-    def test_a_draft_tournament_still_resolves_by_direct_link(self):
-        # DRAFT isn't on the public list, but (like registration itself) a
-        # direct link to it isn't a secret -- see TournamentDetailView's own
-        # docstring for the reasoning.
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 200)
-
-    def test_404s_for_a_tournament_in_another_club(self):
-        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
-        other_tournament = Tournament.objects.create(club=other_club, name="Rival Cup", season=make_season(other_club), start_date=datetime.date(2026, 9, 1), end_date=datetime.date(2026, 9, 2), status=Tournament.Status.PUBLISHED)
-
-        response = self.client.get(self._url(other_tournament), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
-
-    def test_404s_when_the_feature_flag_is_off(self):
-        get_waffle_flag_model().objects.get(name="tournaments").clubs.remove(self.club)
-        cache.clear()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
-
-    def test_shows_a_register_link_when_open(self):
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, reverse("tournaments:register", kwargs={"tournament_slug": self.tournament.slug}))
-
-    def test_hides_the_register_link_and_shows_a_note_when_closed(self):
-        self.tournament.registration_open = False
-        self.tournament.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertNotContains(response, reverse("tournaments:register", kwargs={"tournament_slug": self.tournament.slug}))
-        self.assertContains(response, "Registration is closed")
-
-    def test_hides_the_register_link_once_in_progress(self):
-        self.tournament.status = Tournament.Status.IN_PROGRESS
-        self.tournament.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertNotContains(response, reverse("tournaments:register", kwargs={"tournament_slug": self.tournament.slug}))
-
-    def test_shows_the_closed_banner_when_registration_is_closed(self):
-        self.tournament.registration_open = False
-        self.tournament.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "Registration is closed for this tournament")
-
-    def test_shows_the_contact_email_when_set(self):
-        self.tournament.contact_email = "organiser@example.com"
-        self.tournament.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "organiser@example.com")
-
-    def test_does_not_show_a_contact_email_row_when_unset(self):
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        # The shared page footer always has its own "Powered by RosterChief"
-        # mailto link -- this test only cares that the tournament's own
-        # contact-email row doesn't add a second one.
-        self.assertContains(response, "mailto:", count=1)
-
-    def test_shows_the_location_when_the_club_has_a_home_ground(self):
-        Location.objects.create(club=self.club, name="Ajax Arena", address="1 Main St", city="Mechelen", zip_code="2800", country="BE", is_home=True)
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "Ajax Arena")
-
-    def test_description_is_rendered_as_markdown(self):
-        self.tournament.description = "**Bold** and a [link](https://example.com)."
-        self.tournament.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "<strong>Bold</strong>", html=False)
-        self.assertContains(response, 'href="https://example.com"', html=False)
-        self.assertContains(response, ">link</a>", html=False)
-
-
-@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
-class TournamentScheduleViewTests(TournamentsTestCase):
-    """tournaments:schedule -- the full read-only schedule (tournaments.views.TournamentScheduleView)."""
-
-    def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
-        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
-
-    def _url(self, tournament=None):
-        return reverse("tournaments:schedule", kwargs={"slug": (tournament or self.tournament).slug})
-
-    def test_groups_matches_by_stage_then_round(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
-        stage = TournamentStage.objects.create(tournament=self.tournament, name="Round Robin", format=TournamentStage.Format.ROUND_ROBIN)
-        generate_stage_matches(stage, entries=teams)
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 200)
-        stages = response.context["stages"]
-        self.assertEqual(len(stages), 1)
-        self.assertEqual(stages[0]["stage"], stage)
-        rounds = stages[0]["rounds"]
-        self.assertEqual(len(rounds), 3)  # 4 teams round robin -> 3 rounds
-        for round_row in rounds:
-            self.assertEqual(len(round_row["matches"]), 2)  # 2 matches per round
-        self.assertEqual(sum(len(round_row["matches"]) for round_row in rounds), 6)  # 4 choose 2
-
-    def test_404s_for_a_tournament_in_another_club(self):
-        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
-        other_tournament = Tournament.objects.create(club=other_club, name="Rival Cup", season=make_season(other_club), start_date=datetime.date(2026, 9, 1), end_date=datetime.date(2026, 9, 2))
-
-        response = self.client.get(self._url(other_tournament), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
-
-    def test_404s_when_the_feature_flag_is_off(self):
-        get_waffle_flag_model().objects.get(name="tournaments").clubs.remove(self.club)
-        cache.clear()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
-
-    def test_a_knockout_stage_renders_as_a_bracket_not_a_table(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
-        stage = TournamentStage.objects.create(tournament=self.tournament, name="Knockout", format=TournamentStage.Format.SINGLE_ELIM)
-        generate_stage_matches(stage, entries=teams)
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Semifinal")
-        self.assertNotContains(response, "<table")
-
-    def test_a_round_robin_stage_still_renders_as_a_table(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
-        stage = TournamentStage.objects.create(tournament=self.tournament, name="Round Robin", format=TournamentStage.Format.ROUND_ROBIN)
-        generate_stage_matches(stage, entries=teams)
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "<table")
-
-
-@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
-class TournamentScheduleRowsViewTests(TournamentsTestCase):
-    """tournaments:schedule_rows -- the htmx-polled partial (tournaments.views.TournamentScheduleRowsView)."""
-
-    def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
-        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
-
-    def test_returns_only_the_rows_partial(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
-        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
-        generate_stage_matches(stage, entries=teams)
-
-        response = self.client.get(reverse("tournaments:schedule_rows", kwargs={"slug": self.tournament.slug}), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, "tournaments/_schedule_rows.html")
-        self.assertTemplateNotUsed(response, "registration/_base.html")
-        self.assertNotContains(response, "<html")
-
-
-@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
-class TournamentStandingsViewTests(TournamentsTestCase):
-    """tournaments:standings -- stage/group standings plus bracket progression
-    (tournaments.views.TournamentStandingsView)."""
-
-    def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
-        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
-
-    def _url(self, tournament=None):
-        return reverse("tournaments:standings", kwargs={"slug": (tournament or self.tournament).slug})
-
-    def test_shows_the_right_ranked_order(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 4)]
-        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
-        generate_stage_matches(stage, entries=teams)
-        for match in stage.matches.all():
-            winner_is_home = match.home_team.seed < match.away_team.seed
-            match.score_home, match.score_away = (2, 0) if winner_is_home else (0, 2)
-            match.status = Match.Status.COMPLETE
-            match.save()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 200)
-        rows = response.context["standings_stages"][0]["tables"][0]["rows"]
-        self.assertEqual([row["team"] for row in rows], [row["team"] for row in compute_standings(stage)])  # sanity: same order as the raw call
-        self.assertEqual(rows[0]["team"], teams[0])
-        self.assertEqual(rows[0]["rank"], 1)
-        self.assertEqual(rows[-1]["team"], teams[-1])
-
-    def test_groups_stage_gets_one_table_per_group(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 7)]
-        stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, config={"num_groups": 2})
-        generate_stage_matches(stage, entries=teams)
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        tables = response.context["standings_stages"][0]["tables"]
-        self.assertEqual(len(tables), 2)
-        self.assertTrue(all(table["group"] is not None for table in tables))
-
-    def test_single_elim_stage_is_a_bracket_not_a_table(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
-        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
-        generate_stage_matches(stage, entries=teams)
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.context["standings_stages"], [])
-        bracket_stages = response.context["bracket_stages"]
-        self.assertEqual(len(bracket_stages), 1)
-        self.assertEqual(len(bracket_stages[0]["rounds"]), 2)  # semis, final
-
-    def test_404s_for_a_tournament_in_another_club(self):
-        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
-        other_tournament = Tournament.objects.create(club=other_club, name="Rival Cup", season=make_season(other_club), start_date=datetime.date(2026, 9, 1), end_date=datetime.date(2026, 9, 2))
-
-        response = self.client.get(self._url(other_tournament), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
-
-    def test_404s_when_the_feature_flag_is_off(self):
-        get_waffle_flag_model().objects.get(name="tournaments").clubs.remove(self.club)
-        cache.clear()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
-
-
-@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
-class TournamentStandingsRowsViewTests(TournamentsTestCase):
-    """tournaments:standings_rows -- the htmx-polled partial (tournaments.views.TournamentStandingsRowsView)."""
-
-    def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
-        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
-
-    def test_returns_only_the_rows_partial(self):
-        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
-        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
-        generate_stage_matches(stage, entries=teams)
-
-        response = self.client.get(reverse("tournaments:standings_rows", kwargs={"slug": self.tournament.slug}), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, "tournaments/_standings_rows.html")
-        self.assertTemplateNotUsed(response, "registration/_base.html")
-        self.assertNotContains(response, "<html")
-
-
-@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
-class TournamentTeamScheduleViewTests(TournamentsTestCase):
-    """tournaments:team_schedule -- one TournamentTeam's own matches only
-    (tournaments.views.TournamentTeamScheduleView)."""
-
-    def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
-        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
-
-    def _url(self, team, tournament=None):
-        return reverse("tournaments:team_schedule", kwargs={"slug": (tournament or self.tournament).slug, "team_slug": team.slug})
-
-    def test_only_shows_this_teams_own_matches(self):
-        team_a, team_b, team_c = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=name, seed=seed) for seed, name in enumerate(["A", "B", "C"], start=1)]
-        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
-        generate_stage_matches(stage, entries=[team_a, team_b, team_c])
-
-        response = self.client.get(self._url(team_a), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 200)
-        matches = response.context["matches"]
-        self.assertEqual(len(matches), 2)  # A plays B and C, not B-vs-C
-        for match in matches:
-            self.assertIn(team_a.id, (match.home_team_id, match.away_team_id))
-
-    def test_404_for_an_unknown_team_slug(self):
-        response = self.client.get(reverse("tournaments:team_schedule", kwargs={"slug": self.tournament.slug, "team_slug": "no-such-team"}), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
-
-    def test_404s_for_a_team_in_another_club(self):
-        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
-        other_tournament = Tournament.objects.create(club=other_club, name="Rival Cup", season=make_season(other_club), start_date=datetime.date(2026, 9, 1), end_date=datetime.date(2026, 9, 2))
-        other_team = TournamentTeam.objects.create(club=other_club, tournament=other_tournament, foreign_name="Rival Team")
-
-        response = self.client.get(self._url(other_team, tournament=other_tournament), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
-
-    def test_404s_when_the_feature_flag_is_off(self):
-        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Solo FC")
-        get_waffle_flag_model().objects.get(name="tournaments").clubs.remove(self.club)
-        cache.clear()
-
-        response = self.client.get(self._url(team), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
-
-    def test_shows_the_roster_with_public_safe_fields_only(self):
-        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Solo FC")
-        TournamentRosterEntry.objects.create(
-            tournament_team=team,
-            foreign_first_name="Guest",
-            foreign_last_name="Player",
-            jersey_number=7,
-            position_label="Forward",
-            license_number="LIC-99887",
-            dietary_restrictions="Peanut allergy",
-            date_of_birth=datetime.date(2015, 1, 1),
-        )
-
-        response = self.client.get(self._url(team), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "Guest Player")
-        self.assertContains(response, "Forward")
-        # Staff-only fields never reach this public page at all.
-        self.assertNotContains(response, "LIC-99887")
-        self.assertNotContains(response, "Peanut allergy")
-        self.assertNotContains(response, "2015")
-
-    def test_shows_dressing_room_assignments_when_present(self):
-        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Solo FC")
-        room = DressingRoom.objects.create(club=self.club, name="Room 3")
-        DressingRoomAssignment.objects.create(dressing_room=room, tournament_team=team)
-
-        response = self.client.get(self._url(team), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "Room 3")
-
-    def test_no_dressing_room_section_when_none_assigned(self):
-        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Solo FC")
-
-        response = self.client.get(self._url(team), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertNotContains(response, "Dressing room")
-
-
-@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
-class TournamentTeamsViewTests(TournamentsTestCase):
-    """tournaments:teams -- the public list of every team in the bracket
-    (tournaments.views.TournamentTeamsView)."""
-
-    def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
-        get_waffle_flag_model().objects.get_or_create(name="tournaments")[0].clubs.add(self.club)
-
-    def _url(self, tournament=None):
-        return reverse("tournaments:teams", kwargs={"slug": (tournament or self.tournament).slug})
-
-    def test_lists_non_withdrawn_teams(self):
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Alpha FC")
-        withdrawn = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Beta FC")
-        withdrawn.withdrawn_at = timezone.now()
-        withdrawn.save(update_fields=["withdrawn_at"])
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "Alpha FC")
-        self.assertNotContains(response, "Beta FC")
-
-    def test_a_club_linked_team_falls_back_to_the_clubs_logo(self):
-        self.club.logo = SimpleUploadedFile("crest.png", b"fake-image-bytes", content_type="image/png")
-        self.club.save(update_fields=["logo"])
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, team=self.team)
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, self.club.logo.url)
-
-    def test_teams_are_sorted_alphabetically_case_insensitively(self):
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Zebra FC")
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="apple FC")
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Banana FC")
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        names = [team.display_name for team in response.context["teams"]]
-        self.assertEqual(names, ["apple FC", "Banana FC", "Zebra FC"])
-
-    def test_shows_a_dressing_room_chip_when_assigned(self):
-        team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Roomy FC")
-        room = DressingRoom.objects.create(club=self.club, name="Room 7")
-        DressingRoomAssignment.objects.create(dressing_room=room, tournament_team=team)
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "Room 7")
-
-    def test_no_dressing_room_chip_when_none_assigned(self):
-        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Roomless FC")
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertNotContains(response, "badge-neutral")
-
-    def test_404s_when_the_feature_flag_is_off(self):
-        get_waffle_flag_model().objects.get(name="tournaments").clubs.remove(self.club)
-        cache.clear()
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertEqual(response.status_code, 404)
 
 
 class ClaimTaskServiceTests(TournamentsTestCase):
@@ -4048,9 +2871,9 @@ class AssignDressingRoomServiceTests(TournamentsTestCase):
     @classmethod
     def setUpTestData(cls):
         super().setUpTestData()
-        cls.room = DressingRoom.objects.create(club=cls.club, name="Room A")
-        cls.team_a = TournamentTeam.objects.create(club=cls.club, tournament=cls.tournament, foreign_name="Team A")
-        cls.team_b = TournamentTeam.objects.create(club=cls.club, tournament=cls.tournament, foreign_name="Team B")
+        cls.room = DressingRoom.objects.create(name="Room A")
+        cls.team_a = TournamentTeam.objects.create(tournament=cls.tournament, foreign_name="Team A")
+        cls.team_b = TournamentTeam.objects.create(tournament=cls.tournament, foreign_name="Team B")
 
     def test_assigns_a_free_room(self):
         assignment = assign_dressing_room(self.room, self.team_a)
@@ -4111,3 +2934,45 @@ class WindowsConflictTests(TournamentsTestCase):
     def test_overlapping_windows_conflict(self):
         start = timezone.now()
         self.assertTrue(windows_conflict(start, start + datetime.timedelta(hours=2), start + datetime.timedelta(hours=1), start + datetime.timedelta(hours=3)))
+
+
+class RegistrationEmailTests(TournamentsTestCase):
+    def setUp(self):
+        self.registration = TournamentRegistration.objects.create(tournament=self.tournament, foreign_name="Visiting FC", foreign_contact_name="Casey", foreign_contact_email="casey@example.com")
+
+    def test_confirmation_goes_to_the_contact_with_the_status_link(self):
+        from .services.notifications import send_registration_confirmation_email
+
+        self.assertTrue(send_registration_confirmation_email(self.registration))
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["casey@example.com"])
+        self.assertIn(f"/tournaments/{self.tournament.slug}/registration/{self.registration.status_token}", mail.outbox[0].body)
+
+    def test_decision_wording_follows_the_status(self):
+        from .services.notifications import send_registration_decision_email
+
+        self.registration.status = TournamentRegistration.Status.APPROVED
+        send_registration_decision_email(self.registration)
+        self.registration.status = TournamentRegistration.Status.REJECTED
+        self.registration.rejection_reason = "We are full."
+        send_registration_decision_email(self.registration)
+
+        self.assertIn("approved", mail.outbox[0].subject)
+        self.assertIn("not accepted", mail.outbox[1].subject)
+        self.assertIn("We are full.", mail.outbox[1].body)
+
+
+class DispatchShiftsOpenTests(TournamentsTestCase):
+    def test_the_task_is_queued_after_the_commit(self):
+        from .services.notifications import dispatch_notify_tournament_shifts_open
+
+        with mock.patch("tournaments.tasks.notify_shifts_open.delay") as delay, self.captureOnCommitCallbacks(execute=True):
+            dispatch_notify_tournament_shifts_open(self.tournament.pk)
+
+        delay.assert_called_once_with(str(self.tournament.pk))
+
+    def test_the_task_runs_the_notification(self):
+        from .tasks import notify_shifts_open
+
+        self.assertIn("Skipped", notify_shifts_open(str(self.tournament.pk)))
