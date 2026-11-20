@@ -80,7 +80,6 @@ def approve_registration(registration: TournamentRegistration, *, reviewed_by) -
     _guard_pending(registration)
 
     team = TournamentTeam.objects.create(
-        club=registration.tournament.club,
         tournament=registration.tournament,
         registration=registration,
         team=registration.team,
@@ -217,11 +216,11 @@ def create_manual_team(tournament, *, club_team=None, foreign_fields: dict | Non
     if club_team is not None:
         # The club doesn't pay itself -- a club team entered here is always
         # already fully paid, no staff step required.
-        team = TournamentTeam.objects.create(club=tournament.club, tournament=tournament, team=club_team, payment_status=TournamentTeam.PaymentStatus.FULLY_PAID)
+        team = TournamentTeam.objects.create(tournament=tournament, team=club_team, payment_status=TournamentTeam.PaymentStatus.FULLY_PAID)
         if snapshot_roster:
             snapshot_club_team_roster(team, club_team, tournament.season)
     else:
-        team = TournamentTeam.objects.create(club=tournament.club, tournament=tournament, **foreign_fields)
+        team = TournamentTeam.objects.create(tournament=tournament, **foreign_fields)
 
     return team
 
@@ -304,7 +303,7 @@ def ensure_home_team(tournament) -> TournamentTeam | None:
 
         start = timezone.make_aware(datetime.combine(tournament.start_date, time.min))
         end = timezone.make_aware(datetime.combine(tournament.end_date, time(23, 59)))
-        event = Event.objects.create(club=tournament.club, season=tournament.season, kind=Event.EventKind.TOURNAMENT, title=tournament.name, start=start, end=end)
+        event = Event.objects.create(season=tournament.season, kind=Event.EventKind.TOURNAMENT, title=tournament.name, start=start, end=end)
         tournament.event = event
         tournament.save(update_fields=["event"])
 

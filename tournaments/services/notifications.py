@@ -12,81 +12,85 @@ module docstring): the underlying TournamentRegistration row exists in the
 database whether or not the mail actually leaves the building.
 """
 
+import logging
+
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
-from django.template.loader import render_to_string
-from django.urls import reverse
+from django.db import transaction
 from django.utils.translation import gettext as _
 
 from members.models import Member
-from notifications.services import notify_members
-from rosterchief.concurrency import run_in_background
+from members.services import recipients
+from notifications import inbox
 from rosterchief.mail import send_message
 from teams.models import TeamMembership
 
 from ..models import Tournament
 
+log = logging.getLogger(__name__)
+
+
+def _club():
+    from events.services.attendance import current_club
+
+    return current_club()
+
 
 def _status_url(registration, *, request=None) -> str:
-    path = reverse("tournaments:registration_status", kwargs={"tournament_slug": registration.tournament.slug, "token": registration.status_token})
-    return request.build_absolute_uri(path) if request is not None else path
+    """The public status page of a registration: ``<club base url>/tournaments/<slug>/registration/<token>``."""
+    from registration.services.notifications import base_url
+
+    club = _club()
+    base = base_url(club) if club is not None else ""
+    if not base and request is not None:
+        base = f"{request.scheme}://{request.get_host()}"
+    return f"{base}/tournaments/{registration.tournament.slug}/registration/{registration.status_token}"
+
+
+def _send(registration, subject: str, lines: list[str]) -> bool:
+    """Plain-text mail to the registration's contact. Never fatal: the registration exists whether or not the mail leaves."""
+    message = EmailMultiAlternatives(subject, "\n\n".join(lines).strip() + "\n", settings.DEFAULT_FROM_EMAIL, [registration.foreign_contact_email])
+    try:
+        return send_message(message, fail_silently=False)
+    except OSError:
+        # Anything the mail backend raises for an unreachable server or a refused connection.
+        log.warning("tournaments.registration_mail_failed", exc_info=True)
+        return False
 
 
 def send_registration_confirmation_email(registration, *, request=None) -> bool:
-    # "request" rides along in the context for the .html template's own
-    # {% absolute_media_url %} use (the club's logo), same as registration's
-    # own send_registration_confirmation_email.
-    context = {
-        "club": registration.tournament.club,
-        "tournament": registration.tournament,
-        "registration": registration,
-        "contact_name": registration.foreign_contact_name,
-        "status_url": _status_url(registration, request=request),
-        "request": request,
-    }
-    subject = " ".join(render_to_string("tournaments/email/confirmation_subject.txt", context).split())
-    text_body = render_to_string("tournaments/email/confirmation.txt", context).strip() + "\n"
-    html_body = render_to_string("tournaments/email/confirmation.html", context)
-
-    message = EmailMultiAlternatives(subject, text_body, settings.DEFAULT_FROM_EMAIL, [registration.foreign_contact_email])
-    message.attach_alternative(html_body, "text/html")
-
-    try:
-        return send_message(message, fail_silently=False)
-    except OSError:
-        # Anything the mail backend raises for an unreachable server or a
-        # refused connection. The registration and its status page stand
-        # either way.
-        return False
+    club = _club()
+    club_name = club.name if club is not None else ""
+    tournament = registration.tournament
+    return _send(
+        registration,
+        " ".join((_("%(club)s: we received your registration for %(tournament)s") % {"club": club_name, "tournament": tournament.name}).split()),
+        [
+            _("Hi %(name)s,") % {"name": registration.foreign_contact_name},
+            _("We received the registration of %(team)s for %(tournament)s. We will review it and come back to you.") % {"team": registration.foreign_name, "tournament": tournament.name},
+            _("Follow your registration here: %(url)s") % {"url": _status_url(registration, request=request)},
+        ],
+    )
 
 
 def send_registration_decision_email(registration, *, request=None) -> bool:
-    """Sent once staff has approved or rejected a pending registration --
-    called from tournaments.services.registration's own
-    approve_registration/reject_registration, or the staff review queue that
-    calls those. One template set covering both outcomes (registration.status
-    picks the wording inside it, same "branch inside the template" shape
-    registration/templates/registration/status.html already uses for a
-    membership's status) rather than a template per outcome."""
-    context = {
-        "club": registration.tournament.club,
-        "tournament": registration.tournament,
-        "registration": registration,
-        "contact_name": registration.foreign_contact_name,
-        "status_url": _status_url(registration, request=request),
-        "request": request,
-    }
-    subject = " ".join(render_to_string("tournaments/email/decision_subject.txt", context).split())
-    text_body = render_to_string("tournaments/email/decision.txt", context).strip() + "\n"
-    html_body = render_to_string("tournaments/email/decision.html", context)
-
-    message = EmailMultiAlternatives(subject, text_body, settings.DEFAULT_FROM_EMAIL, [registration.foreign_contact_email])
-    message.attach_alternative(html_body, "text/html")
-
-    try:
-        return send_message(message, fail_silently=False)
-    except OSError:
-        return False
+    """Sent once staff has approved or rejected a pending registration. One wording covering both outcomes, picked by ``registration.status``."""
+    club = _club()
+    club_name = club.name if club is not None else ""
+    tournament = registration.tournament
+    names = {"club": club_name, "tournament": tournament.name, "team": registration.foreign_name}
+    if registration.status == registration.Status.APPROVED:
+        subject = _("%(club)s: your registration for %(tournament)s is approved") % names
+        body = _("Good news: the registration of %(team)s for %(tournament)s is approved.") % names
+    else:
+        subject = _("%(club)s: your registration for %(tournament)s was not accepted") % names
+        body = _("Unfortunately the registration of %(team)s for %(tournament)s was not accepted.") % names
+    lines = [_("Hi %(name)s,") % {"name": registration.foreign_contact_name}, body]
+    reason = getattr(registration, "rejection_reason", "")
+    if registration.status != registration.Status.APPROVED and reason:
+        lines.append(reason)
+    lines.append(_("Details: %(url)s") % {"url": _status_url(registration, request=request)})
+    return _send(registration, " ".join(subject.split()), lines)
 
 
 def notify_tournament_shifts_open(tournament_id):
@@ -109,7 +113,7 @@ def notify_tournament_shifts_open(tournament_id):
     uses) when there's no home_team, the home team's own TournamentTeam
     hasn't been created yet, there are no shifts defined, or the team has
     no members for this season to notify."""
-    tournament = Tournament.objects.filter(pk=tournament_id).select_related("club").first()
+    tournament = Tournament.objects.filter(pk=tournament_id).first()
     if tournament is None or tournament.home_team_id is None:
         return "Skipped: no tournament or no home team."
     if not tournament.tasks.exists():
@@ -126,12 +130,18 @@ def notify_tournament_shifts_open(tournament_id):
 
     body = _("“%(name)s” is published and needs volunteers for its shifts -- take a look and sign up for one that works for you.") % {"name": tournament.name}
     title = _("Volunteer shifts open: %(name)s") % {"name": tournament.name}
-    notifications = notify_members(members, club=tournament.club, title=title, body=body, source=tournament)
-    return f"Notified {len(notifications)} member(s)."
+    club = _club()
+    href = f"/tournaments/{tournament.pk}"
+    told = set()
+    for member in members:
+        for user in recipients.deliver(member, club, title=title, body=body, kind=inbox.Kind.INFO, href=href, push=True, category="event"):
+            told.add(user.pk)
+    return f"Notified {len(told)} user(s)."
 
 
 def dispatch_notify_tournament_shifts_open(tournament_id):
-    """Runs notify_tournament_shifts_open on a daemon background thread so
-    the request that just published the tournament doesn't wait on it --
-    see rosterchief.concurrency.run_in_background."""
-    run_in_background(notify_tournament_shifts_open, tournament_id)
+    """Queues the Celery task ``tournaments.notify_shifts_open`` after the commit so the request that just published the
+    tournament doesn't wait on it; it runs in the club schema it was queued from."""
+    from tournaments import tasks
+
+    transaction.on_commit(lambda: tasks.notify_shifts_open.delay(str(tournament_id)))
