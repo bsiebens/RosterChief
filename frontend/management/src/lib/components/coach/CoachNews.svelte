@@ -67,7 +67,7 @@
 		<article class="mx-auto grid max-w-2xl gap-4 px-6 py-6">
 			<p class="font-mono text-[11px] tracking-[.14em] text-muted uppercase">{(selected.teams ?? []).join(', ') || t('portal.news')}{#if selected.published_at} · {formatDay(selected.published_at)}{/if}</p>
 			<h2 class="font-display text-4xl leading-none font-extrabold text-ink uppercase">{translation(selected).title}</h2>
-			<div class="prose max-w-none text-base leading-relaxed">{@html translation(selected).body}</div>
+			<div class="news-body max-w-none text-base leading-relaxed text-slate">{@html translation(selected).body}</div>
 			{#each selected.photos.filter((image) => image !== cover) as image (image.url)}
 				<img class="w-full rounded-box object-cover" src={mediaPath(image.url)} style:object-position={image.object_position} alt="" loading="lazy" />
 			{/each}
