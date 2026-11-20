@@ -18,6 +18,7 @@ rc: release, deploy and provision RosterChief
   rc rollback ENV [--host NAME]           switch hosts back to their previous completed release
   rc status ENV                           role, running version and health of every host
   rc provision ENV --host NAME            prepare a new server (bootstrap) for the role listed in the environment file
+  rc maintenance ENV on|off               switch platform maintenance mode (rc deploy does this itself on production)
   rc proxy ENV on|off                     switch whether Caddy trusts Cloudflare's CF-Connecting-IP (updates the env file too)
 
 Options (where they apply):
@@ -85,7 +86,7 @@ cmd_release() {
     uv run python manage.py check
 
     echo
-    echo "About to: merge development into main, set the version to $version, tag $tag, push main and the tag,"
+    echo "About to: merge development into main, set the version to $version (backend and both frontend apps), tag $tag, push main and the tag,"
     echo "then fast-forward development to include the version commit. CI then builds and publishes the release."
     confirm "Proceed?" || die "Cancelled."
 
@@ -99,7 +100,13 @@ cmd_release() {
     run sed -i.bak -E "s/^version = \".*\"/version = \"$version\"/" pyproject.toml
     run rm -f pyproject.toml.bak
     run uv lock
-    run git add pyproject.toml uv.lock
+    local app
+    for app in management controlpanel; do
+        run npm --prefix "frontend/$app" version "$version" --no-git-tag-version --allow-same-version
+    done
+    run git add pyproject.toml uv.lock \
+        frontend/management/package.json frontend/management/package-lock.json \
+        frontend/controlpanel/package.json frontend/controlpanel/package-lock.json
     run git commit -m "Release $tag"
     run git tag -a "$tag" -m "RosterChief $tag"
     confirm "Push main and $tag to origin now? (This triggers the release build.)" || die "Not pushed. main and the tag exist locally; push them yourself, or delete the tag with: git tag -d $tag"
@@ -122,6 +129,42 @@ deployed_everywhere() (
     done
 )
 
+# Maintenance mode is one database switch, so it is set through the first backend (or full) host of the
+# environment, using the release that is running there now. Prints nothing and succeeds when no release
+# has completed yet (a first deploy has no platform to put in maintenance). Usage: set_maintenance on|off
+# Returns $MAINTENANCE_UNAVAILABLE when the running release has no maintenance command yet.
+MAINTENANCE_UNAVAILABLE=3
+set_maintenance() {
+    local state=$1 i
+    for i in $(select_hosts all ""); do
+        [[ ${H_ROLE[i]} != frontend ]] || continue
+        info "Maintenance mode $state (via ${H_NAME[i]})"
+        rc_run "$i" << REMOTE
+set -euo pipefail
+current=\$(readlink -f /opt/rosterchief/current 2> /dev/null || true)
+if [[ -z \$current || ! -f \$current/.ready ]]; then echo "No completed release on this host yet; maintenance mode skipped."; exit 0; fi
+status=0
+out=\$(systemd-run --quiet --wait --pipe --collect -p User=rosterchief -p Group=rosterchief \\
+    -p "WorkingDirectory=\$current" -p "EnvironmentFile=/etc/rosterchief/app.env" \\
+    "\$current/.venv/bin/python" "\$current/manage.py" maintenance $state 2>&1) || status=\$?
+[[ -z \$out ]] || echo "\$out"
+if [[ \$status != 0 ]] && grep -q "Unknown command" <<< "\$out"; then exit $MAINTENANCE_UNAVAILABLE; fi
+exit \$status
+REMOTE
+        return
+    done
+    die "Environment $ENV_NAME has no backend host to switch maintenance mode through."
+}
+
+cmd_maintenance() {
+    local env=${1:-} state=${2:-}
+    [[ -n $env && ( $state == on || $state == off ) ]] || usage
+    shift 2
+    parse_flags "$@"
+    load_env "$env"
+    set_maintenance "$state"
+}
+
 cmd_deploy() {
     local env=${1:-} tag=${2:-} i idx promote
     [[ -n $env && -n $tag ]] || usage
@@ -139,13 +182,33 @@ cmd_deploy() {
     echo "Deploying $tag to $ENV_NAME:"
     for i in $idx; do echo "  - $(describe_host "$i")"; done
     require_production_word || die "Cancelled."
+    local maintenance=0
+    [[ $ENV_NAME == *prod* ]] && maintenance=1
+    if [[ $maintenance == 1 ]]; then
+        local m_status=0
+        set_maintenance on || m_status=$?
+        if [[ $m_status == "$MAINTENANCE_UNAVAILABLE" ]]; then
+            warn "The release running on production has no maintenance command yet; deploying without maintenance mode."
+            maintenance=0
+        elif [[ $m_status != 0 ]]; then
+            die "Could not turn maintenance mode on. Nothing was deployed."
+        fi
+    fi
     for i in $idx; do
         info "$(describe_host "$i")"
         if ! printf 'rosterchief-deploy release %q\n' "$tag" | rc_run "$i"; then
+            [[ $maintenance == 0 ]] || warn "The platform is STILL IN MAINTENANCE MODE. Once it is healthy again: rc maintenance $ENV_NAME off"
             die "Deploy to ${H_NAME[i]} failed. Hosts after it were not touched. The host rolled itself back when it could; check with: rc status $ENV_NAME"
         fi
     done
     info "Done. Check on all hosts with: rc status $ENV_NAME"
+    if [[ $maintenance == 1 ]]; then
+        if confirm "Deploy finished and the platform is still in maintenance mode. Take it out of maintenance now?"; then
+            set_maintenance off || die "Could not turn maintenance mode off. Run: rc maintenance $ENV_NAME off"
+        else
+            warn "Leaving the platform in maintenance mode. When ready: rc maintenance $ENV_NAME off"
+        fi
+    fi
 }
 
 cmd_rollback() {
@@ -282,6 +345,7 @@ case $command in
     rollback) cmd_rollback "$@" ;;
     status) cmd_status "$@" ;;
     provision) cmd_provision "$@" ;;
+    maintenance) cmd_maintenance "$@" ;;
     proxy) cmd_proxy "$@" ;;
     -h | --help | help) usage ;;
     *) usage ;;

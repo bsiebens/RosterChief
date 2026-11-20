@@ -1626,3 +1626,47 @@ textarea[name="note"] {
 .dot-countdown { width: 0; animation: dot-countdown 6s linear forwards; }
 @keyframes dot-countdown { to { width: 100%; } }
 @media (prefers-reduced-motion: reduce) { .dot-countdown { width: 100%; animation: none; } }
+
+/* Rendered Markdown news body (portal, coach, management preview); Tailwind preflight strips list/heading styles. */
+.news-body p,
+.news-body ul,
+.news-body ol,
+.news-body blockquote,
+.news-body table {
+    margin-block: 0.6rem;
+}
+.news-body h1,
+.news-body h2,
+.news-body h3,
+.news-body h4 {
+    margin-block: 1rem 0.4rem;
+    font-family: var(--font-display);
+    font-weight: 800;
+    text-transform: uppercase;
+    color: var(--color-ink);
+}
+.news-body ul {
+    list-style: disc;
+    padding-left: 1.4rem;
+}
+.news-body ol {
+    list-style: decimal;
+    padding-left: 1.4rem;
+}
+.news-body blockquote {
+    border-left: 3px solid var(--color-club);
+    padding-left: 0.9rem;
+    color: var(--color-muted);
+}
+.news-body a {
+    color: var(--color-club-dark);
+    text-decoration: underline;
+}
+.news-body img {
+    max-width: 100%;
+}
+.news-body th,
+.news-body td {
+    border: 1px solid var(--color-line);
+    padding: 0.25rem 0.5rem;
+}
