@@ -234,7 +234,7 @@ const rows: [string, string, string, string][] = [
 	['tn.tiebreaker.won', 'Wins', 'Overwinningen', 'Victoires'],
 	['tn.tiebreaker.head_to_head', 'Head to head', 'Onderling resultaat', 'Confrontation directe'],
 	['tn.setup.breaks', 'Break rules', 'Pauzeregels', 'Règles de pause'],
-	['tn.setup.breaks_help', 'Longer breaks the schedule inserts on a field, for example after every four games or around noon.', 'Langere pauzes die het schema op een veld inlast, bijvoorbeeld na elke vier wedstrijden of rond de middag.', 'Pauses plus longues insérées par le calendrier sur un terrain, par exemple après chaque quatre matchs ou vers midi.'],
+	['tn.setup.breaks_help', 'Longer breaks the schedule inserts on a field, for example after every four games or around noon. Rules are tried from the top: use the arrows to change the order.', 'Langere pauzes die het schema op een veld inlast, bijvoorbeeld na elke vier wedstrijden of rond de middag. Regels worden van boven naar onder toegepast: wijzig de volgorde met de pijlen.', 'Pauses plus longues insérées par le calendrier sur un terrain, par exemple après chaque quatre matchs ou vers midi. Les règles sont appliquées de haut en bas : changez l’ordre avec les flèches.'],
 	['tn.setup.add_rule', 'Add break rule', 'Pauzeregel toevoegen', 'Ajouter une règle de pause'],
 	['tn.setup.edit_rule', 'Edit break rule', 'Pauzeregel bewerken', 'Modifier la règle de pause'],
 	['tn.setup.delete_rule', 'Delete break rule', 'Pauzeregel verwijderen', 'Supprimer la règle de pause'],
@@ -253,7 +253,8 @@ const rows: [string, string, string, string][] = [
 	['tn.setup.win_start', 'Window starts', 'Venster begint', 'Début de la plage'],
 	['tn.setup.win_end', 'Window ends', 'Venster eindigt', 'Fin de la plage'],
 	['tn.setup.gap_minutes', 'Break (minutes)', 'Pauze (minuten)', 'Pause (minutes)'],
-	['tn.setup.priority', 'Priority', 'Prioriteit', 'Priorité'],
+	['tn.setup.rule_up', 'Move up (tried earlier)', 'Naar boven (eerder toegepast)', 'Monter (appliquée plus tôt)'],
+	['tn.setup.rule_down', 'Move down (tried later)', 'Naar beneden (later toegepast)', 'Descendre (appliquée plus tard)'],
 	['tn.setup.replaces_gap', 'Replaces the normal gap between matches', 'Vervangt de normale tijd tussen wedstrijden', 'Remplace l’intervalle normal entre les matchs'],
 
 	// seeding, next phase

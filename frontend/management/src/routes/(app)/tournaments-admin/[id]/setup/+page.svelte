@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { Coffee, Layers, LayoutGrid, MapPin, Network, Pencil, Plus, Repeat, Shuffle, Swords, Trash2, Wrench, X, GitFork } from '@lucide/svelte';
+	import { ArrowDown, ArrowUp, Coffee, Layers, LayoutGrid, MapPin, Network, Pencil, Plus, Repeat, Shuffle, Swords, Trash2, Wrench, X, GitFork } from '@lucide/svelte';
+	import { invalidateAll } from '$app/navigation';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
@@ -82,6 +83,18 @@
 		};
 		if (await (editStage ? run.patch(`${base}/stages/${editStage.id}`, body) : run.post(`${base}/stages`, body))) stageOpen = false;
 	}
+	/** Rules are tried in list order, top first. Moving one renumbers the priorities to match, changing only the rules whose number differs. */
+	async function moveRule(i: number, by: -1 | 1) {
+		const list = [...(setup?.break_rules ?? [])];
+		const j = i + by;
+		if (j < 0 || j >= list.length) return;
+		[list[i], list[j]] = [list[j], list[i]];
+		for (const [k, r] of list.entries()) {
+			if (r.priority === k) continue;
+			if (!(await run.patch(`${base}/break-rules/${r.id}`, { priority: k }, undefined, { reload: false }))) break;
+		}
+		await invalidateAll();
+	}
 	async function removeStage() {
 		if (delStage && (await run.del(`${base}/stages/${delStage.id}`))) delStageOpen = false;
 	}
@@ -89,8 +102,8 @@
 	const generate = (s: StageDoc) => run.post<{ generated_count: number }>(`${base}/stages/${s.id}/generate-matches`, placement[s.id] ? { with_placement: true } : {}, (d) => void (run.notice = t('tn.setup.generated', { n: d?.generated_count ?? 0 })), { notice: '' });
 
 	// --- break rules
-	type RuleForm = { field_id: string; trigger_type: string; every_games: string; every_minutes: string; after_round: string; win_start: string; win_end: string; gap_minutes: string; replaces_default_gap: boolean; priority: string };
-	const blankRule = (): RuleForm => ({ field_id: '', trigger_type: 'game_count', every_games: '', every_minutes: '', after_round: '', win_start: '', win_end: '', gap_minutes: '', replaces_default_gap: false, priority: '' });
+	type RuleForm = { field_id: string; trigger_type: string; every_games: string; every_minutes: string; after_round: string; win_start: string; win_end: string; gap_minutes: string; replaces_default_gap: boolean };
+	const blankRule = (): RuleForm => ({ field_id: '', trigger_type: 'game_count', every_games: '', every_minutes: '', after_round: '', win_start: '', win_end: '', gap_minutes: '', replaces_default_gap: false });
 	let ruleOpen = $state(false);
 	let editRule = $state<BreakRule | null>(null);
 	let rf = $state<RuleForm>(blankRule());
@@ -100,7 +113,7 @@
 	function openRule(r: BreakRule | null) {
 		editRule = r;
 		rf = r
-			? { field_id: r.field_id ?? '', trigger_type: r.trigger_type, every_games: s(r.trigger_every_n_games), every_minutes: s(r.trigger_every_n_minutes), after_round: s(r.trigger_after_round_number), win_start: r.trigger_window_start ?? '', win_end: r.trigger_window_end ?? '', gap_minutes: s(r.gap_minutes), replaces_default_gap: r.replaces_default_gap, priority: s(r.priority) }
+			? { field_id: r.field_id ?? '', trigger_type: r.trigger_type, every_games: s(r.trigger_every_n_games), every_minutes: s(r.trigger_every_n_minutes), after_round: s(r.trigger_after_round_number), win_start: r.trigger_window_start ?? '', win_end: r.trigger_window_end ?? '', gap_minutes: s(r.gap_minutes), replaces_default_gap: r.replaces_default_gap }
 			: blankRule();
 		run.clear();
 		ruleOpen = true;
@@ -117,7 +130,8 @@
 			trigger_window_end: rf.trigger_type === 'clock_window' ? strOrNull(rf.win_end) : null,
 			gap_minutes: numOrNull(rf.gap_minutes),
 			replaces_default_gap: rf.replaces_default_gap,
-			priority: numOrNull(rf.priority)
+			// A new rule goes last; the order of the rules is then set with the arrows in the list.
+			...(editRule ? {} : { priority: setup?.break_rules?.length ? Math.max(...setup.break_rules.map((r) => r.priority ?? 0)) + 1 : 0 })
 		};
 		if (await (editRule ? run.patch(`${base}/break-rules/${editRule.id}`, body) : run.post(`${base}/break-rules`, body))) ruleOpen = false;
 	}
@@ -206,13 +220,17 @@
 				{#if canOperate}<button class="btn btn-outline btn-sm gap-1" type="button" onclick={() => openRule(null)}><Plus size={14} /> {t('tn.setup.add_rule')}</button>{/if}
 			</div>
 			<p class="text-xs text-muted">{t('tn.setup.breaks_help')}</p>
-			{#each setup.break_rules as r (r.id)}
+			{#each setup.break_rules as r, i (r.id)}
 				<div class="flex flex-wrap items-center gap-3 rounded-lg border border-line p-3">
 					<div class="min-w-0 flex-1">
 						<span class="text-sm text-ink">{r.summary}</span>
 						<p class="font-mono text-xs text-muted">{fieldName_(r.field_id)}</p>
 					</div>
 					{#if canOperate}
+						<span class="flex items-center gap-0.5">
+							<button class="btn btn-ghost btn-xs btn-square" type="button" disabled={i === 0 || run.busy} aria-label={t('tn.setup.rule_up')} title={t('tn.setup.rule_up')} onclick={() => moveRule(i, -1)}><ArrowUp size={14} /></button>
+							<button class="btn btn-ghost btn-xs btn-square" type="button" disabled={i === setup.break_rules.length - 1 || run.busy} aria-label={t('tn.setup.rule_down')} title={t('tn.setup.rule_down')} onclick={() => moveRule(i, 1)}><ArrowDown size={14} /></button>
+						</span>
 						<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.setup.edit_rule')} onclick={() => openRule(r)}><Pencil size={13} /></button>
 						<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.setup.delete_rule')} onclick={() => { delRule = r; run.clear(); delRuleOpen = true; }}><Trash2 size={13} /></button>
 					{/if}
@@ -325,7 +343,6 @@
 		{/if}
 		<div class="grid grid-cols-2 gap-3">
 			<Field label={t('tn.setup.gap_minutes')} type="number" min="0" bind:value={rf.gap_minutes} error={run.fields.gap_minutes} />
-			<Field label={t('tn.setup.priority')} type="number" bind:value={rf.priority} error={run.fields.priority} />
 		</div>
 		<label class="flex cursor-pointer items-center gap-3 rounded-lg border border-line p-3"><input type="checkbox" class="checkbox" bind:checked={rf.replaces_default_gap} /><span class="text-sm">{t('tn.setup.replaces_gap')}</span></label>
 		<div class="modal-action mt-2 flex justify-end gap-2">

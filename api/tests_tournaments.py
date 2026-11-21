@@ -265,6 +265,19 @@ class TournamentApiTests(TestCase):
         self.assertFalse(entries["Coach"]["age_flagged"])
         self.assertTrue(self.as_("operate", "get", f"/{t.pk}/teams").json()["results"][0]["has_age_flag"])
 
+    def test_break_rules_are_listed_in_priority_order_and_can_be_reordered(self):
+        t = self.make()
+        body = {"trigger_type": "game_count", "trigger_every_n_games": 4, "gap_minutes": 10}
+        ids = [self.as_("operate", "post", f"/{t.pk}/break-rules", {**body, "priority": n}).json()["id"] for n in (0, 1, 2)]
+        order = lambda: [r["id"] for r in self.as_("operate", "get", f"/{t.pk}/setup").json()["break_rules"]]  # noqa: E731
+        self.assertEqual(order(), ids)
+        # moving the first rule down is two partial updates that renumber the priorities
+        self.assertEqual(self.as_("operate", "patch", f"/{t.pk}/break-rules/{ids[0]}", {"priority": 1}).status_code, 200)
+        self.assertEqual(self.as_("operate", "patch", f"/{t.pk}/break-rules/{ids[1]}", {"priority": 0}).status_code, 200)
+        self.assertEqual(order(), [ids[1], ids[0], ids[2]])
+        # the rest of the rule is left alone by a priority-only update
+        self.assertEqual(self.as_("operate", "get", f"/{t.pk}/setup").json()["break_rules"][0]["gap_minutes"], 10)
+
     def test_delete_only_a_draft_tournament(self):
         body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}
         tid = self.as_("manage", "post", "", body).json()["id"]

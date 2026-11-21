@@ -83,7 +83,7 @@ def setup(request, tournament_id: uuid.UUID):
     stages = list(t.stages.all())
     return {
         "fields": [field_out(f) for f in t.fields.all()], "stages": [_stage_doc(s, len(stages)) for s in stages],
-        "break_rules": [rule_out(r) for r in t.break_rules.select_related("field")], "dates": t.date_range(),
+        "break_rules": [rule_out(r) for r in t.break_rules.select_related("field").order_by("priority", "pk")]  # the order the scheduler tries them in, "dates": t.date_range(),
     }  # fmt: skip
 
 
