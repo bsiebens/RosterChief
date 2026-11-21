@@ -20,7 +20,7 @@ from events.models import Attendance, Event, Season
 from features.entitlements import Entitlement, Entitlements
 from members.models import Member
 from teams.models import Position, StaffAssignment, Team, TeamMembership
-from tournaments.models import Match, Tournament, TournamentField, TournamentTask, TournamentTeam
+from tournaments.models import Match, Tournament, TournamentField, TournamentRosterEntry, TournamentTask, TournamentTeam
 
 BASE = "/api/v1"
 WITH = Entitlements({"tournaments": Entitlement(True)})
@@ -246,6 +246,24 @@ class TournamentApiTests(TestCase):
         team.roster_entries.all().delete()
         self.as_("manage", "patch", f"/{tid}", {"max_teams": 6})
         self.assertEqual(team.roster_entries.count(), 0)
+
+    def test_roster_entries_of_members_carry_their_name_birth_date_and_licence(self):
+        t = self.make(earliest_birth_year=2012, latest_birth_year=2016)
+        team = TournamentTeam.objects.create(tournament=t, team=self.club_team)
+        with schema_context(self.club.schema_name):
+            kid = Member.objects.create(first_name="Kim", last_name="Kid", date_of_birth=datetime.date(2010, 5, 1), license_number="L-42")
+            coach = Member.objects.create(first_name="Cora", last_name="Coach", date_of_birth=datetime.date(1980, 1, 1), license_number="L-7")
+        TournamentRosterEntry.objects.create(tournament_team=team, member=kid, jersey_number=9, position_label="Forward")
+        TournamentRosterEntry.objects.create(tournament_team=team, member=coach, role="staff", position_label="Head coach")
+        r = self.as_("operate", "get", f"/{t.pk}/teams/{team.pk}/roster")
+        self.assertEqual(r.status_code, 200, r.content)
+        entries = {e["last_name"]: e for e in r.json()["entries"]}
+        self.assertEqual((entries["Kid"]["first_name"], entries["Kid"]["date_of_birth"], entries["Kid"]["license_number"]), ("Kim", "2010-05-01", "L-42"))
+        self.assertTrue(entries["Kid"]["age_flagged"])  # born 2010, the tournament takes 2012-2016
+        self.assertEqual((entries["Coach"]["first_name"], entries["Coach"]["position_label"]), ("Cora", "Head coach"))
+        self.assertIsNone(entries["Coach"]["date_of_birth"])  # staff has none
+        self.assertFalse(entries["Coach"]["age_flagged"])
+        self.assertTrue(self.as_("operate", "get", f"/{t.pk}/teams").json()["results"][0]["has_age_flag"])
 
     def test_delete_only_a_draft_tournament(self):
         body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}

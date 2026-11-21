@@ -238,7 +238,7 @@ def _team(team_id) -> TournamentTeam:
 def teams(request, tournament_id: uuid.UUID):
     c.gate_view(request)
     t = c.get_tournament(tournament_id)
-    rows = list(t.teams.select_related("team").prefetch_related("roster_entries"))
+    rows = list(t.teams.select_related("team").prefetch_related("roster_entries__member"))
     for row in rows:
         row.tournament = t
     return {"results": [c.team_out(row, t) for row in rows], "payment_statuses": [v for v, _label in TournamentTeam.PaymentStatus.choices]}

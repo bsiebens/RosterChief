@@ -116,7 +116,7 @@ def team_ref(team) -> dict | None:
 
 
 def team_out(team: TournamentTeam, tournament: Tournament, entries=None) -> dict:
-    entries = list(team.roster_entries.all()) if entries is None else entries
+    entries = list(team.roster_entries.select_related("member")) if entries is None else entries
     return {
         **team_ref(team),
         "club_team": ref(team.team),
@@ -127,20 +127,32 @@ def team_out(team: TournamentTeam, tournament: Tournament, entries=None) -> dict
         "registration_id": team.registration_id,
         "player_count": sum(1 for e in entries if e.role == TournamentRosterRole.PLAYER),
         "staff_count": sum(1 for e in entries if e.role == TournamentRosterRole.STAFF),
-        "has_age_flag": any(tournament.birth_year_out_of_range(e.date_of_birth) for e in entries),
+        "has_age_flag": any(tournament.birth_year_out_of_range(effective_dob(e)) for e in entries),
     }
+
+
+def effective_dob(row):
+    """A roster entry's date of birth, else (for a club member playing) the one on their member record. Staff has none."""
+    if row.date_of_birth is not None or not getattr(row, "member_id", None) or row.role != TournamentRosterRole.PLAYER:
+        return row.date_of_birth
+    return row.member.date_of_birth
 
 
 def person_out(row, tournament: Tournament) -> dict:
     """A roster entry or a registration player row (same shape; ``member_id`` is only set on roster entries of club members)."""
     is_entry = hasattr(row, "member_id")
-    first = row.foreign_first_name if is_entry and not row.member_id else getattr(row, "first_name", "")
-    last = row.foreign_last_name if is_entry and not row.member_id else getattr(row, "last_name", "")
+    member = row.member if is_entry and row.member_id else None
+    if is_entry:  # a club member's name lives on their member record, a guest's on the entry
+        first, last = (member.first_name, member.last_name) if member else (row.foreign_first_name, row.foreign_last_name)
+    else:
+        first, last = row.first_name, row.last_name
+    dob = effective_dob(row) if is_entry else row.date_of_birth
+    license_number = row.license_number or ((member.license_number or "") if member else "")
     return {
         "id": row.pk, "member_id": row.member_id if is_entry else None, "name": row.display_name if is_entry else f"{first} {last}".strip(),
         "first_name": first, "last_name": last, "jersey_number": row.jersey_number, "role": row.role, "position_label": row.position_label,
-        "date_of_birth": row.date_of_birth, "license_number": row.license_number, "dietary_restrictions": row.dietary_restrictions,
-        "lunch_days": row.lunch_days, "age_flagged": tournament.birth_year_out_of_range(row.date_of_birth),
+        "date_of_birth": dob, "license_number": license_number, "dietary_restrictions": row.dietary_restrictions,
+        "lunch_days": row.lunch_days, "age_flagged": tournament.birth_year_out_of_range(dob),
     }
 
 
