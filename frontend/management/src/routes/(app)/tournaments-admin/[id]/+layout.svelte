@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { t } from '#lib/i18n.svelte.ts';
-	import { fmtDateRange, statusBadge, TBASE } from '#lib/tournaments.svelte.ts';
+	import { TBASE } from '#lib/tournaments.svelte.ts';
 
 	let { data, children } = $props();
 	const tn = $derived(data.tournament);
@@ -21,14 +21,6 @@
 	);
 	const isActive = (key: string) => (key === '' ? page.url.pathname === base : page.url.pathname.startsWith(base + key));
 </script>
-
-<div class="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1">
-	<a class="link text-sm text-muted" href={TBASE}>{t('tn.title')}</a>
-	<span class="text-muted">/</span>
-	<strong class="font-display text-ink">{tn.name}</strong>
-	<span class="badge badge-sm {statusBadge(tn.status)}">{t(`tn.status.${tn.status}`)}</span>
-	<span class="font-mono text-xs text-muted">{fmtDateRange(tn.start_date, tn.end_date)}</span>
-</div>
 
 <nav class="card mb-5 overflow-x-auto px-3" aria-label={t('tn.tabs_label')}>
 	<div class="flex min-w-max">

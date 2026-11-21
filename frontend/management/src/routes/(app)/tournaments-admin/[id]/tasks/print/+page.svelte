@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { ArrowLeft, Printer } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
@@ -9,7 +10,7 @@
 	let { data } = $props();
 	const tn = $derived(data.tournament);
 
-	usePageHeader(() => ({ title: tn.name, context: t('tn.tasks.print'), actions }));
+	usePageHeader(() => ({ badge: statusPill, title: tn.name, context: t('tn.tasks.print'), actions }));
 </script>
 
 {#snippet actions()}

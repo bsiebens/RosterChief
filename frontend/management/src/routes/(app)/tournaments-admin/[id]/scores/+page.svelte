@@ -3,6 +3,7 @@
 	import Alert from '#lib/components/Alert.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import Toast from '#lib/components/Toast.svelte';
+	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
@@ -31,7 +32,7 @@
 	const nextRound = (stageId: string) => run.post<{ generated_count: number }>(`/tournaments/${tn.id}/stages/${stageId}/swiss/next-round`, {}, (d) => void (run.notice = t('tn.scores.generated', { n: d?.generated_count ?? 0 })), { notice: '' });
 	const done = (x: MatchDoc) => x.score_home !== null && x.score_away !== null;
 
-	usePageHeader(() => ({ title: tn.name, context: t('tn.tab.scores') }));
+	usePageHeader(() => ({ badge: statusPill, title: tn.name, context: t('tn.tab.scores') }));
 </script>
 
 <svelte:head><title>{pageTitle(t('tn.tab.scores'))}</title></svelte:head>

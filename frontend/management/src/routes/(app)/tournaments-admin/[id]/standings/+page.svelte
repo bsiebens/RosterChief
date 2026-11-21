@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Medal, Swords } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
@@ -10,7 +11,7 @@
 	const s = $derived(data.standings);
 	const score = (m: { score_home: number | null; score_away: number | null }) => (m.score_home === null || m.score_away === null ? 'vs' : `${m.score_home} – ${m.score_away}`);
 
-	usePageHeader(() => ({ title: tn.name, context: t('tn.tab.standings') }));
+	usePageHeader(() => ({ badge: statusPill, title: tn.name, context: t('tn.tab.standings') }));
 </script>
 
 <svelte:head><title>{pageTitle(t('tn.tab.standings'))}</title></svelte:head>

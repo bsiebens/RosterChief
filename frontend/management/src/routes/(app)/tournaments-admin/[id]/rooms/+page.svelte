@@ -3,6 +3,7 @@
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
+	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
@@ -31,7 +32,7 @@
 	}
 	const release = (id: string) => run.del(`${base}/assignments/${id}`);
 
-	usePageHeader(() => ({ title: tn.name, context: t('tn.tab.rooms') }));
+	usePageHeader(() => ({ badge: statusPill, title: tn.name, context: t('tn.tab.rooms') }));
 </script>
 
 <svelte:head><title>{pageTitle(t('tn.tab.rooms'))}</title></svelte:head>

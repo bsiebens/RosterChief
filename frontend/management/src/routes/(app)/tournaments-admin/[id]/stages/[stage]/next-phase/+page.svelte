@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { ArrowDown, ArrowLeft, ArrowUp, ListOrdered } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
@@ -43,7 +44,7 @@
 		}, { reload: false });
 	}
 
-	usePageHeader(() => ({ title: tn.name, context: t('tn.next.title') }));
+	usePageHeader(() => ({ badge: statusPill, title: tn.name, context: t('tn.next.title') }));
 </script>
 
 <svelte:head><title>{pageTitle(t('tn.next.title'))}</title></svelte:head>

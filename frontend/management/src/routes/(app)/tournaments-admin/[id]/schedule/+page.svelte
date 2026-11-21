@@ -5,6 +5,7 @@
 	import Modal from '#lib/components/Modal.svelte';
 	import ScheduleBoard from '#lib/components/tournaments/ScheduleBoard.svelte';
 	import Toast from '#lib/components/Toast.svelte';
+	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
@@ -67,7 +68,7 @@
 		if (delBlock && (await run.del(`${base}/schedule-blocks/${delBlock.id}`))) delOpen = false;
 	}
 
-	usePageHeader(() => ({ title: tn.name, context: t('tn.tab.schedule') }));
+	usePageHeader(() => ({ badge: statusPill, title: tn.name, context: t('tn.tab.schedule') }));
 </script>
 
 <svelte:head><title>{pageTitle(t('tn.tab.schedule'))}</title></svelte:head>

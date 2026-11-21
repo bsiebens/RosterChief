@@ -5,6 +5,7 @@
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import Toast from '#lib/components/Toast.svelte';
+	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
@@ -60,7 +61,7 @@
 	}
 	const unclaim = (task: TaskDoc, claimId: string) => run.del(`${base}/${task.id}/claims/${claimId}`);
 
-	usePageHeader(() => ({ title: tn.name, context: t('tn.tasks.count', { n: data.tasks.length }), actions }));
+	usePageHeader(() => ({ badge: statusPill, title: tn.name, context: t('tn.tasks.count', { n: data.tasks.length }), actions }));
 </script>
 
 {#snippet actions()}

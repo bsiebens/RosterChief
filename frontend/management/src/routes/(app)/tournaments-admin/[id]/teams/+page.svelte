@@ -4,6 +4,7 @@
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import Toast from '#lib/components/Toast.svelte';
+	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { api } from '#lib/management-api.ts';
@@ -52,7 +53,7 @@
 	}
 	const sorted = $derived([...data.rows].sort((a, b) => Number(!!a.withdrawn_at) - Number(!!b.withdrawn_at)));
 
-	usePageHeader(() => ({ title: tn.name, context: t('tn.teams.count', { n: data.rows.filter((r) => !r.withdrawn_at).length }), actions }));
+	usePageHeader(() => ({ badge: statusPill, title: tn.name, context: t('tn.teams.count', { n: data.rows.filter((r) => !r.withdrawn_at).length }), actions }));
 </script>
 
 {#snippet actions()}

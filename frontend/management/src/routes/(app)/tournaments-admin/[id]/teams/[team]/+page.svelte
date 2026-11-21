@@ -3,6 +3,7 @@
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
+	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
@@ -55,7 +56,7 @@
 	/** Lunch days can also be flipped straight in the table when lunch is optional. */
 	const setLunch = (p: Person, day: string, on: boolean) => run.put(`${base}/roster/${p.id}/lunch`, { lunch_days: on ? [...p.lunch_days, day] : p.lunch_days.filter((d) => d !== day) });
 
-	usePageHeader(() => ({ title: roster?.team.name ?? tn.name, context: tn.name, actions }));
+	usePageHeader(() => ({ badge: statusPill, title: roster?.team.name ?? tn.name, context: tn.name, actions }));
 </script>
 
 {#snippet actions()}

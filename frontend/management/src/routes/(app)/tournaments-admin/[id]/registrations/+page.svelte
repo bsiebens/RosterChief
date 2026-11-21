@@ -2,6 +2,7 @@
 	import { Check, ChevronDown, ClipboardList, X } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Modal from '#lib/components/Modal.svelte';
+	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
@@ -22,7 +23,7 @@
 		if (await run.post(`/tournaments/registrations/${rejecting.id}/reject`, { reason: reason.trim() })) rejectOpen = false;
 	}
 
-	usePageHeader(() => ({ title: tn.name, context: t('tn.tab.registrations') }));
+	usePageHeader(() => ({ badge: statusPill, title: tn.name, context: t('tn.tab.registrations') }));
 </script>
 
 <svelte:head><title>{pageTitle(t('tn.tab.registrations'))}</title></svelte:head>

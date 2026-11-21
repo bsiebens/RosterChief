@@ -4,6 +4,7 @@
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import Toast from '#lib/components/Toast.svelte';
+	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
@@ -118,7 +119,7 @@
 	}
 	const fieldName_ = (id: string | null) => setup?.fields.find((f) => f.id === id)?.name ?? t('tn.setup.all_fields');
 
-	usePageHeader(() => ({ title: tn.name, context: t('tn.tab.setup') }));
+	usePageHeader(() => ({ badge: statusPill, title: tn.name, context: t('tn.tab.setup') }));
 </script>
 
 <svelte:head><title>{pageTitle(t('tn.tab.setup'))}</title></svelte:head>

@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { ArrowLeft, Swords } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
@@ -42,7 +43,7 @@
 	/** Fill the slots in the order of the entered teams (a quick start). */
 	const fillInOrder = () => seed && (slots = slots.map((s, i) => ({ ...s, type: 'team', team_id: seed.teams[i]?.id ?? '' })));
 
-	usePageHeader(() => ({ title: tn.name, context: t('tn.seed.title') }));
+	usePageHeader(() => ({ badge: statusPill, title: tn.name, context: t('tn.seed.title') }));
 </script>
 
 <svelte:head><title>{pageTitle(t('tn.seed.title'))}</title></svelte:head>

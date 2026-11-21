@@ -5,6 +5,7 @@
 	import TournamentFields from '#lib/components/tournaments/TournamentFields.svelte';
 	import TournamentSummary from '#lib/components/tournaments/TournamentSummary.svelte';
 	import Toast from '#lib/components/Toast.svelte';
+	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
@@ -28,7 +29,7 @@
 		return run.patch(`/tournaments/${tn.id}`, body, undefined, { notice: t('tn.saved') });
 	};
 
-	usePageHeader(() => ({ title: tn.name, context: t('tn.tab.settings') }));
+	usePageHeader(() => ({ badge: statusPill, title: tn.name, context: t('tn.tab.settings') }));
 </script>
 
 <svelte:head><title>{pageTitle(tn.name)}</title></svelte:head>
