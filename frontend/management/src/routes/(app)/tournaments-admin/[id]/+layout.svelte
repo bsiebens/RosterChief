@@ -30,16 +30,18 @@
 	<span class="font-mono text-xs text-muted">{fmtDateRange(tn.start_date, tn.end_date)}</span>
 </div>
 
-<nav class="mb-5 flex gap-1 overflow-x-auto pb-1" aria-label={t('tn.tabs_label')}>
-	{#each tabs as tab (tab.key)}
-		<a
-			href="{base}{tab.key}"
-			aria-current={isActive(tab.key) ? 'page' : undefined}
-			class="flex items-center gap-1.5 rounded-md px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] whitespace-nowrap uppercase {isActive(tab.key) ? 'border border-ink bg-ink text-white' : 'border border-line text-muted hover:text-ink'}">
-			{tab.label}
-			{#if tab.count}<span class="badge badge-warning badge-xs">{tab.count}</span>{/if}
-		</a>
-	{/each}
+<nav class="card mb-5 overflow-x-auto px-3" aria-label={t('tn.tabs_label')}>
+	<div class="flex min-w-max">
+		{#each tabs as tab (tab.key)}
+			<a
+				href="{base}{tab.key}"
+				aria-current={isActive(tab.key) ? 'page' : undefined}
+				class="-mb-px flex items-center gap-2 border-b-2 px-4 py-3.5 font-display text-sm font-bold tracking-[.08em] whitespace-nowrap uppercase focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-club {isActive(tab.key) ? 'border-club text-ink' : 'border-transparent text-muted hover:text-ink'}">
+				{tab.label}
+				{#if tab.count}<span class="badge badge-warning badge-xs">{tab.count}</span>{/if}
+			</a>
+		{/each}
+	</div>
 </nav>
 
 {@render children()}
