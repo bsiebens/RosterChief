@@ -87,6 +87,7 @@ export type TeamDoc = {
 	club_team: { id: string; name: string } | null;
 	is_foreign: boolean;
 	is_home_team: boolean;
+	event_id: string | null;
 	contact_name: string;
 	contact_email: string;
 	contact_phone: string;

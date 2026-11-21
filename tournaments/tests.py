@@ -28,6 +28,7 @@ from .models import (
     MatchReferee,
     ScheduleBlock,
     Tournament,
+    TournamentDay,
     TournamentField,
     TournamentGroup,
     TournamentRegistration,
@@ -861,19 +862,19 @@ class ApproveRegistrationServiceTests(TournamentsTestCase):
         self.assertEqual(roster["Sam Striker"].jersey_number, 9)
         self.assertIsNone(roster["Dee Fender"].jersey_number)
 
-    def test_approving_a_club_team_registration_snapshots_the_season_roster(self):
+    def test_approving_a_club_team_registration_gives_it_an_event_and_its_staff_but_no_snapshot_of_the_team(self):
         reviewer = make_user("staff@example.com")
-        position = Position.objects.create(name="Forward", short_name="FW")
-        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, position=position, jersey_number=7)
+        coach = Member.objects.create(first_name="Coach", last_name="Carter")
+        head_coach = Position.objects.create(name="Head coach", short_name="HC", staff_position=True)
+        StaffAssignment.objects.create(team=self.team, member=coach, season=self.season, position=head_coach)
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=7)
         registration = TournamentRegistration.objects.create(tournament=self.tournament, team=self.team)
 
         team = approve_registration(registration, reviewed_by=reviewer)
 
-        roster = list(team.roster_entries.all())
-        self.assertEqual(len(roster), 1)
-        self.assertEqual(roster[0].member, self.member)
-        self.assertEqual(roster[0].jersey_number, 7)
-        self.assertEqual(roster[0].position_label, "Forward")
+        self.assertIsNotNone(team.event)  # its own calendar event: the line-up there decides the players
+        self.assertEqual(list(team.event.teams.all()), [self.team])
+        self.assertEqual([(e.member_id, e.role) for e in team.roster_entries.all()], [(coach.pk, TournamentRosterRole.STAFF)])
 
     def test_approving_a_club_team_registration_does_not_use_another_seasons_roster(self):
         reviewer = make_user("staff@example.com")
@@ -1006,27 +1007,18 @@ class DeleteManualTeamServiceTests(TournamentsTestCase):
 
 
 class CreateManualTeamServiceTests(TournamentsTestCase):
-    def test_a_club_team_gets_created_with_registration_left_null_and_its_roster_snapshotted(self):
-        position = Position.objects.create(name="Forward", short_name="FW")
-        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, position=position, jersey_number=7)
+    def test_a_club_team_gets_created_with_registration_left_null_and_its_own_event(self):
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=7)
 
         team = create_manual_team(self.tournament, club_team=self.team)
 
         self.assertEqual(team.tournament, self.tournament)
         self.assertEqual(team.team, self.team)
         self.assertIsNone(team.registration)
-        roster = list(team.roster_entries.all())
-        self.assertEqual(len(roster), 1)
-        self.assertEqual(roster[0].member, self.member)
-        self.assertEqual(roster[0].jersey_number, 7)
-        self.assertEqual(roster[0].position_label, "Forward")
-
-    def test_snapshot_roster_false_skips_the_teammembership_dump(self):
-        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season)
-
-        team = create_manual_team(self.tournament, club_team=self.team, snapshot_roster=False)
-
-        self.assertEqual(team.roster_entries.count(), 0)
+        self.assertEqual(team.payment_status, TournamentTeam.PaymentStatus.FULLY_PAID)
+        self.assertEqual(team.event.kind, Event.EventKind.TOURNAMENT)
+        self.assertEqual(list(team.event.teams.all()), [self.team])
+        self.assertEqual(team.roster_entries.count(), 0)  # the players come from the line-up, not from a dump of the whole team
 
     def test_a_foreign_team_gets_created_from_the_given_fields_with_no_roster(self):
         team = create_manual_team(self.tournament, foreign_fields={"foreign_name": "Walk-up FC", "foreign_contact_email": "walkup@example.com"})
@@ -1087,18 +1079,11 @@ class EnsureHomeTeamServiceTests(TournamentsTestCase):
         self.tournament.refresh_from_db()
         self.assertEqual(self.tournament.event_id, first_event_id)
 
-    def test_a_pre_existing_teams_stale_roster_snapshot_gets_purged(self):
-        # Reproduces a real bug: a team added by hand via "Add team" *before*
-        # being made the home team already got a full TeamMembership
-        # snapshot (correct for that path) -- ensure_home_team's own
-        # "does this TournamentTeam already exist" check used to leave that
-        # snapshot untouched forever, since nothing about becoming the home
-        # team itself ever prompted a re-sync.
-        other_member = Member.objects.create(first_name="Not", last_name="Selected")
-        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season)
-        TeamMembership.objects.create(team=self.team, member=other_member, season=self.season)
-        team = create_manual_team(self.tournament, club_team=self.team)  # snapshot_roster defaults True
-        self.assertEqual(team.roster_entries.count(), 2)
+    def test_a_pre_existing_teams_players_that_are_not_picked_get_purged(self):
+        # A team entered before it was the home team (or before rosters followed the line-up) can hold players nobody picked.
+        team = create_manual_team(self.tournament, club_team=self.team)
+        TournamentRosterEntry.objects.create(tournament_team=team, member=self.member)
+        self.assertEqual(team.roster_entries.count(), 1)
 
         self.tournament.home_team = self.team
         self.tournament.save(update_fields=["home_team"])
@@ -3143,3 +3128,88 @@ class RosterPdfTests(TournamentsTestCase):
         self.assertIn("Cora Coach", html.split("<h2>Staff</h2>")[1])
         self.assertNotIn("Cora Coach", html.split("<h2>Staff</h2>")[0])
         self.assertIn("4 May 2011", html)
+
+
+class ClubTeamEventTests(TournamentsTestCase):
+    """Every club team in a tournament has its own calendar event, whose line-up decides its roster, like the home team's."""
+
+    def setUp(self):
+        self.tournament.home_team = self.team
+        self.tournament.save(update_fields=["home_team"])
+        self.home = ensure_home_team(self.tournament)
+        self.tournament.refresh_from_db()
+        self.other_team = Team.objects.create(name="Sharks U18", short_name="U18")
+
+    def add(self):
+        return create_manual_team(self.tournament, club_team=self.other_team)
+
+    def test_the_home_teams_event_is_the_tournaments_own_and_another_team_gets_its_own(self):
+        other = self.add()
+
+        self.assertEqual(self.home.event_id, self.tournament.event_id)
+        self.assertNotEqual(other.event_id, self.tournament.event_id)
+        self.assertEqual(other.event.title, f"{self.tournament.name} — Sharks U18")
+        self.assertEqual(list(other.event.teams.all()), [self.other_team])
+        self.assertEqual(list(self.home.event.teams.all()), [self.team])
+
+    def test_a_guest_team_has_no_event(self):
+        guest = create_manual_team(self.tournament, foreign_fields={"foreign_name": "Walk-up FC", "foreign_contact_email": "w@example.com"})
+
+        self.assertIsNone(guest.event)
+
+    def test_another_teams_staff_is_copied_once_and_its_players_follow_its_own_line_up(self):
+        coach = Member.objects.create(first_name="Coach", last_name="Eighteen")
+        head_coach = Position.objects.create(name="Head coach", short_name="HC", staff_position=True)
+        StaffAssignment.objects.create(team=self.other_team, member=coach, season=self.season, position=head_coach)
+        TeamMembership.objects.create(team=self.other_team, member=self.member, season=self.season, jersey_number=18)
+        other = self.add()
+        self.assertEqual([(e.member_id, e.role) for e in other.roster_entries.all()], [(coach.pk, TournamentRosterRole.STAFF)])
+
+        lineup = Lineup.objects.create(event=other.event, team=self.other_team)
+        LineupSelection.objects.create(lineup=lineup, member=self.member)
+        lineup_changed.send(sender=Lineup, lineup=lineup)
+
+        player = other.roster_entries.get(member=self.member)
+        self.assertEqual((player.role, player.jersey_number), (TournamentRosterRole.PLAYER, 18))
+        self.assertFalse(self.home.roster_entries.filter(member=self.member).exists())  # the home team's roster is its own
+
+    def test_changing_the_days_moves_every_teams_event(self):
+        other = self.add()
+        TournamentDay.objects.create(tournament=self.tournament, date=datetime.date(2026, 9, 19), starts_at=datetime.time(10, 30), ends_at=datetime.time(16, 0))
+
+        ensure_home_team(self.tournament)
+
+        other.event.refresh_from_db()
+        self.home.event.refresh_from_db()
+        for event in (other.event, self.home.event):
+            self.assertEqual(timezone.localtime(event.start).strftime("%H:%M"), "10:30")
+            self.assertEqual(timezone.localtime(event.end).strftime("%H:%M"), "16:00")
+
+    def test_withdrawing_a_team_cancels_its_event_and_deleting_it_removes_the_event(self):
+        other = self.add()
+        event_id = other.event_id
+        withdraw_team(other, reason="Injuries")
+        self.assertTrue(Event.objects.get(pk=event_id).cancelled)
+
+        removable = create_manual_team(self.tournament, club_team=Team.objects.create(name="Sharks U12", short_name="U12"))
+        removable_event = removable.event_id
+        delete_manual_team(removable)
+        self.assertFalse(Event.objects.filter(pk=removable_event).exists())
+
+    def test_changing_the_home_team_gives_the_previous_home_team_an_event_of_its_own(self):
+        other = self.add()
+        other_event_id = other.event_id
+        old_tournament_event = self.tournament.event_id
+
+        self.tournament.home_team = self.other_team
+        self.tournament.save(update_fields=["home_team"])
+        ensure_home_team(self.tournament)
+        self.tournament.refresh_from_db()
+        other.refresh_from_db()
+        self.home.refresh_from_db()
+
+        self.assertEqual(self.tournament.event_id, other_event_id)  # the new home team's own event is now the tournament's
+        self.assertEqual(other.event_id, other_event_id)
+        self.assertIsNotNone(self.home.event_id)
+        self.assertNotEqual(self.home.event_id, old_tournament_event if old_tournament_event == other_event_id else None)
+        self.assertEqual(list(self.home.event.teams.all()), [self.team])

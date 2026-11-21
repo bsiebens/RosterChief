@@ -124,7 +124,7 @@ def team_out(team: TournamentTeam, tournament: Tournament, entries=None) -> dict
         "is_home_team": team.team_id is not None and team.team_id == tournament.home_team_id,
         "contact_name": team.foreign_contact_name, "contact_email": team.foreign_contact_email, "contact_phone": team.foreign_contact_phone,
         "seed": team.seed, "payment_status": team.payment_status, "withdrawn_at": team.withdrawn_at, "withdrawal_reason": team.withdrawal_reason,
-        "registration_id": team.registration_id,
+        "registration_id": team.registration_id, "event_id": team.event_id,
         "player_count": sum(1 for e in entries if e.role == TournamentRosterRole.PLAYER),
         "staff_count": sum(1 for e in entries if e.role == TournamentRosterRole.STAFF),
         "has_age_flag": any(tournament.birth_year_out_of_range(effective_dob(e)) for e in entries),

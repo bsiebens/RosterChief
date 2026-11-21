@@ -89,10 +89,10 @@
 				</span>
 			</div>
 		</div>
-		{#if roster.team.is_home_team}
+		{#if !roster.team.is_foreign}
 			<Alert kind="info">
 				{t('tn.roster.home_note')}
-				{#if tn.event_id}<a class="link font-semibold" href={eventHref(tn.event_id)}>{t('tn.roster.home_note_link')}</a>{/if}
+				{#if roster.team.event_id}<a class="link font-semibold" href={eventHref(roster.team.event_id)}>{t('tn.roster.home_note_link')}</a>{/if}
 			</Alert>
 		{/if}
 		{#if roster.earliest_birth_year !== null || roster.latest_birth_year !== null}

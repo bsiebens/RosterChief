@@ -611,6 +611,9 @@ class TournamentTeam(UUIDModel):
 
     tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE, related_name="teams", verbose_name=_("tournament"))
     registration = models.OneToOneField(TournamentRegistration, on_delete=models.SET_NULL, null=True, blank=True, related_name="tournament_team", verbose_name=_("registration"))
+    #: The calendar event of a club team's tournament: its line-up decides who is on the roster (see ``sync_team_roster``). The home team's
+    #: is the tournament's own ``event``. A guest team has none.
+    event = models.OneToOneField("events.Event", on_delete=models.SET_NULL, null=True, blank=True, related_name="tournament_team", verbose_name=_("calendar event"))
     #: A plain public link, not a secret token -- a team's own slate of
     #: matches is public information by design (see the design spec's
     #: public-site section), unlike TournamentRegistration.status_token
