@@ -1252,6 +1252,42 @@ class HomeTeamRosterSyncSignalTests(TournamentsTestCase):
         self.assertEqual(entry.position_label, "Striker")
         self.assertEqual(TournamentRosterEntry.objects.filter(tournament_team=self.tournament_team, member=self.member).count(), 1)
 
+    def test_a_picked_player_takes_over_the_jersey_number_and_position_of_the_team(self):
+        forward = Position.objects.create(name="Forward", short_name="FW")
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=9, position=forward)
+        self.pick(self.member)
+
+        entry = TournamentRosterEntry.objects.get(tournament_team=self.tournament_team, member=self.member)
+        self.assertEqual((entry.jersey_number, entry.position_label), (9, "Forward"))
+
+    def test_only_the_tournaments_season_counts_for_the_take_over(self):
+        other_season = Season.objects.create(start_date=datetime.date(2030, 7, 1), end_date=datetime.date(2031, 6, 30))
+        TeamMembership.objects.create(team=self.team, member=self.member, season=other_season, jersey_number=4)
+        self.pick(self.member)
+
+        entry = TournamentRosterEntry.objects.get(tournament_team=self.tournament_team, member=self.member)
+        self.assertEqual((entry.jersey_number, entry.position_label), (None, ""))
+
+    def test_blanks_on_an_existing_line_are_filled_but_typed_values_stick(self):
+        forward = Position.objects.create(name="Forward", short_name="FW")
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=9, position=forward)
+        entry = TournamentRosterEntry.objects.create(tournament_team=self.tournament_team, member=self.member, position_label="Captain")
+        self.pick(self.member)
+
+        entry.refresh_from_db()
+        self.assertEqual((entry.jersey_number, entry.position_label), (9, "Captain"))  # number filled in, typed position kept
+
+    def test_a_number_already_taken_on_the_roster_is_not_taken_over_twice(self):
+        other = Member.objects.create(first_name="Other", last_name="Player")
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=9)
+        TeamMembership.objects.create(team=self.team, member=other, season=self.season, jersey_number=10)
+        TournamentRosterEntry.objects.create(tournament_team=self.tournament_team, foreign_first_name="Guest", foreign_last_name="Nine", jersey_number=9)
+        self.pick(self.member)
+        self.pick(other)
+
+        self.assertIsNone(TournamentRosterEntry.objects.get(tournament_team=self.tournament_team, member=self.member).jersey_number)
+        self.assertEqual(TournamentRosterEntry.objects.get(tournament_team=self.tournament_team, member=other).jersey_number, 10)
+
     def test_staff_and_guests_added_by_hand_are_never_removed_by_the_sync(self):
         coach = Member.objects.create(first_name="Coach", last_name="Carter")
         TournamentRosterEntry.objects.create(tournament_team=self.tournament_team, member=coach, role=TournamentRosterRole.STAFF)

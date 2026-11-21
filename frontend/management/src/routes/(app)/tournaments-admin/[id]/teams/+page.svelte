@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { FileDown, Plus, Trash2, Users } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import TeamLogo from '#lib/components/tournaments/TeamLogo.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import Toast from '#lib/components/Toast.svelte';
@@ -90,7 +91,7 @@
 						<tr class="hover:bg-paper {team.withdrawn_at ? 'opacity-60' : ''}">
 							<td>
 								<div class="flex items-center gap-2">
-									<span class="size-4 shrink-0 rounded-full border border-line" style:background={team.primary_color || undefined} aria-hidden="true"></span>
+									<TeamLogo name={team.name} logoUrl={team.logo_url} color={team.primary_color} />
 									<a class="link font-semibold" href="{TBASE}/{tn.id}/teams/{team.id}">{team.name}</a>
 									{#if team.is_home_team}<span class="badge badge-sm badge-info">{t('tn.teams.home')}</span>{/if}
 									{#if team.is_foreign}<span class="badge badge-sm badge-outline">{t('tn.reg.foreign')}</span>{/if}

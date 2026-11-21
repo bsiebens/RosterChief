@@ -10,8 +10,8 @@
 	const tabs = $derived(
 		[
 			{ key: '', label: t('tn.tab.settings'), manage: true },
-			{ key: '/registrations', label: t('tn.tab.registrations'), manage: true, count: tn.pending_registration_count },
-			{ key: '/teams', label: t('tn.tab.teams') },
+			{ key: '/registrations', label: t('tn.tab.registrations'), manage: true, count: tn.pending_registration_count, warn: true },
+			{ key: '/teams', label: t('tn.tab.teams'), count: tn.teams_in_count },
 			{ key: '/setup', label: t('tn.tab.setup') },
 			{ key: '/schedule', label: t('tn.tab.schedule') },
 			{ key: '/scores', label: t('tn.tab.scores') },
@@ -39,7 +39,7 @@
 				aria-current={isActive(tab.key) ? 'page' : undefined}
 				class="-mb-px flex items-center gap-2 border-b-2 px-4 py-3.5 font-display text-sm font-bold tracking-[.08em] whitespace-nowrap uppercase focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-club {isActive(tab.key) ? 'border-club text-ink' : 'border-transparent text-muted hover:text-ink'}">
 				{tab.label}
-				{#if tab.count}<span class="badge badge-warning badge-xs">{tab.count}</span>{/if}
+				{#if tab.count !== undefined && (tab.count > 0 || !tab.warn)}<span class="badge badge-xs {tab.warn ? 'badge-warning' : 'badge-ghost'}">{tab.count}</span>{/if}
 			</a>
 		{/each}
 	</div>

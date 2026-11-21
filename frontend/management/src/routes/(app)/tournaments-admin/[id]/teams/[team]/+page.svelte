@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { ArrowLeft, FileDown, Pencil, Plus, Trash2, Utensils } from '@lucide/svelte';
+	import { ArrowLeft, FileDown, Pencil, Plus, Trash2, UserCog, Users, Utensils } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import TeamLogo from '#lib/components/tournaments/TeamLogo.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
@@ -13,6 +14,8 @@
 	let { data } = $props();
 	const tn = $derived(data.tournament);
 	const roster = $derived(data.roster);
+	const players = $derived((roster?.entries ?? []).filter((p) => p.role === 'player'));
+	const staffRows = $derived((roster?.entries ?? []).filter((p) => p.role === 'staff'));
 	const canOperate = $derived(tn.can_operate);
 	const run = new Runner();
 	const base = $derived(`/tournaments/${tn.id}/teams/${data.teamId}`);
@@ -25,11 +28,11 @@
 	let deleting = $state<Person | null>(null);
 	let deleteOpen = $state(false);
 
-	function openForm(p: Person | null) {
+	function openForm(p: Person | null, role: 'player' | 'staff' = 'player') {
 		editing = p;
 		f = p
 			? { first_name: p.first_name, last_name: p.last_name, jersey_number: p.jersey_number === null ? '' : String(p.jersey_number), role: p.role, position_label: p.position_label, date_of_birth: p.date_of_birth ?? '', license_number: p.license_number, dietary_restrictions: p.dietary_restrictions, lunch_days: [...p.lunch_days] }
-			: blank();
+			: { ...blank(), role };
 		run.clear();
 		open = true;
 	}
@@ -75,6 +78,17 @@
 	{#if !roster}
 		<Alert kind="error">{t('common.error.generic')}</Alert>
 	{:else}
+		<div class="flex items-center gap-4">
+			<TeamLogo name={roster.team.name} logoUrl={roster.team.logo_url} color={roster.team.primary_color} size="size-16" text="text-xl" />
+			<div class="grid gap-0.5">
+				<span class="font-display text-xl font-extrabold text-ink uppercase">{roster.team.name}</span>
+				<span class="flex flex-wrap items-center gap-2 text-xs text-muted">
+					{#if roster.team.is_home_team}<span class="badge badge-sm badge-info">{t('tn.teams.home')}</span>{/if}
+					{#if roster.team.is_foreign}<span class="badge badge-sm badge-outline">{t('tn.reg.foreign')}</span>{/if}
+					<span class="font-mono">{roster.team.player_count} + {roster.team.staff_count}</span>
+				</span>
+			</div>
+		</div>
 		{#if roster.team.is_home_team}
 			<Alert kind="info">
 				{t('tn.roster.home_note')}
@@ -84,55 +98,67 @@
 		{#if roster.earliest_birth_year !== null || roster.latest_birth_year !== null}
 			<Alert kind="info">{t('tn.roster.age_range', { earliest: roster.earliest_birth_year ?? '—', latest: roster.latest_birth_year ?? '—' })}</Alert>
 		{/if}
-		<div class="card overflow-x-auto">
-			<table class="table">
-				<thead>
-					<tr>
-						<th class="w-12">#</th>
-						<th>{t('tn.roster.name')}</th>
-						<th>{t('tn.roster.role')}</th>
-						<th class="hidden md:table-cell">{t('tn.roster.dob')}</th>
-						<th class="hidden lg:table-cell">{t('tn.roster.license')}</th>
-						<th>{t('tn.roster.dietary')}</th>
-						{#if roster.lunch_mode !== 'none'}<th>{t('tn.roster.lunch')}</th>{/if}
-						<th></th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each roster.entries as p (p.id)}
-						<tr class="hover:bg-paper">
-							<td class="font-mono text-xs">{p.jersey_number ?? '—'}</td>
-							<td>{p.name}{#if p.age_flagged} <span class="badge badge-warning badge-xs">{t('tn.roster.age_flag')}</span>{/if}</td>
-							<td>{t(`tn.role.${p.role}`)}{p.position_label ? ` · ${p.position_label}` : ''}</td>
-							<td class="hidden font-mono text-xs md:table-cell">{fmtDate(p.date_of_birth)}</td>
-							<td class="hidden font-mono text-xs lg:table-cell">{p.license_number || '—'}</td>
-							<td class="text-xs">{p.dietary_restrictions || '—'}</td>
-							{#if roster.lunch_mode !== 'none'}
-								<td>
-									{#if roster.lunch_mode === 'optional' && canOperate}
-										<div class="flex flex-wrap gap-1">
-											{#each roster.dates as d (d)}
-												<label class="flex items-center gap-1 text-xs"><input type="checkbox" class="checkbox checkbox-xs" checked={p.lunch_days.includes(d)} disabled={run.busy} onchange={(e) => setLunch(p, d, e.currentTarget.checked)} />{fmtDate(d, { weekday: 'short', day: 'numeric' })}</label>
-											{/each}
-										</div>
-									{:else}
-										<span class="font-mono text-xs">{p.lunch_days.length}/{roster.dates.length}</span>
+		{#snippet rosterCard(rows: Person[], staff: boolean)}
+			<section class="card overflow-x-auto">
+				<header class="flex items-center justify-between gap-3 px-4 pt-4">
+					<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">
+						{#if staff}<UserCog size={16} class="shrink-0" aria-hidden="true" />{:else}<Users size={16} class="shrink-0" aria-hidden="true" />{/if}
+						{staff ? t('tn.roster.staff') : t('tn.roster.players')}
+						<span class="badge badge-ghost badge-sm">{rows.length}</span>
+					</h2>
+					{#if canOperate}<button class="btn btn-outline btn-sm gap-1" type="button" onclick={() => openForm(null, staff ? 'staff' : 'player')}><Plus size={14} /> {staff ? t('tn.roster.add_staff') : t('tn.roster.add_player')}</button>{/if}
+				</header>
+				<table class="table">
+					<thead>
+						<tr>
+							{#if !staff}<th class="w-12">#</th>{/if}
+							<th>{t('tn.roster.name')}</th>
+							<th>{t('tn.roster.position')}</th>
+							{#if !staff}<th class="hidden md:table-cell">{t('tn.roster.dob')}</th>{/if}
+							<th class="hidden lg:table-cell">{t('tn.roster.license')}</th>
+							<th>{t('tn.roster.dietary')}</th>
+							{#if roster.lunch_mode !== 'none'}<th>{t('tn.roster.lunch')}</th>{/if}
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each rows as p (p.id)}
+							<tr class="hover:bg-paper">
+								{#if !staff}<td class="font-mono text-xs">{p.jersey_number ?? '—'}</td>{/if}
+								<td>{p.name}{#if p.age_flagged} <span class="badge badge-warning badge-xs">{t('tn.roster.age_flag')}</span>{/if}</td>
+								<td>{p.position_label || '—'}</td>
+								{#if !staff}<td class="hidden font-mono text-xs md:table-cell">{fmtDate(p.date_of_birth)}</td>{/if}
+								<td class="hidden font-mono text-xs lg:table-cell">{p.license_number || '—'}</td>
+								<td class="text-xs">{p.dietary_restrictions || '—'}</td>
+								{#if roster.lunch_mode !== 'none'}
+									<td>
+										{#if roster.lunch_mode === 'optional' && canOperate}
+											<div class="flex flex-wrap gap-1">
+												{#each roster.dates as d (d)}
+													<label class="flex items-center gap-1 text-xs"><input type="checkbox" class="checkbox checkbox-xs" checked={p.lunch_days.includes(d)} disabled={run.busy} onchange={(e) => setLunch(p, d, e.currentTarget.checked)} />{fmtDate(d, { weekday: 'short', day: 'numeric' })}</label>
+												{/each}
+											</div>
+										{:else}
+											<span class="font-mono text-xs">{p.lunch_days.length}/{roster.dates.length}</span>
+										{/if}
+									</td>
+								{/if}
+								<td class="text-right whitespace-nowrap">
+									{#if canOperate}
+										<button class="btn btn-ghost btn-xs btn-square text-muted" type="button" aria-label={t('tn.roster.edit_named', { name: p.name })} onclick={() => openForm(p)}><Pencil size={14} /></button>
+										<button class="btn btn-ghost btn-xs btn-square text-error" type="button" aria-label={t('tn.roster.delete_named', { name: p.name })} onclick={() => { deleting = p; run.clear(); deleteOpen = true; }}><Trash2 size={14} /></button>
 									{/if}
 								</td>
-							{/if}
-							<td class="text-right whitespace-nowrap">
-								{#if canOperate}
-									<button class="btn btn-ghost btn-xs btn-square text-muted" type="button" aria-label={t('tn.roster.edit_named', { name: p.name })} onclick={() => openForm(p)}><Pencil size={14} /></button>
-									<button class="btn btn-ghost btn-xs btn-square text-error" type="button" aria-label={t('tn.roster.delete_named', { name: p.name })} onclick={() => { deleting = p; run.clear(); deleteOpen = true; }}><Trash2 size={14} /></button>
-								{/if}
-							</td>
-						</tr>
-					{:else}
-						<tr><td colspan="8" class="py-8 text-center text-muted">{t('tn.roster.empty')}</td></tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
+							</tr>
+						{:else}
+							<tr><td colspan="8" class="py-6 text-center text-muted">{staff ? t('tn.roster.empty_staff') : t('tn.roster.empty_players')}</td></tr>
+						{/each}
+					</tbody>
+				</table>
+			</section>
+		{/snippet}
+		{@render rosterCard(players, false)}
+		{@render rosterCard(staffRows, true)}
 
 		{#if roster.lunch.length}
 			<section class="card card-body gap-3">

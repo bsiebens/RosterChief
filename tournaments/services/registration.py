@@ -256,7 +256,36 @@ def sync_home_roster(tournament) -> None:
     on_roster = set(team.roster_entries.filter(member__isnull=False).values_list("member_id", flat=True))  # any role: a staff member who is also picked is not added twice
 
     team.roster_entries.filter(member__isnull=False, role=TournamentRosterRole.PLAYER).exclude(member_id__in=wanted).delete()
-    TournamentRosterEntry.objects.bulk_create([TournamentRosterEntry(tournament_team=team, member_id=member_id, role=TournamentRosterRole.PLAYER) for member_id in wanted - on_roster])
+
+    # Jersey number and position come from the player's place in the team for the tournament's season. They are only filled in where the
+    # roster line has none, so whatever was typed by hand sticks, and a number that is already taken on this roster is left out.
+    memberships = {m.member_id: m for m in TeamMembership.objects.filter(team_id=tournament.home_team_id, season=tournament.season, member_id__in=wanted).select_related("position")}
+    taken = set(team.roster_entries.exclude(jersey_number__isnull=True).values_list("jersey_number", flat=True))
+
+    def take_over(membership):
+        number = membership.jersey_number if membership and membership.jersey_number not in taken else None
+        if number is not None:
+            taken.add(number)
+        return number, (membership.position.name if membership and membership.position_id else "")
+
+    for entry in team.roster_entries.filter(member_id__in=wanted & on_roster, role=TournamentRosterRole.PLAYER):
+        if entry.jersey_number is not None and entry.position_label:
+            continue
+        number, position = take_over(memberships.get(entry.member_id))
+        changed = []
+        if entry.jersey_number is None and number is not None:
+            entry.jersey_number = number
+            changed.append("jersey_number")
+        if not entry.position_label and position:
+            entry.position_label = position
+            changed.append("position_label")
+        if changed:
+            entry.save(update_fields=[*changed, "modified"])
+    new_entries = []
+    for member_id in wanted - on_roster:
+        number, position = take_over(memberships.get(member_id))
+        new_entries.append(TournamentRosterEntry(tournament_team=team, member_id=member_id, role=TournamentRosterRole.PLAYER, jersey_number=number, position_label=position))
+    TournamentRosterEntry.objects.bulk_create(new_entries)
 
 
 def _event_span(tournament):
