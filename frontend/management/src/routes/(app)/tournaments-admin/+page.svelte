@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { Plus, Trophy } from '@lucide/svelte';
+	import { ChevronRight, Plus, Trophy } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -56,11 +56,12 @@
 						<th>{t('tn.col.status')}</th>
 						<th class="text-right">{t('tn.col.teams')}</th>
 						<th class="text-right">{t('tn.col.pending')}</th>
+						<th><span class="sr-only">{t('tn.col.actions')}</span></th>
 					</tr>
 				</thead>
 				<tbody>
 					{#each data.rows as r (r.id)}
-						<tr class="hover:bg-paper">
+						<tr class="cursor-pointer hover:bg-paper" onclick={(e) => { if (!(e.target as HTMLElement).closest('a, button')) goto(`${TBASE}/${r.id}`); }}>
 							<td><a class="link font-semibold" href="{TBASE}/{r.id}">{r.name}</a></td>
 							<td class="font-mono text-xs whitespace-nowrap">{fmtDateRange(r.start_date, r.end_date)}</td>
 							<td class="hidden md:table-cell">{r.season.name}</td>
@@ -71,6 +72,9 @@
 							<td class="text-right font-mono text-xs">{r.teams_in_count}{r.max_teams ? ` / ${r.max_teams}` : ''}</td>
 							<td class="text-right font-mono text-xs">
 								{#if r.pending_registration_count && canManage}<a class="badge badge-warning badge-sm" href="{TBASE}/{r.id}/registrations">{r.pending_registration_count}</a>{:else}{r.pending_registration_count || '—'}{/if}
+							</td>
+							<td class="text-right whitespace-nowrap">
+								<a class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-rule hover:text-ink" href="{TBASE}/{r.id}" aria-label={t('tn.open_named', { name: r.name })} title={t('tn.open')}><ChevronRight size={18} /></a>
 							</td>
 						</tr>
 					{/each}
