@@ -9,7 +9,7 @@
     import {usePageHeader} from '#lib/header.svelte.ts';
     import {t} from '#lib/i18n.svelte.ts';
     import {eventEditHref, eventHref, formatTime, resultStyle, scoreText, type AttendanceCounts} from '#lib/events/types.ts';
-    import {addDays, AGENDA_DAYS, EVENT_KINDS, type EventRow, formatDay, formatLongDay, formatMonth, formatWeekday, isoDate, kindLabelKey, kindStyle, parseIsoDate, sameDay, weekStart} from '#lib/events/types.ts';
+    import {addDays, AGENDA_DAYS, EVENT_KINDS, type EventRow, formatDateTime, formatDay, formatLongDay, formatMonth, formatWeekday, isoDate, kindLabelKey, kindStyle, parseIsoDate, sameDay, weekStart} from '#lib/events/types.ts';
 
     import type {PageData} from '../../../routes/(app)/calendar/$types';
 
@@ -94,18 +94,59 @@
     const MIN_BLOCK_PX = 26;
     type Seg = {e: EventRow; top: number; height: number; lane: number; lanes: number};
     const minutesOfDay = (d: Date) => d.getHours() * 60 + d.getMinutes();
-    /** The part of each event that falls on day `d`, in minutes since midnight. */
+    /** First and last local day an event covers (same rule as `byDay`: ending exactly at midnight does not spill over). */
+    function spanOf(e: EventRow) {
+        const s = new Date(e.start);
+        const startDay = new Date(s.getFullYear(), s.getMonth(), s.getDate());
+        const end = e.end ? new Date(e.end) : s;
+        const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+        const last = endDay > startDay && end.getHours() === 0 && end.getMinutes() === 0 ? addDays(endDay, -1) : endDay;
+        return {startDay, last};
+    }
+    const isMultiDay = (e: EventRow) => {
+        const {startDay, last} = spanOf(e);
+        return last > startDay;
+    };
+    /** The part of each single-day event that falls on day `d`, in minutes since midnight, clamped to the visible grid. */
     function rawSegments(d: Date) {
         const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
         const dayEnd = dayStart + 86_400_000;
-        return eventsOn(d).map((e) => {
+        const gMin = gridRange.start * 60;
+        const gMax = gridRange.end * 60;
+        return eventsOn(d).filter((e) => !isMultiDay(e)).map((e) => {
             const s = new Date(e.start).getTime();
             const en = e.end ? new Date(e.end).getTime() : s + 3_600_000;
             const a = Math.max(s, dayStart);
             const b = Math.min(Math.max(en, s + 30 * 60_000), dayEnd);
-            return {e, from: Math.round((a - dayStart) / 60000), to: Math.max(Math.round((b - dayStart) / 60000), Math.round((a - dayStart) / 60000) + 30)};
+            let from = Math.round((a - dayStart) / 60000);
+            let to = Math.max(Math.round((b - dayStart) / 60000), from + 30);
+            // Clamp to the visible grid; events entirely outside it show as a minimum block at its edge.
+            from = Math.min(Math.max(from, gMin), gMax - 30);
+            to = Math.min(Math.max(to, from + 30), gMax);
+            return {e, from, to};
         });
     }
+    type Banner = {e: EventRow; col: number; span: number; lane: number; startsHere: boolean; endsHere: boolean; label: string};
+    /** Events covering several days, as bars across the day columns with stacked lanes. */
+    const banners = $derived.by(() => {
+        const out: Banner[] = [];
+        const laneEnds: number[] = [];
+        const list = data.events.filter(isMultiDay).map((e) => ({e, ...spanOf(e)})).filter((x) => x.last >= from && x.startDay <= to).sort((x, y) => +x.startDay - +y.startDay || +y.last - +x.last);
+        for (const {e, startDay, last} of list) {
+            const first = startDay < from ? from : startDay;
+            const end = last > to ? to : last;
+            const c0 = days.findIndex((d) => sameDay(d, first));
+            const c1 = days.findIndex((d) => sameDay(d, end));
+            if (c0 < 0 || c1 < 0) continue;
+            let lane = laneEnds.findIndex((x) => x < c0);
+            if (lane < 0) lane = laneEnds.length;
+            laneEnds[lane] = c1;
+            out.push({e, col: c0, span: c1 - c0 + 1, lane, startsHere: startDay >= from, endsHere: last <= to, label: `${formatDateTime(e.start)}${e.end ? ` – ${formatDateTime(e.end)}` : ''}`});
+        }
+        return out;
+    });
+    const bannerLanes = $derived(Math.max(0, ...banners.map((b) => b.lane + 1)));
+    const BANNER_PX = 24;
     // Always 06:00 until midnight.
     const gridRange = {start: 6, end: 24};
     const hours = $derived(Array.from({length: gridRange.end - gridRange.start}, (_, i) => gridRange.start + i));
@@ -125,7 +166,9 @@
             const used = new Set(cluster.filter((c) => c.to > it.from).map((c) => c.lane));
             let lane = 0;
             while (used.has(lane)) lane++;
-            const seg = {e: it.e, from: it.from, to: it.to, lane, lanes: 1, top: (it.from - gridRange.start * 60) / 60 * HOUR_PX, height: Math.max((it.to - it.from) / 60 * HOUR_PX, MIN_BLOCK_PX)};
+            const seg = {e: it.e, from: it.from, to: it.to, lane, lanes: 1, top: (it.from - gridRange.start * 60) / 60 * HOUR_PX, height: 0};
+            seg.height = Math.min(Math.max((it.to - it.from) / 60 * HOUR_PX, MIN_BLOCK_PX), (gridRange.end - gridRange.start) * HOUR_PX);
+            seg.top = Math.min(Math.max(seg.top, 0), (gridRange.end - gridRange.start) * HOUR_PX - seg.height);
             cluster.push(seg);
             out.push(seg);
             clusterEnd = Math.max(clusterEnd, it.to);
@@ -347,6 +390,20 @@
                             </div>
                         {/each}
                     </div>
+                    {#if bannerLanes}
+                        <div class="grid grid-cols-[3.5rem_repeat(7,minmax(0,1fr))] border-b border-line bg-white py-1" style="grid-template-rows: repeat({bannerLanes}, {BANNER_PX}px); row-gap: 2px">
+                            {#each banners as b (b.e.id)}
+                                {@const style = kindStyle(b.e.kind)}
+                                <a href={eventHref(b.e.id)}
+                                   class="mx-0.5 flex items-center gap-2 overflow-hidden border border-line bg-white px-1.5 text-xs shadow-sm hover:shadow-md focus:z-10 {b.startsHere ? 'rounded-l border-l-4' : 'border-l-0'} {b.endsHere ? 'rounded-r' : ''} {style.bar} {b.e.cancelled ? 'bg-subhead opacity-70' : ''}"
+                                   style="grid-column: {b.col + 2} / span {b.span}; grid-row: {b.lane + 1}"
+                                   title="{b.label} {b.e.title}">
+                                    <span class="truncate font-semibold text-ink {b.e.cancelled ? 'line-through' : ''}">{b.e.title}</span>
+                                    <span class="hidden truncate whitespace-nowrap font-mono text-[10px] text-muted xl:inline">{b.label}</span>
+                                </a>
+                            {/each}
+                        </div>
+                    {/if}
                     <div class="grid grid-cols-[3.5rem_repeat(7,minmax(0,1fr))]">
                         <div class="relative" style="height: {hours.length * HOUR_PX}px" aria-hidden="true">
                             {#each hours as h, i (h)}
