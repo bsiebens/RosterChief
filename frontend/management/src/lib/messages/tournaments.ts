@@ -44,6 +44,9 @@ const rows: [string, string, string, string][] = [
 
 	// settings form
 	['tn.card.details', 'Details', 'Details', 'Détails'],
+	['tn.card.entries', 'Entries and schedule', 'Inschrijvingen en schema', 'Inscriptions et calendrier'],
+	['tn.card.fees', 'Fees and lunch', 'Kosten en lunch', 'Frais et déjeuner'],
+	['tn.card.summary', 'Summary', 'Samenvatting', 'Résumé'],
 	['tn.saved', 'Saved.', 'Opgeslagen.', 'Enregistré.'],
 	['tn.f.name', 'Name', 'Naam', 'Nom'],
 	['tn.f.start_date', 'First day', 'Eerste dag', 'Premier jour'],
