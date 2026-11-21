@@ -9,7 +9,7 @@
 	import { t } from '#lib/i18n.svelte.ts';
 	import { api } from '#lib/management-api.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
-	import { Runner, TBASE, type TeamDoc } from '#lib/tournaments.svelte.ts';
+	import { headerSnapshot, Runner, TBASE, type TeamDoc } from '#lib/tournaments.svelte.ts';
 
 	let { data } = $props();
 	const tn = $derived(data.tournament);
@@ -53,12 +53,13 @@
 	}
 	const sorted = $derived([...data.rows].sort((a, b) => Number(!!a.withdrawn_at) - Number(!!b.withdrawn_at)));
 
+	const hdr = headerSnapshot(() => ({ base, canOperate }));
 	usePageHeader(() => ({ badge: statusPill, title: tn.name, context: t('tn.teams.count', { n: data.rows.filter((r) => !r.withdrawn_at).length }), actions }));
 </script>
 
 {#snippet actions()}
-	<a class="btn btn-outline gap-2" href="/api/v1{base}/lunch-summary/pdf" target="_blank" rel="noopener"><FileDown size={16} /> {t('tn.teams.lunch_pdf')}</a>
-	{#if canOperate}<button class="btn btn-primary gap-2" type="button" onclick={() => { run.clear(); addOpen = true; }}><Plus size={16} /> {t('tn.teams.add')}</button>{/if}
+	<a class="btn btn-outline gap-2" href="/api/v1{hdr.base}/lunch-summary/pdf" target="_blank" rel="noopener"><FileDown size={16} /> {t('tn.teams.lunch_pdf')}</a>
+	{#if hdr.canOperate}<button class="btn btn-primary gap-2" type="button" onclick={() => { run.clear(); addOpen = true; }}><Plus size={16} /> {t('tn.teams.add')}</button>{/if}
 {/snippet}
 
 <svelte:head><title>{pageTitle(t('tn.tab.teams'))}</title></svelte:head>

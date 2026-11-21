@@ -7,7 +7,7 @@
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
-	import { fmtDate, fmtDay, numOrNull, Runner, strOrNull, TBASE, type Person } from '#lib/tournaments.svelte.ts';
+	import { fmtDate, fmtDay, headerSnapshot, numOrNull, Runner, strOrNull, TBASE, type Person } from '#lib/tournaments.svelte.ts';
 
 	let { data } = $props();
 	const tn = $derived(data.tournament);
@@ -56,13 +56,14 @@
 	/** Lunch days can also be flipped straight in the table when lunch is optional. */
 	const setLunch = (p: Person, day: string, on: boolean) => run.put(`${base}/roster/${p.id}/lunch`, { lunch_days: on ? [...p.lunch_days, day] : p.lunch_days.filter((d) => d !== day) });
 
+	const hdr = headerSnapshot(() => ({ base, canOperate, hasLunch: !!roster && roster.lunch_mode !== 'none' }));
 	usePageHeader(() => ({ badge: statusPill, title: roster?.team.name ?? tn.name, context: tn.name, actions }));
 </script>
 
 {#snippet actions()}
-	<a class="btn btn-outline gap-2" href="/api/v1{base}/roster/pdf" target="_blank" rel="noopener"><FileDown size={16} /> {t('tn.roster.pdf')}</a>
-	{#if roster && roster.lunch_mode !== 'none'}<a class="btn btn-outline gap-2" href="/api/v1{base}/lunch/pdf" target="_blank" rel="noopener"><Utensils size={16} /> {t('tn.roster.lunch_pdf')}</a>{/if}
-	{#if canOperate}<button class="btn btn-primary gap-2" type="button" onclick={() => openForm(null)}><Plus size={16} /> {t('tn.roster.add')}</button>{/if}
+	<a class="btn btn-outline gap-2" href="/api/v1{hdr.base}/roster/pdf" target="_blank" rel="noopener"><FileDown size={16} /> {t('tn.roster.pdf')}</a>
+	{#if hdr.hasLunch}<a class="btn btn-outline gap-2" href="/api/v1{hdr.base}/lunch/pdf" target="_blank" rel="noopener"><Utensils size={16} /> {t('tn.roster.lunch_pdf')}</a>{/if}
+	{#if hdr.canOperate}<button class="btn btn-primary gap-2" type="button" onclick={() => openForm(null)}><Plus size={16} /> {t('tn.roster.add')}</button>{/if}
 {/snippet}
 
 <svelte:head><title>{pageTitle(roster?.team.name ?? t('tn.tab.teams'))}</title></svelte:head>

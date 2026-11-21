@@ -1,7 +1,8 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { page } from '$app/state';
 	import { t } from '#lib/i18n.svelte.ts';
-	import { TBASE } from '#lib/tournaments.svelte.ts';
+	import { TBASE, tournamentHeader } from '#lib/tournaments.svelte.ts';
 
 	let { data, children } = $props();
 	const tn = $derived(data.tournament);
@@ -19,6 +20,14 @@
 			{ key: '/rooms', label: t('tn.tab.rooms') }
 		].filter((x) => !x.manage || tn.can_manage)
 	);
+	$effect(() => {
+		try {
+			tournamentHeader.status = data.tournament.status;
+		} catch {
+			// The props are already gone while a navigation tears this layout down; the next page sets its own.
+		}
+	});
+	onDestroy(() => (tournamentHeader.status = ''));
 	const isActive = (key: string) => (key === '' ? page.url.pathname === base : page.url.pathname.startsWith(base + key));
 </script>
 

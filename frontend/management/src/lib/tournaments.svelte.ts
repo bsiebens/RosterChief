@@ -233,3 +233,26 @@ export class Runner {
 		this.notice = '';
 	}
 }
+
+/**
+ * The open tournament's status for the page header's pill. The `[id]` layout publishes it here from its own props: the header
+ * renders while a navigation is tearing the route tree down, and reading `page.data` at that moment throws inside SvelteKit's root.
+ */
+export const tournamentHeader = $state<{ status: string }>({ status: '' });
+
+/**
+ * A plain copy of values a header snippet needs. The page header renders in the shared layout and can re-evaluate right after a
+ * navigation removed the page's route node; reading the page's own props then throws inside SvelteKit's root (`n().data`).
+ * The copy is refreshed while the page is alive and keeps its last value once the props are gone.
+ */
+export function headerSnapshot<T extends object>(get: () => T): T {
+	const snap = $state(get());
+	$effect(() => {
+		try {
+			Object.assign(snap, get());
+		} catch {
+			// The props are already gone; keep the last values until the header is cleared.
+		}
+	});
+	return snap;
+}

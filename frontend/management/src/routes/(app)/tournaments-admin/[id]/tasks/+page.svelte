@@ -9,7 +9,7 @@
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
-	import { fmtDateTime, fmtTime, fromLocalInput, numOrNull, Runner, TBASE, toLocalInput } from '#lib/tournaments.svelte.ts';
+	import { fmtDateTime, fmtTime, fromLocalInput, headerSnapshot, numOrNull, Runner, TBASE, toLocalInput } from '#lib/tournaments.svelte.ts';
 	import type { TaskDoc } from './+page.server.ts';
 
 	let { data } = $props();
@@ -61,12 +61,13 @@
 	}
 	const unclaim = (task: TaskDoc, claimId: string) => run.del(`${base}/${task.id}/claims/${claimId}`);
 
+	const hdr = headerSnapshot(() => ({ id: tn.id, canOperate }));
 	usePageHeader(() => ({ badge: statusPill, title: tn.name, context: t('tn.tasks.count', { n: data.tasks.length }), actions }));
 </script>
 
 {#snippet actions()}
-	<a class="btn btn-outline gap-2" href="{TBASE}/{tn.id}/tasks/print"><Printer size={16} /> {t('tn.tasks.print')}</a>
-	{#if canOperate}
+	<a class="btn btn-outline gap-2" href="{TBASE}/{hdr.id}/tasks/print"><Printer size={16} /> {t('tn.tasks.print')}</a>
+	{#if hdr.canOperate}
 		<button class="btn btn-outline gap-2" type="button" onclick={() => { run.clear(); genOpen = true; }}><Wand2 size={16} /> {t('tn.tasks.generate')}</button>
 		<button class="btn btn-primary gap-2" type="button" onclick={() => openForm(null)}><Plus size={16} /> {t('tn.tasks.add')}</button>
 	{/if}
