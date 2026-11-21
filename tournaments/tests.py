@@ -3090,3 +3090,56 @@ class DispatchShiftsOpenTests(TournamentsTestCase):
         from .tasks import notify_shifts_open
 
         self.assertIn("Skipped", notify_shifts_open(str(self.tournament.pk)))
+
+
+class RosterPdfTests(TournamentsTestCase):
+    """The roster sheet lists players and staff apart. WeasyPrint is not needed: the data is captured and the template rendered directly."""
+
+    def render(self):
+        from django.template.loader import render_to_string
+
+        from tournaments.services import pdf
+
+        captured = {}
+
+        def fake(template, context):
+            captured["template"], captured["context"] = template, context
+            return render_to_string(template, {**context, "generated_at": timezone.now()}).encode()
+
+        with mock.patch.object(pdf, "_write_pdf", side_effect=fake):
+            html = pdf.roster_pdf(self.club, self.tournament, self.tournament_team).decode()
+        return captured["context"], html
+
+    def setUp(self):
+        self.tournament_team = TournamentTeam.objects.create(tournament=self.tournament, team=self.team)
+        self.club = mock.Mock()
+        self.club.name = "Sharks"
+        young = Member.objects.create(first_name="Zed", last_name="Young", date_of_birth=datetime.date(2011, 5, 4), license_number="L-1")
+        old = Member.objects.create(first_name="Amy", last_name="Able")
+        coach = Member.objects.create(first_name="Cora", last_name="Coach", date_of_birth=datetime.date(1980, 1, 1), license_number="L-9")
+        TournamentRosterEntry.objects.create(tournament_team=self.tournament_team, member=young, jersey_number=9, position_label="Forward")
+        TournamentRosterEntry.objects.create(tournament_team=self.tournament_team, member=old, jersey_number=3)
+        TournamentRosterEntry.objects.create(tournament_team=self.tournament_team, foreign_first_name="No", foreign_last_name="Number")
+        TournamentRosterEntry.objects.create(tournament_team=self.tournament_team, member=coach, role=TournamentRosterRole.STAFF, position_label="Head coach")
+
+    def test_players_and_staff_are_separate_and_players_follow_jersey_order(self):
+        context, _html = self.render()
+
+        self.assertEqual([r["name"] for r in context["players"]], ["Amy Able", "Zed Young", "No Number"])  # 3, 9, then no number
+        self.assertEqual([r["name"] for r in context["staff"]], ["Cora Coach"])
+
+    def test_members_take_their_birth_date_and_licence_from_their_record_but_staff_has_no_birth_date(self):
+        context, _html = self.render()
+
+        zed = next(r for r in context["players"] if r["name"] == "Zed Young")
+        self.assertEqual((zed["date_of_birth"], zed["license_number"], zed["position"]), (datetime.date(2011, 5, 4), "L-1", "Forward"))
+        coach = context["staff"][0]
+        self.assertEqual((coach["date_of_birth"], coach["license_number"], coach["position"]), (None, "L-9", "Head coach"))
+
+    def test_the_sheet_has_a_players_table_before_a_staff_table(self):
+        _context, html = self.render()
+
+        self.assertLess(html.index("<h2>Players</h2>"), html.index("<h2>Staff</h2>"))
+        self.assertIn("Cora Coach", html.split("<h2>Staff</h2>")[1])
+        self.assertNotIn("Cora Coach", html.split("<h2>Staff</h2>")[0])
+        self.assertIn("4 May 2011", html)

@@ -21,12 +21,21 @@ def _write_pdf(template: str, context: dict) -> bytes:
     return HTML(string=html).write_pdf()
 
 
+def _roster_row(entry: TournamentRosterEntry) -> dict:
+    """One line of the roster sheet. A club member's date of birth (players only) and licence number fall back to their member record."""
+    member = entry.member if entry.member_id else None
+    dob = entry.date_of_birth or (member.date_of_birth if member and entry.role == TournamentRosterRole.PLAYER else None)
+    return {
+        "name": entry.display_name, "jersey_number": entry.jersey_number, "position": entry.position_label,
+        "date_of_birth": dob, "license_number": entry.license_number or ((member.license_number or "") if member else ""),
+    }  # fmt: skip
+
+
 def roster_pdf(club, tournament, team) -> bytes:
     entries = list(team.roster_entries.select_related("member"))
-    context = {
-        "club": club, "tournament": tournament, "team": team, "entries": entries,
-        "player_count": sum(1 for e in entries if e.role == TournamentRosterRole.PLAYER), "staff_count": sum(1 for e in entries if e.role == TournamentRosterRole.STAFF),
-    }  # fmt: skip
+    players = sorted((e for e in entries if e.role == TournamentRosterRole.PLAYER), key=lambda e: (e.jersey_number is None, e.jersey_number or 0, e.display_name.lower()))
+    staff = sorted((e for e in entries if e.role == TournamentRosterRole.STAFF), key=lambda e: e.display_name.lower())
+    context = {"club": club, "tournament": tournament, "team": team, "players": [_roster_row(e) for e in players], "staff": [_roster_row(e) for e in staff]}
     return _write_pdf("tournaments/pdf/roster.html", context)
 
 

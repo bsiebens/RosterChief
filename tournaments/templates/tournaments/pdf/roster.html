@@ -7,8 +7,9 @@
     (tournament_team_schedule.html), which only ever shows name/role/
     position/jersey.
 
-    Context: club, tournament, team, entries, player_count, staff_count,
-    generated_at.
+    Context: club, tournament, team, players, staff (lists of dicts: name,
+    jersey_number, position, date_of_birth, license_number), generated_at.
+    Players and staff are listed separately; staff has no jersey or date of birth.
 {% endcomment %}
 <!DOCTYPE html>
 <html lang="en">
@@ -27,6 +28,7 @@
             }
             body { font-family: sans-serif; font-size: 9.5pt; color: #111; }
             h1 { font-size: 18pt; margin: 0 0 2mm; }
+            h2 { font-size: 12pt; margin: 6mm 0 1mm; border-bottom: 1px solid #999; padding-bottom: 1mm; page-break-after: avoid; }
             .muted { color: #666; }
             .header { display: flex; justify-content: space-between; margin-bottom: 6mm; }
             .stats { display: flex; gap: 6mm; margin-bottom: 6mm; }
@@ -36,6 +38,8 @@
             table { width: 100%; border-collapse: collapse; }
             th { text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #666; border-bottom: 1px solid #999; padding: 2mm 2mm 1mm 0; }
             td { padding: 1.5mm 2mm 1.5mm 0; border-bottom: 1px solid #eee; vertical-align: top; }
+            th.num, td.num { width: 10mm; text-align: right; padding-right: 4mm; }
+            tr { page-break-inside: avoid; }
         </style>
     </head>
     <body>
@@ -50,34 +54,57 @@
         </div>
 
         <div class="stats">
-            <div class="stat"><div class="value">{{ player_count }}</div><div class="label">{% trans "Players" %}</div></div>
-            <div class="stat"><div class="value">{{ staff_count }}</div><div class="label">{% trans "Staff" %}</div></div>
+            <div class="stat"><div class="value">{{ players|length }}</div><div class="label">{% trans "Players" %}</div></div>
+            <div class="stat"><div class="value">{{ staff|length }}</div><div class="label">{% trans "Staff" %}</div></div>
         </div>
 
+        <h2>{% trans "Players" %}</h2>
         <table>
             <thead>
                 <tr>
+                    <th class="num">#</th>
                     <th>{% trans "Name" %}</th>
-                    <th>{% trans "Role" %}</th>
-                    <th>{% trans "Jersey" %}</th>
                     <th>{% trans "Position" %}</th>
                     <th>{% trans "Date of birth" %}</th>
                     <th>{% trans "License" %}</th>
                 </tr>
             </thead>
             <tbody>
-                {% for entry in entries %}
+                {% for row in players %}
                     <tr>
-                        <td>{{ entry.display_name }}</td>
-                        <td>{{ entry.get_role_display }}</td>
-                        <td>{{ entry.jersey_number|default:"—" }}</td>
-                        <td>{{ entry.position_label|default:"—" }}</td>
-                        <td>{{ entry.date_of_birth|date:"j M Y"|default:"—" }}</td>
-                        <td>{{ entry.license_number|default:"—" }}</td>
+                        <td class="num">{{ row.jersey_number|default_if_none:"—" }}</td>
+                        <td>{{ row.name }}</td>
+                        <td>{{ row.position|default:"—" }}</td>
+                        <td>{{ row.date_of_birth|date:"j M Y"|default:"—" }}</td>
+                        <td>{{ row.license_number|default:"—" }}</td>
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="6" class="muted">{% trans "No one on the roster yet." %}</td>
+                        <td colspan="5" class="muted">{% trans "No players yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <h2>{% trans "Staff" %}</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>{% trans "Name" %}</th>
+                    <th>{% trans "Position" %}</th>
+                    <th>{% trans "License" %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in staff %}
+                    <tr>
+                        <td>{{ row.name }}</td>
+                        <td>{{ row.position|default:"—" }}</td>
+                        <td>{{ row.license_number|default:"—" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="3" class="muted">{% trans "No staff yet." %}</td>
                     </tr>
                 {% endfor %}
             </tbody>
