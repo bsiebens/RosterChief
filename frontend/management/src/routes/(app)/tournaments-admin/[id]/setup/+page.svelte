@@ -151,7 +151,10 @@
 				if (!byKey.has(key)) byKey.set(key, { key, title: m.group ? m.group.name : r.label, matches: [] });
 				byKey.get(key)!.matches.push(m);
 			}
-		return [...byKey.values()];
+		// A stable order: groups by name, and each group's matches by round then position, so editing a match never moves it around.
+		return [...byKey.values()]
+			.sort((x, y) => x.title.localeCompare(y.title))
+			.map((x) => ({ ...x, matches: [...x.matches].sort((p, q) => p.round_number - q.round_number || p.sequence - q.sequence) }));
 	});
 	const matchTotal = $derived(sections.reduce((n, x) => n + x.matches.length, 0));
 	const locked = (m: MatchDoc) => m.status === 'completed' || m.status === 'complete';
@@ -230,7 +233,20 @@
 		if (delStage && (await run.del(`${base}/stages/${delStage.id}`))) delStageOpen = false;
 	}
 	let placement = $state<Record<string, boolean>>({});
-	const generate = (s: StageDoc) => run.post<{ generated_count: number }>(`${base}/stages/${s.id}/generate-matches`, placement[s.id] ? { with_placement: true } : {}, (d) => void (run.notice = t('tn.setup.generated', { n: d?.generated_count ?? 0 })), { notice: '' });
+	const doGenerate = (s: StageDoc, regenerate: boolean) =>
+		run.post<{ generated_count: number }>(`${base}/stages/${s.id}/generate-matches`, { ...(placement[s.id] ? { with_placement: true } : {}), ...(regenerate ? { regenerate: true } : {}) }, (d) => void (run.notice = t('tn.setup.generated', { n: d?.generated_count ?? 0 })), { notice: '' });
+	// Regenerating throws the stage's matches (and any changes made to them) away, so it asks first.
+	let regenStage = $state<StageDoc | null>(null);
+	let regenOpen = $state(false);
+	const generate = (s: StageDoc) => {
+		if (!s.match_count) return doGenerate(s, false);
+		regenStage = s;
+		run.clear();
+		regenOpen = true;
+	};
+	async function confirmRegenerate() {
+		if (regenStage && (await doGenerate(regenStage, true))) regenOpen = false;
+	}
 
 	// --- break rules
 	type RuleForm = { field_id: string; trigger_type: string; every_games: string; every_minutes: string; after_round: string; win_start: string; win_end: string; gap_minutes: string; replaces_default_gap: boolean };
@@ -284,7 +300,7 @@
 	{#if data.error || !setup}
 		<Alert kind="error">{t('common.error.generic')}</Alert>
 	{:else}
-		{#if run.error && !fieldOpen && !stageOpen && !ruleOpen && !delFieldOpen && !delStageOpen && !delRuleOpen && !replaceOpen && !moveOpen && !delMatchOpen && !addOpen}<Alert kind="error">{run.error}</Alert>{/if}
+		{#if run.error && !fieldOpen && !stageOpen && !ruleOpen && !delFieldOpen && !delStageOpen && !regenOpen && !delRuleOpen && !replaceOpen && !moveOpen && !delMatchOpen && !addOpen}<Alert kind="error">{run.error}</Alert>{/if}
 
 		<section class="card card-body card-hl gap-3">
 			<div class="flex flex-wrap items-center justify-between gap-2">
@@ -323,7 +339,7 @@
 						{#each stageList as s, i (s.id)}
 							{@const Icon = FORMAT_ICONS[s.format]}
 							{@const isSel = selectedId === s.id}
-							<div class="flex flex-col items-stretch md:flex-row md:items-center">
+							<div class="flex flex-col items-stretch md:flex-row md:items-start">
 								<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
 								<div
 									class="flex w-full flex-col gap-2 rounded-lg border p-3 transition-colors md:w-72 {isSel ? 'border-ink bg-row-sel' : 'border-line bg-white hover:bg-surface'} {overStageId === s.id && dragStageId !== s.id ? 'outline outline-2 -outline-offset-2 outline-club' : ''} {dragStageId === s.id ? 'opacity-50' : ''}"
@@ -638,6 +654,16 @@
 		<div class="modal-action mt-2 flex justify-end gap-2">
 			<button class="btn btn-outline" type="button" onclick={() => (delFieldOpen = false)}>{t('common.cancel')}</button>
 			<button class="btn btn-error gap-2" type="button" disabled={run.busy} onclick={removeField}><Trash2 size={16} /> {t('common.delete')}</button>
+		</div>
+	</div>
+</Modal>
+<Modal bind:open={regenOpen} title={t('tn.setup.regenerate_title')}>
+	<div class="grid gap-3">
+		{#if run.error}<Alert kind="error">{run.error}</Alert>{/if}
+		<p>{t('tn.setup.regenerate_body', { name: regenStage?.name ?? '', n: regenStage?.match_count ?? 0 })}</p>
+		<div class="modal-action mt-2 flex justify-end gap-2">
+			<button class="btn btn-outline" type="button" onclick={() => (regenOpen = false)}>{t('common.cancel')}</button>
+			<button class="btn btn-warning gap-2" type="button" disabled={run.busy} onclick={confirmRegenerate}>{t('tn.setup.regenerate')}</button>
 		</div>
 	</div>
 </Modal>

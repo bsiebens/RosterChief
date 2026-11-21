@@ -224,6 +224,7 @@ class StagePatch(Schema):
 
 class GenerateMatchesIn(Schema):
     with_placement: bool = False
+    regenerate: bool = False  # throw away the stage's matches and groups first (only while nothing has been played and no later stage depends on them)
 
 
 class SeedSlotIn(Schema):

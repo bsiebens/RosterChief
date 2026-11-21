@@ -214,6 +214,8 @@ const rows: [string, string, string, string][] = [
 	['tn.setup.matches', '{n} matches', '{n} wedstrijden', '{n} matchs'],
 	['tn.setup.points', '{w}/{d}/{l} points', '{w}/{d}/{l} punten', '{w}/{d}/{l} points'],
 	['tn.setup.generate', 'Generate matches', 'Wedstrijden genereren', 'Générer les matchs'],
+	['tn.setup.regenerate_title', 'Regenerate the matches?', 'De wedstrijden opnieuw genereren?', 'Régénérer les matchs ?'],
+	['tn.setup.regenerate_body', 'The {n} matches of {name} are deleted and created again from the current teams, including any changes you made to them. This only works while nothing has been played and no later stage takes its teams from this one.', 'De {n} wedstrijden van {name} worden verwijderd en opnieuw aangemaakt met de huidige teams, inclusief alle wijzigingen die je eraan maakte. Dit kan alleen zolang er niets gespeeld is en geen latere fase haar teams uit deze fase haalt.', 'Les {n} matchs de {name} sont supprimés puis recréés avec les équipes actuelles, y compris vos modifications. Possible uniquement tant que rien n’a été joué et qu’aucune phase suivante ne prend ses équipes dans celle-ci.'],
 	['tn.setup.regenerate', 'Regenerate matches', 'Wedstrijden opnieuw genereren', 'Regénérer les matchs'],
 	['tn.setup.generated', '{n} matches generated.', '{n} wedstrijden gegenereerd.', '{n} matchs générés.'],
 	['tn.setup.placement', 'Include placement matches', 'Plaatsingswedstrijden toevoegen', 'Inclure les matchs de classement'],

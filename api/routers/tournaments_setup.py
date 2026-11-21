@@ -4,13 +4,15 @@ stage, and break rules. Reading needs either tournament permission, changing nee
 
 import uuid
 
-from django.db.models import Max
+from django.db import transaction
+from django.db.models import Max, Q
 from ninja import Router
 
 from api.auth import AUTHENTICATORS
 from api.routers import tournaments_common as c
 from api.routers.tournaments_competition import _scheduling
 from api.schemas_tournaments import BreakRuleIn, BreakRulePatch, FieldIn, FieldPatch, GenerateMatchesIn, NextPhaseIn, SeedIn, StageIn, StagePatch
+from formbuilder.services.management import Conflict
 from members.services.errors import Invalid
 from tournaments.models import BreakRule, Match, TournamentField, TournamentGroup, TournamentStage, TournamentTeam
 from tournaments.services import scheduling as svc
@@ -162,12 +164,29 @@ def _activate(stage):
     stage.save(update_fields=["status"])
 
 
+def _clear_stage(stage):
+    """Removes a stage's generated matches and groups so it can be generated again. Refused once a match has been played, or when a later
+    stage takes its teams from this one's matches or groups (seeded or advanced), because those would silently lose their source."""
+    if stage.matches.filter(status__in=[Match.Status.COMPLETE, Match.Status.IN_PROGRESS, Match.Status.WALKOVER]).exists():
+        raise Conflict("This stage has played matches, so it can't be regenerated.", "has_results")
+    depends = Match.objects.exclude(stage=stage).filter(
+        Q(home_source_match__stage=stage) | Q(away_source_match__stage=stage) | Q(home_source_group__stage=stage) | Q(away_source_group__stage=stage)
+    )
+    if depends.exists():
+        raise Conflict("A later stage takes its teams from this one: clear that stage first.", "has_dependents")
+    stage.matches.all().delete()
+    stage.groups.all().delete()
+
+
 @router.post("/{tournament_id}/stages/{stage_id}/generate-matches", summary="Generate a stage's matches from the teams in seed order", operation_id="tournaments_stage_generate")
 def generate_matches(request, tournament_id: uuid.UUID, stage_id: uuid.UUID, payload: GenerateMatchesIn | None = None):
     c.gate_operate(request)
     t = c.get_tournament(tournament_id)
     stage = c.get_stage(t, stage_id)
-    matches = _scheduling(svc.generate_stage_matches, stage, with_placement=bool(payload and payload.with_placement))
+    with transaction.atomic():
+        if payload and payload.regenerate:
+            _clear_stage(stage)
+        matches = _scheduling(svc.generate_stage_matches, stage, with_placement=bool(payload and payload.with_placement))
     _activate(stage)
     return {"generated_count": len(matches)}
 

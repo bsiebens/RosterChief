@@ -20,7 +20,7 @@ from events.models import Attendance, Event, Season
 from features.entitlements import Entitlement, Entitlements
 from members.models import Member
 from teams.models import Position, StaffAssignment, Team, TeamMembership
-from tournaments.models import Match, Tournament, TournamentField, TournamentRosterEntry, TournamentTask, TournamentTeam
+from tournaments.models import Match, Tournament, TournamentField, TournamentGroup, TournamentRosterEntry, TournamentStage, TournamentTask, TournamentTeam
 
 BASE = "/api/v1"
 WITH = Entitlements({"tournaments": Entitlement(True)})
@@ -310,6 +310,35 @@ class TournamentApiTests(TestCase):
         self.as_("operate", "patch", f"/{t.pk}/stages/{ids[0]}", {"sequence": 1})
         self.as_("operate", "patch", f"/{t.pk}/stages/{ids[1]}", {"sequence": 0})
         self.assertEqual(order(), [ids[1], ids[0], ids[2]])
+
+    def test_regenerating_a_stage_replaces_its_matches_and_groups(self):
+        t = self.make()
+        for i in range(1, 5):
+            TournamentTeam.objects.create(tournament=t, foreign_name=f"T{i}", foreign_contact_name="C", foreign_contact_email="c@x.test", seed=i)
+        stage = self.as_("operate", "post", f"/{t.pk}/stages", {"name": "Groups", "format": "groups", "num_groups": 2}).json()["id"]
+        gen = lambda body: self.as_("operate", "post", f"/{t.pk}/stages/{stage}/generate-matches", body)  # noqa: E731
+        self.assertEqual(gen({}).status_code, 200)
+        self.assertEqual(gen({}).status_code, 422)  # a plain generate still refuses when matches exist
+        self.assertEqual(gen({"regenerate": True}).status_code, 200)
+        self.assertEqual(Match.objects.filter(stage_id=stage).count(), 2)  # two groups of two teams: one match each
+        self.assertEqual(TournamentGroup.objects.filter(stage_id=stage).count(), 2)  # the old groups are gone, not doubled
+
+    def test_a_stage_with_played_matches_or_dependents_cannot_be_regenerated(self):
+        t = self.make()
+        for i in range(1, 5):
+            TournamentTeam.objects.create(tournament=t, foreign_name=f"T{i}", foreign_contact_name="C", foreign_contact_email="c@x.test", seed=i)
+        stage = self.as_("operate", "post", f"/{t.pk}/stages", {"name": "RR", "format": "round_robin"}).json()["id"]
+        gen = lambda: self.as_("operate", "post", f"/{t.pk}/stages/{stage}/generate-matches", {"regenerate": True})  # noqa: E731
+        self.assertEqual(gen().status_code, 200)
+        match = Match.objects.filter(stage_id=stage).first()
+        later = TournamentStage.objects.create(tournament=t, name="KO", format="single_elim", sequence=5)
+        dependent = Match.objects.create(stage=later, round_number=1, sequence=0, home_source_match=match)
+        r = gen()
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "has_dependents"))
+        dependent.delete()
+        Match.objects.filter(pk=match.pk).update(status=Match.Status.COMPLETE)
+        r = gen()
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "has_results"))
 
     def test_delete_only_a_draft_tournament(self):
         body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}
