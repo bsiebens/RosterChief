@@ -253,16 +253,22 @@
 	<form class="grid gap-3" onsubmit={saveStage}>
 		{@render err()}
 		<Field label={t('tn.setup.stage_name')} bind:value={sf.name} error={run.fields.name} required />
-		<div class="grid grid-cols-2 gap-3">
-			<div class="form-control w-full">
-				<label class="label" for="st-format"><span class="label-text">{t('tn.setup.format')}</span></label>
-				<select id="st-format" class="select select-bordered w-full" bind:value={sf.format}>
-					{#each FORMATS as f (f)}<option value={f}>{t(`tn.format.${f}`)}</option>{/each}
-				</select>
-				{#if run.fields.format}<span class="mt-1 block text-xs text-error">{run.fields.format}</span>{/if}
+		<fieldset class="grid gap-2">
+			<legend class="label"><span class="label-text">{t('tn.setup.format')}</span></legend>
+			<div class="grid gap-2" role="radiogroup" aria-label={t('tn.setup.format')}>
+				{#each FORMATS as f (f)}
+					<label class="flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 hover:bg-surface {sf.format === f ? 'border-ink bg-row-sel' : 'border-line'}">
+						<input type="radio" class="radio radio-sm mt-1" name="st-format" value={f} bind:group={sf.format} />
+						<span class="min-w-0 flex-1">
+							<span class="block font-semibold text-ink">{t(`tn.format.${f}`)}</span>
+							<span class="block text-xs text-muted">{t(`tn.format.${f}.help`)}</span>
+						</span>
+					</label>
+				{/each}
 			</div>
-			<Field label={t('tn.setup.sequence')} type="number" min="1" bind:value={sf.sequence} error={run.fields.sequence} />
-		</div>
+			{#if run.fields.format}<span class="text-xs text-error">{run.fields.format}</span>{/if}
+		</fieldset>
+		<Field label={t('tn.setup.sequence')} type="number" min="1" bind:value={sf.sequence} error={run.fields.sequence} help={t('tn.setup.sequence_help')} />
 		{#if sf.format === 'swiss'}<Field label={t('tn.setup.rounds')} type="number" min="1" bind:value={sf.rounds} error={run.fields.rounds} required />{/if}
 		{#if sf.format === 'groups'}<Field label={t('tn.setup.num_groups')} type="number" min="1" bind:value={sf.num_groups} error={run.fields.num_groups} required />{/if}
 		<div class="grid grid-cols-3 gap-3">
