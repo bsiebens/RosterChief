@@ -108,6 +108,11 @@ def count_label(items, key):
 # --- documents -----------------------------------------------------------------------------------------------------------
 
 
+def group_ref(group) -> dict | None:
+    """A group by its own name ("Group A"): ``str(group)`` also carries the tournament and stage names, which only crowd a screen."""
+    return None if group is None else {"id": group.pk, "name": group.name}
+
+
 def team_ref(team) -> dict | None:
     if team is None:
         return None
@@ -169,7 +174,7 @@ def match_out(match: Match, *, with_field=True) -> dict:
     return {
         "home_team_id": match.home_team_id, "away_team_id": match.away_team_id, "home_is_tbd": match.home_team_id is None, "away_is_tbd": match.away_team_id is None,
         "home_source": side_source(match, "home"), "away_source": side_source(match, "away"), "group_id": match.group_id,
-        "id": match.pk, "stage_id": match.stage_id, "group": ref(match.group), "round_number": match.round_number, "round_label": match.round_label, "sequence": match.sequence,
+        "id": match.pk, "stage_id": match.stage_id, "group": group_ref(match.group), "round_number": match.round_number, "round_label": match.round_label, "sequence": match.sequence,
         "field": ref(match.field) if with_field else None, "scheduled_start": match.scheduled_start, "auto_scheduled": match.auto_scheduled, "status": match.status,
         "score_home": match.score_home, "score_away": match.score_away, "went_to_overtime": match.went_to_overtime, "penalty_home": match.penalty_home, "penalty_away": match.penalty_away,
         "home_team": team_ref(match.home_team), "away_team": team_ref(match.away_team), "home_display": match.home_display, "away_display": match.away_display,

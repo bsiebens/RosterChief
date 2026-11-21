@@ -64,6 +64,8 @@
 								</div>
 							{/each}
 						</div>
+					{:else}
+						<p class="text-sm text-muted">{t('tn.standings.bracket_empty')}</p>
 					{/each}
 				</div>
 			</section>

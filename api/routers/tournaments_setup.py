@@ -55,7 +55,7 @@ def rule_out(rule: BreakRule) -> dict:
 def _stage_doc(stage: TournamentStage, stage_count: int) -> dict:
     seedable = stage.format in SEEDABLE
     return {
-        **c.stage_summary(stage), "match_count": stage.matches.count(), "groups": [c.ref(g) for g in stage.groups.order_by("sequence")],
+        **c.stage_summary(stage), "match_count": stage.matches.count(), "groups": [c.group_ref(g) for g in stage.groups.filter(matches__isnull=False).distinct().order_by("sequence")],  # a group is only real once it has matches
         # single/double elimination can be seeded by hand ("Nth place of a group"); only worth asking when there is another stage to seed from
         "needs_seed_choice": seedable and stage_count > 1, "supports_placement": stage.format == TournamentStage.Format.SINGLE_ELIM,
     }  # fmt: skip

@@ -9,6 +9,9 @@
 	 */
 	let { board, canOperate, busy, onmove, onedit }: { board: BoardData; canOperate: boolean; busy: boolean; onmove: (match: MatchDoc, fieldId: string, startsAt: string) => void; onedit: (match: MatchDoc) => void } = $props();
 
+	/** The board gives each day's window as a timestamp; the wall-clock part is what the board needs ("2026-11-28T09:00:00+01:00" -> "09:00"). */
+	const clock = (v: string) => (/^\d{2}:\d{2}/.test(v) ? v.slice(0, 5) : v.slice(11, 16));
+
 	let dragging = $state<MatchDoc | null>(null);
 	let hover = $state<string>('');
 	const toMin = (hhmm: string) => {
@@ -40,10 +43,10 @@
 		<section class="card card-body gap-3">
 			<h3 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{f.field.name}</h3>
 			{#if f.rules.length}<p class="text-xs text-muted">{f.rules.map((r) => r.summary).join(' · ')}</p>{/if}
-			<div class="flex gap-4 overflow-x-auto pb-2">
+			<div class="grid gap-x-4 gap-y-5 overflow-x-auto pb-2 [grid-template-columns:repeat(auto-fit,minmax(15rem,1fr))]">
 				{#each f.days as day (day.date)}
-					<div class="w-52 shrink-0">
-						<p class="mb-1 font-mono text-xs text-muted">{fmtDay(day.date)} · {day.start}–{day.end}</p>
+					<div class="min-w-0">
+						<p class="mb-1 font-mono text-xs text-muted">{fmtDay(day.date)} · {clock(day.start)}–{clock(day.end)}</p>
 						<div
 							role="application"
 							aria-label={t('tn.sched.column', { field: f.field.name, day: fmtDay(day.date) })}
@@ -55,11 +58,14 @@
 								hover = f.field.id + day.date;
 							}}
 							ondragleave={() => (hover = '')}
-							ondrop={(e) => canOperate && drop(e, f.field.id, day.date, day.start)}>
-							{#each marks(day.start, day.end) as m (m.label)}
+							ondrop={(e) => canOperate && drop(e, f.field.id, day.date, clock(day.start))}>
+							{#each marks(clock(day.start), clock(day.end)) as m (m.label)}
 								<span class="pointer-events-none absolute -left-9 font-mono text-[10px] text-muted" style:top="{m.min * board.px_per_minute - 6}px">{m.label}</span>
 								<span class="pointer-events-none absolute inset-x-0 border-t border-dashed border-line" style:top="{m.min * board.px_per_minute}px"></span>
 							{/each}
+							{#if !day.slots.some((x) => x.type === 'match')}
+								<p class="pointer-events-none absolute inset-x-2 top-1/2 -translate-y-1/2 text-center text-xs text-muted">{t('tn.sched.day_empty')}</p>
+							{/if}
 							{#each day.slots as s, i (i)}
 								{#if s.type === 'match' && s.match}
 									{@const m = s.match}
@@ -76,7 +82,7 @@
 										<span class="block truncate font-semibold text-ink">{m.home_display} – {m.away_display}</span>
 										<span class="block truncate font-mono text-muted">{fmtTime(m.scheduled_start)} · {m.round_label}</span>
 									</button>
-								{:else}
+								{:else if day.slots.some((x) => x.type === 'match')}
 									<div class="pointer-events-none absolute inset-x-0.5 overflow-hidden rounded bg-ink/5 px-1.5 text-[10px] text-muted italic" style:top="{s.top_px}px" style:height="{s.height_px}px">
 										{s.rule?.summary ?? t('tn.sched.gap', { n: s.minutes })}
 									</div>

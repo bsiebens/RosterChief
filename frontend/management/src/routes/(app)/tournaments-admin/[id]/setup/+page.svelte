@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUp, CalendarClock, Coffee, GripVertical, Layers, LayoutGrid, MapPin, Network, Pencil, Plus, Repeat, Shuffle, Swords, Trash2, Users, Wrench, X, GitFork } from '@lucide/svelte';
+	import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUp, CalendarClock, Coffee, GripVertical, Layers, ListChecks, LayoutGrid, MapPin, Network, Pencil, Plus, Repeat, Shuffle, Swords, Trash2, Users, Wrench, X, GitFork } from '@lucide/svelte';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import Alert from '#lib/components/Alert.svelte';
@@ -133,6 +133,13 @@
 	// --- selected stage and its matches
 	const selectedId = $derived(page.url.searchParams.get('stage'));
 	const selected = $derived(stageList.find((x) => x.id === selectedId) ?? null);
+	/** Opens a stage's matches panel, or closes it again when that stage is already the open one. */
+	function toggleStage(id: string) {
+		const u = new URL(page.url.href);
+		if (id === selectedId) u.searchParams.delete('stage');
+		else u.searchParams.set('stage', id);
+		goto(u, { replace: true, reset: false });
+	}
 	function selectStage(id: string) {
 		if (id === selectedId) return;
 		const u = new URL(page.url.href);
@@ -334,7 +341,7 @@
 				<p class="text-sm text-muted">{t('tn.setup.no_stages')}</p>
 			{:else}
 				<p class="text-xs text-muted">{t('tn.setup.flow_hint')}</p>
-				<div class="grid items-start gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+				<div class="grid items-start gap-4 {selected ? 'xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]' : ''}">
 					<div class="flex flex-col gap-y-2 md:flex-row md:flex-wrap md:gap-y-3">
 						{#each stageList as s, i (s.id)}
 							{@const Icon = FORMAT_ICONS[s.format]}
@@ -367,14 +374,29 @@
 											<strong class="block truncate text-ink"><span class="font-mono text-xs text-muted">{i + 1}.</span> {s.name}</strong>
 											<span class="mt-1 flex flex-wrap items-center gap-1">
 												<span class="badge badge-sm badge-outline">{t(`tn.format.${s.format}`)}</span>
-												<span class="badge badge-sm badge-ghost">{s.status}</span>
+												<span class="badge badge-sm {s.status === 'active' ? 'badge-success' : s.status === 'complete' ? 'badge-neutral' : 'badge-ghost'}">{t(`tn.stage_status.${s.status}`)}</span>
 											</span>
 										</button>
 										{#if canOperate}<GripVertical size={16} class="mt-1 shrink-0 cursor-grab text-muted" aria-hidden="true" />{/if}
 									</div>
-									<p class="font-mono text-xs text-muted">
-										{t('tn.setup.matches', { n: s.match_count })}{s.groups.length ? ` · ${s.groups.map((g) => g.name).join(', ')}` : ''} · {t('tn.setup.points', { w: s.points_win, d: s.points_draw, l: s.points_loss })}
-									</p>
+									<dl class="grid grid-cols-3 gap-x-3 gap-y-1 border-t border-line pt-2">
+										<div class="min-w-0">
+											<dt class="font-display text-[10px] font-bold tracking-[.08em] text-muted uppercase">{t('tn.setup.stat.matches')}</dt>
+											<dd class="text-sm font-semibold text-ink">{s.match_count}</dd>
+										</div>
+										<div class="min-w-0">
+											<dt class="font-display text-[10px] font-bold tracking-[.08em] text-muted uppercase">{t('tn.setup.stat.groups')}</dt>
+											<dd class="text-sm font-semibold text-ink">{s.groups.length ? s.groups.map((g) => g.name.replace(/^Group\s+/i, '')).join(' · ') : '—'}</dd>
+										</div>
+										<div class="min-w-0">
+											<dt class="font-display text-[10px] font-bold tracking-[.08em] text-muted uppercase" title={t('tn.setup.stat.points_help')}>{t('tn.setup.stat.points')}</dt>
+											<dd class="text-sm font-semibold text-ink">{s.points_win} / {s.points_draw} / {s.points_loss}</dd>
+										</div>
+									</dl>
+									<button class="btn btn-outline btn-xs w-full gap-1" type="button" aria-pressed={isSel} onclick={() => toggleStage(s.id)}>
+										<ListChecks size={13} aria-hidden="true" />
+										{isSel ? t('tn.setup.hide_matches') : t('tn.setup.view_matches', { n: s.match_count })}
+									</button>
 									{#if canOperate}
 										<div class="flex flex-wrap items-center gap-2">
 											{#if isKnockout(s) || s.needs_seed_choice}
@@ -409,10 +431,8 @@
 						{/each}
 					</div>
 
-					<div class="grid gap-3 rounded-lg border border-line p-3">
-						{#if !selected}
-							<p class="text-sm text-muted">{t('tn.setup.panel_select')}</p>
-						{:else}
+					<div class="grid gap-3 rounded-lg border border-line p-3 {selected ? '' : 'hidden'}">
+						{#if selected}
 							<div class="flex flex-wrap items-center justify-between gap-2">
 								<h3 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('tn.setup.panel_title', { name: selected.name })}</h3>
 								{#if canOperate}<button class="btn btn-outline btn-sm gap-1" type="button" onclick={openAdd}><Plus size={14} /> {t('tn.setup.add_match')}</button>{/if}

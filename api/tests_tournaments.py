@@ -340,6 +340,20 @@ class TournamentApiTests(TestCase):
         r = gen()
         self.assertEqual((r.status_code, r.json()["code"]), (409, "has_results"))
 
+    def test_standings_list_every_team_even_before_a_match_is_played_and_skip_empty_groups(self):
+        t = self.make()
+        for i in range(1, 5):
+            TournamentTeam.objects.create(tournament=t, foreign_name=f"T{i}", foreign_contact_name="C", foreign_contact_email="c@x.test", seed=i)
+        stage = self.as_("operate", "post", f"/{t.pk}/stages", {"name": "Groups", "format": "groups", "num_groups": 2}).json()["id"]
+        self.as_("operate", "post", f"/{t.pk}/stages/{stage}/generate-matches", {})
+        TournamentGroup.objects.create(stage_id=stage, name="Group A", sequence=9)  # an empty leftover must not become a table
+        doc = self.as_("operate", "get", f"/{t.pk}/standings").json()["standings"][0]
+        self.assertEqual([tbl["group"]["name"] for tbl in doc["tables"]], ["Group A", "Group B"])
+        for table in doc["tables"]:
+            self.assertEqual(len(table["rows"]), 2)
+            self.assertEqual({r["played"] for r in table["rows"]}, {0})
+            self.assertEqual([r["rank"] for r in table["rows"]], [1, 2])
+
     def test_delete_only_a_draft_tournament(self):
         body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}
         tid = self.as_("manage", "post", "", body).json()["id"]

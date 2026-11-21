@@ -36,18 +36,36 @@ def standing_row(row: dict) -> dict:
     }  # fmt: skip
 
 
+def _table_rows(stage, group=None) -> list[dict]:
+    """The standings rows of a stage or group for display: the ranked teams, then every other team that is in its matches at zero, so a
+    table is never empty just because nothing has been played yet. (The ranking service itself only knows teams with a finished match.)"""
+    rows = svc.compute_standings(stage, group=group)
+    seen = {r["team"].id for r in rows}
+    matches = stage.matches.filter(group=group) if group is not None else stage.matches.all()
+    idle = {}
+    for match in matches.select_related("home_team__team", "away_team__team"):
+        for team in (match.home_team, match.away_team):
+            if team is not None and team.id not in seen:
+                idle[team.id] = team
+    zero = [
+        {"team": team, "played": 0, "won": 0, "drawn": 0, "lost": 0, "points": 0, "goals_for": 0, "goals_against": 0, "goal_diff": 0, "rank": len(rows) + i}
+        for i, team in enumerate(sorted(idle.values(), key=lambda t: t.display_name.lower()), start=1)
+    ]
+    return [standing_row(r) for r in [*rows, *zero]]
+
+
 def standings_doc(tournament) -> dict:
     """``standings``: one entry per table-like stage (groups, round robin, Swiss ...) with its tables; ``brackets``: knockout stages as rounds of matches."""
     standings, brackets = [], []
     for stage in tournament.stages.order_by("sequence").prefetch_related("groups"):
         if stage.format == TournamentStage.Format.GROUPS:
-            tables = [{"group": c.ref(g), "rows": [standing_row(r) for r in svc.compute_standings(stage, group=g)]} for g in stage.groups.order_by("sequence")]
+            tables = [{"group": c.group_ref(g), "rows": _table_rows(stage, g)} for g in stage.groups.filter(matches__isnull=False).distinct().order_by("sequence")]
             standings.append({"stage": c.stage_summary(stage), "tables": tables})
         elif stage.format in (TournamentStage.Format.SINGLE_ELIM, TournamentStage.Format.DOUBLE_ELIM):
             matches = list(stage.matches.select_related("home_team__team", "away_team__team", "home_source_match", "away_source_match", "home_source_group", "away_source_group").order_by("round_number", "sequence"))
             brackets.append({"stage": c.stage_summary(stage), "rounds": c.round_groups(matches)})
         else:
-            standings.append({"stage": c.stage_summary(stage), "tables": [{"group": None, "rows": [standing_row(r) for r in svc.compute_standings(stage)]}]})
+            standings.append({"stage": c.stage_summary(stage), "tables": [{"group": None, "rows": _table_rows(stage)}]})
     return {"standings": standings, "brackets": brackets}
 
 
