@@ -16,7 +16,8 @@ from members.services import access
 from members.services.errors import Invalid
 from teams.models import Team
 from tournaments.models import Tournament, TournamentRegistration, TournamentTeam
-from tournaments.services import notifications, registration as svc
+from tournaments.services import notifications
+from tournaments.services import registration as svc
 
 router = Router(auth=AUTHENTICATORS)
 

@@ -49,7 +49,8 @@ def get_tournament(tournament_id) -> Tournament:
 
 
 def get_or_404(model, **filters):
-    obj = model.objects.filter(**filters).first()
+    qs = model if hasattr(model, 'filter') else model.objects
+    obj = qs.filter(**filters).first()
     if obj is None:
         raise HttpError(404, "Not found.")
     return obj

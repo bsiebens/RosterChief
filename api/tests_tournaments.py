@@ -1,0 +1,368 @@
+"""Tournament API (``/tournaments``, ``/dressing-rooms``, ``/public/tournaments``, ``/portal/tournaments``): permission matrix, feature gate,
+/me flags, public pages and registration, and the happy paths (approve, schedule, results, standings, shifts)."""
+
+import datetime
+import json
+import uuid
+from unittest import mock
+
+from django.core.cache import cache
+from django.db import connection
+from django.test import Client, TestCase
+from django_tenants.utils import schema_context
+
+from authorization.services import assign_role, create_role
+from club.models import Club, Domain
+from club.services import create_club, grant_login
+from controlpanel.tests import login_session, make_user
+from events.models import Season
+from features.entitlements import Entitlement, Entitlements
+from members.models import Member
+from teams.models import Team
+from tournaments.models import Match, Tournament, TournamentField, TournamentTask, TournamentTeam
+
+BASE = "/api/v1"
+WITH = Entitlements({"tournaments": Entitlement(True)})
+PERMS = {"manage": "tournaments.manage_tournaments", "operate": "tournaments.operate_tournaments"}
+
+
+class TournamentApiTests(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._mfa = mock.patch("authorization.middleware.is_local_development", return_value=True)
+        cls._mfa.start()
+        super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        connection.set_schema_to_public()
+        cls._mfa.stop()
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = make_user("owner@trn.test", first="Olivia", last="Owner")
+        public = Club(schema_name="public", name="Platform", owner=cls.owner)
+        public.auto_create_schema = False
+        public.save()
+        Domain.objects.create(domain="testserver", tenant=public, is_primary=True)
+        cls.club = create_club("Trn FC", cls.owner)
+        cls.host = Domain.objects.get(tenant=cls.club, is_primary=True).domain
+        cls.users = {}
+        with schema_context(cls.club.schema_name):
+            cls.season = Season.objects.create(start_date=datetime.date(2026, 7, 1), end_date=datetime.date(2027, 6, 30))
+            cls.club_team = Team.objects.create(name="First Team", short_name="1st")
+            members = {key: Member.objects.create(first_name=key.title(), last_name="Staff", email=f"{key}@trn.test") for key in [*PERMS, "plain"]}
+            roles = {key: create_role(f"Trn {key}", [code]) for key, code in PERMS.items()}
+        for key, member in members.items():
+            user, _ = grant_login(cls.club, member)
+            cls.users[key] = user
+            cls.users[key + "_member"] = member
+            if key in roles:
+                with schema_context(cls.club.schema_name):
+                    assign_role(user, roles[key])
+        cls.owner = type(cls.owner).objects.get(pk=cls.owner.pk)
+
+    def setUp(self):
+        self.features = WITH
+        for target in ("features.middleware.entitlements_for_request", "features.context.get_current_entitlements", "features.backends.get_current_entitlements"):
+            patcher = mock.patch(target, side_effect=lambda *a, **k: self.features)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        door = mock.patch("members.services.access.can_access_management", return_value=True)
+        door.start()
+        self.addCleanup(door.stop)
+        targets = (
+            "api.routers.tournaments.notifications.dispatch_notify_tournament_shifts_open",
+            "api.routers.tournaments.notifications.send_registration_decision_email",
+            "api.routers.public_tournaments.notifications.send_registration_confirmation_email",
+        )
+        for target in targets:
+            patcher = mock.patch(target)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        cache.clear()
+        ctx = schema_context(self.club.schema_name)
+        ctx.__enter__()
+        self.addCleanup(ctx.__exit__, None, None, None)
+
+    # -- helpers --
+
+    def call(self, method, path, user=None, data=None, prefix="/tournaments"):
+        headers = {"HTTP_HOST": self.host}
+        if user is not None:
+            headers["HTTP_X_SESSION_TOKEN"] = login_session(user)
+        body = {"data": json.dumps(data), "content_type": "application/json"} if data is not None else {}
+        response = getattr(Client(), method)(BASE + prefix + path, **body, **headers)
+        connection.set_tenant(self.club)
+        return response
+
+    def as_(self, key, method, path, data=None, prefix="/tournaments"):
+        return self.call(method, path, self.owner if key == "owner" else self.users[key], data, prefix)
+
+    def make(self, **kw):
+        fields = {"name": "Summer Cup", "season": self.season, "start_date": datetime.date(2026, 9, 19), "end_date": datetime.date(2026, 9, 20)}
+        return Tournament.objects.create(**{**fields, **kw})
+
+    def foreign(self, tournament, name):
+        return TournamentTeam.objects.create(tournament=tournament, foreign_name=name, foreign_contact_name="C", foreign_contact_email="c@x.test")
+
+    # -- permission matrix --
+
+    def test_permission_matrix(self):
+        t = self.make()
+        i = uuid.uuid4()
+        endpoints = [  # (method, path, body, keys that may pass)
+            ("get", "", None, {"manage", "operate"}),
+            ("get", f"/{t.pk}", None, {"manage", "operate"}),
+            ("get", f"/{t.pk}/standings", None, {"manage", "operate"}),
+            ("get", f"/{t.pk}/setup", None, {"manage", "operate"}),
+            ("get", f"/{t.pk}/tasks", None, {"manage", "operate"}),
+            ("post", "", {"name": "X", "start_date": "2026-09-19", "end_date": "2026-09-20"}, {"manage"}),
+            ("patch", f"/{t.pk}", {"name": "Y"}, {"manage"}),
+            ("post", f"/registrations/{i}/approve", None, {"manage"}),
+            ("post", f"/teams/{i}/withdraw", {}, {"manage"}),
+            ("patch", f"/teams/{i}/payment", {"payment_status": "unpaid"}, {"manage"}),
+            ("post", f"/{t.pk}/fields", {"name": "F1"}, {"manage", "operate"}),
+            ("post", f"/{t.pk}/schedule/clear", None, {"manage", "operate"}),
+            ("post", f"/{t.pk}/tasks", {"title": "Gate", "starts_at": "2026-09-19T09:00:00Z", "ends_at": "2026-09-19T10:00:00Z"}, {"manage", "operate"}),
+        ]
+        for method, path, body, allowed in endpoints:
+            for key in ("plain", "manage", "operate"):
+                response = self.as_(key, method, path, body)
+                if key in allowed:
+                    self.assertNotEqual(response.status_code, 403, (key, method, path))
+                else:
+                    self.assertEqual(response.status_code, 403, (key, method, path))
+            self.assertNotEqual(self.as_("owner", method, path, body).status_code, 403, ("owner", method, path))
+            self.assertEqual(self.call(method, path, None, body).status_code, 401, (method, path))
+        self.assertEqual(self.as_("plain", "get", "", prefix="/dressing-rooms").status_code, 403)
+        self.assertEqual(self.as_("operate", "post", "", {"name": "Room"}, prefix="/dressing-rooms").status_code, 403)
+        self.assertEqual(self.as_("manage", "post", "", {"name": "Room"}, prefix="/dressing-rooms").status_code, 201)
+
+    def test_no_feature_is_404_for_owner_and_403_for_holders(self):
+        t = self.make()
+        self.features = Entitlements({})
+        self.assertEqual(self.as_("owner", "get", "").status_code, 404)
+        self.assertEqual(self.as_("owner", "get", f"/{t.pk}/schedule").status_code, 404)
+        self.assertEqual(self.as_("owner", "get", "", prefix="/dressing-rooms").status_code, 404)
+        self.assertEqual(self.as_("manage", "get", "").status_code, 403)
+        self.assertEqual(self.as_("plain", "get", "").status_code, 403)
+
+    def test_me_flags(self):
+        def me(key):
+            user = self.owner if key == "owner" else self.users[key]
+            body = Client().get(BASE + "/me", HTTP_HOST=self.host, HTTP_X_SESSION_TOKEN=login_session(user)).json()
+            return body["can_manage_tournaments"], body["can_operate_tournaments"]
+
+        self.assertEqual(me("owner"), (True, True))
+        self.assertEqual(me("manage"), (True, True))
+        self.assertEqual(me("operate"), (False, True))
+        self.assertEqual(me("plain"), (False, False))
+        self.features = Entitlements({})
+        self.assertEqual(me("owner"), (False, False))
+
+    # -- tournament and registration queue --
+
+    def test_create_update_and_season_rules(self):
+        body = {"name": "Autumn Cup", "start_date": "2026-10-03", "end_date": "2026-10-04", "status": "published", "home_team_id": str(self.club_team.pk)}
+        r = self.as_("manage", "post", "", body)
+        self.assertEqual(r.status_code, 201, r.content)
+        tid = r.json()["id"]
+        self.assertEqual(r.json()["slug"], "autumn-cup")
+        self.assertTrue(TournamentTeam.objects.filter(tournament_id=tid, team=self.club_team).exists())  # home team entered
+        self.assertEqual(self.as_("manage", "post", "", {**body, "start_date": "2030-01-01", "end_date": "2030-01-02"}).status_code, 422)  # no season
+        self.assertEqual(self.as_("manage", "post", "", {**body, "end_date": "2026-10-01"}).status_code, 422)
+        r = self.as_("manage", "patch", f"/{tid}", {"max_teams": 8, "entry_fee_amount": "25"})
+        self.assertEqual((r.json()["max_teams"], r.json()["entry_fee_amount"]), (8, "25.00"))
+        self.assertEqual(self.as_("operate", "get", "").json()["results"][0]["name"], "Autumn Cup")
+
+    def test_public_registration_approve_and_status(self):
+        t = self.make(status="published", lunch_mode="optional", entry_fee_amount="50")
+        slug = t.slug
+        players = [
+            {"first_name": "Ann", "last_name": "A", "jersey_number": 7, "date_of_birth": "2010-05-01", "lunch_days": ["2026-09-19", "2030-01-01"]},
+            {"first_name": "Coach", "last_name": "C", "role": "staff", "date_of_birth": "1980-01-01"},
+            {"first_name": "", "last_name": ""},
+        ]
+        payload = {"foreign_name": "Visitors", "foreign_contact_name": "Vic", "foreign_contact_email": "vic@x.test", "players": players}
+        r = self.call("post", f"/{slug}/registrations", None, payload, prefix="/public/tournaments")
+        self.assertEqual(r.status_code, 201, r.content)
+        token = r.json()["status_token"]
+        status = self.call("get", f"/{slug}/registrations/{token}", prefix="/public/tournaments").json()
+        self.assertEqual(status["registration"]["status"], "pending")
+        self.assertEqual([p["name"] for p in status["players"]], ["Ann A", "Coach C"])
+        self.assertEqual(status["players"][0]["lunch_days"], ["2026-09-19"])
+        self.assertIsNone(status["players"][1]["date_of_birth"])  # staff has none
+        # validation: duplicate jersey numbers, bad email, future date of birth
+        bad = {**payload, "players": [{"first_name": "A", "last_name": "B", "jersey_number": 1}, {"first_name": "C", "last_name": "D", "jersey_number": 1}]}
+        self.assertEqual(self.call("post", f"/{slug}/registrations", None, bad, prefix="/public/tournaments").status_code, 422)
+        self.assertEqual(self.call("post", f"/{slug}/registrations", None, {**payload, "foreign_contact_email": "nope"}, prefix="/public/tournaments").status_code, 422)
+        future = {**payload, "players": [{"first_name": "A", "last_name": "B", "date_of_birth": "2999-01-01"}]}
+        self.assertEqual(self.call("post", f"/{slug}/registrations", None, future, prefix="/public/tournaments").status_code, 422)
+        # staff: queue, approve, then approving again conflicts
+        queue = self.as_("operate", "get", f"/{t.pk}/registrations").json()["results"]
+        self.assertEqual(len(queue), 1)
+        rid = queue[0]["id"]
+        self.assertEqual(self.as_("operate", "post", f"/registrations/{rid}/approve").status_code, 403)
+        r = self.as_("manage", "post", f"/registrations/{rid}/approve")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(self.as_("manage", "post", f"/registrations/{rid}/approve").status_code, 409)
+        team = TournamentTeam.objects.get(tournament=t)
+        self.assertEqual(team.roster_entries.count(), 2)
+        status = self.call("get", f"/{slug}/registrations/{token}", prefix="/public/tournaments").json()
+        self.assertEqual(status["registration"]["status"], "approved")
+        self.assertEqual(status["amount_owed"], "50.00")
+        # roster stays editable by the team until the tournament starts
+        with mock.patch("api.routers.public_tournaments.timezone.localdate", return_value=datetime.date(2026, 9, 1)):
+            r = self.call("put", f"/{slug}/registrations/{token}/players", None, {"players": [{"first_name": "New", "last_name": "P"}]}, prefix="/public/tournaments")
+        self.assertEqual((r.status_code, team.roster_entries.count()), (200, 1), r.content)
+        r = self.call("put", f"/{slug}/registrations/{token}/players", None, {"players": []}, prefix="/public/tournaments")  # tournament has started
+        self.assertEqual((r.status_code, r.json()["code"]), (422, "locked"))
+        # payment and withdrawal
+        self.assertEqual(self.as_("manage", "patch", f"/teams/{team.pk}/payment", {"payment_status": "fully_paid"}).json()["payment_status"], "fully_paid")
+        self.assertEqual(self.as_("manage", "post", f"/teams/{team.pk}/withdraw", {"reason": "ill"}).status_code, 200)
+
+    def test_reject_registration(self):
+        t = self.make(status="published")
+        self.call("post", f"/{t.slug}/registrations", None, {"foreign_name": "V", "foreign_contact_name": "Vic", "foreign_contact_email": "v@x.test"}, prefix="/public/tournaments")
+        rid = self.as_("manage", "get", f"/{t.pk}/registrations").json()["results"][0]["id"]
+        self.assertEqual(self.as_("manage", "post", f"/registrations/{rid}/reject", {"reason": "full"}).json()["status"], "rejected")
+
+    def test_registration_closed_and_hidden_states(self):
+        draft = self.make(name="D", status="draft")
+        self.assertEqual(self.call("get", f"/{draft.slug}", prefix="/public/tournaments").status_code, 200)
+        self.assertEqual(self.call("get", "", prefix="/public/tournaments").json()["upcoming"], [])
+        closed = self.make(name="C", status="published", registration_open=False)
+        body = {"foreign_name": "V", "foreign_contact_name": "Vic", "foreign_contact_email": "v@x.test"}
+        r = self.call("post", f"/{closed.slug}/registrations", None, body, prefix="/public/tournaments")
+        self.assertEqual((r.status_code, r.json()["code"]), (422, "closed"))
+        started = self.make(name="S", status="in_progress")
+        self.assertEqual(self.call("post", f"/{started.slug}/registrations", None, body, prefix="/public/tournaments").status_code, 404)
+
+    def test_public_endpoints_are_404_without_feature(self):
+        t = self.make(status="published")
+        self.features = Entitlements({})
+        for path in ("", f"/{t.slug}", f"/{t.slug}/schedule", f"/{t.slug}/standings", f"/{t.slug}/teams"):
+            self.assertEqual(self.call("get", path, prefix="/public/tournaments").status_code, 404, path)
+        body = {"foreign_name": "V", "foreign_contact_name": "Vic", "foreign_contact_email": "v@x.test"}
+        self.assertEqual(self.call("post", f"/{t.slug}/registrations", None, body, prefix="/public/tournaments").status_code, 404)
+
+    # -- competition --
+
+    def test_schedule_results_and_standings(self):
+        t = self.make(status="in_progress")
+        teams = [self.foreign(t, n) for n in ("Alpha", "Bravo", "Charlie")]
+        r = self.as_("operate", "post", f"/{t.pk}/fields", {"name": "Field 1", "availability": [{"date": "2026-09-19", "start": "09:00", "end": "18:00"}]})
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/fields", {"name": "F", "availability": [{"date": "2026-09-19", "start": "10:00", "end": "09:00"}]}).status_code, 422)
+        r = self.as_("operate", "post", f"/{t.pk}/stages", {"name": "League", "format": "round_robin"})
+        self.assertEqual(r.status_code, 201, r.content)
+        sid = r.json()["id"]
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/stages", {"name": "Swiss", "format": "swiss"}).status_code, 422)  # rounds required
+        r = self.as_("operate", "post", f"/{t.pk}/stages/{sid}/generate-matches", {})
+        self.assertEqual((r.status_code, r.json().get("generated_count")), (200, 3), r.content)
+        r = self.as_("operate", "post", f"/{t.pk}/schedule/generate", {"match_duration_minutes": 30})
+        self.assertEqual((r.status_code, r.json()["scheduled_count"]), (200, 3), r.content)
+        schedule = self.as_("manage", "get", f"/{t.pk}/schedule").json()
+        matches = [m for rnd in schedule["stages"][0]["rounds"] for m in rnd["matches"]]
+        self.assertTrue(all(m["field"] and m["scheduled_start"] for m in matches))
+        self.assertEqual(self.as_("manage", "get", f"/{t.pk}/schedule/board").status_code, 200)
+        for m, (h, a) in zip(matches, [(3, 0), (1, 1), (0, 2)], strict=True):
+            r = self.as_("operate", "post", f"/matches/{m['id']}/result", {"score_home": h, "score_away": a})
+            self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(Match.objects.filter(status="complete").count(), 3)
+        rows = self.as_("manage", "get", f"/{t.pk}/standings").json()["standings"][0]["tables"][0]["rows"]
+        self.assertEqual([r["rank"] for r in rows], [1, 2, 3])
+        self.assertEqual(sorted(r["points"] for r in rows), sorted([r["points"] for r in rows]))
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/schedule/clear").json()["cleared_count"], 0)  # all played
+        public = self.call("get", f"/{t.slug}/standings", prefix="/public/tournaments").json()
+        self.assertEqual(len(public["standings"][0]["tables"][0]["rows"]), 3)
+        self.assertEqual(len(teams), 3)
+
+    def test_result_needs_both_teams_and_reschedule_unknown_field(self):
+        t = self.make()
+        stage = t.stages.create(name="Cup", format="single_elim")
+        m = Match.objects.create(stage=stage)
+        self.assertEqual(self.as_("operate", "post", f"/matches/{m.pk}/result", {"score_home": 1, "score_away": 0}).status_code, 422)
+        r = self.as_("operate", "post", f"/matches/{m.pk}/reschedule", {"field_id": str(uuid.uuid4()), "scheduled_start": "2026-09-19T10:00:00Z"})
+        self.assertEqual(r.status_code, 422)
+
+    def test_schedule_blocks_and_break_rules(self):
+        t = self.make()
+        field = TournamentField.objects.create(tournament=t, name="F1")
+        r = self.as_("operate", "post", f"/{t.pk}/schedule-blocks", {"title": "Lunch", "starts_at": "2026-09-19T12:00:00Z", "ends_at": "2026-09-19T13:00:00Z", "field_id": str(field.pk)})
+        self.assertEqual(r.status_code, 201, r.content)
+        bad = {"title": "x", "starts_at": "2026-09-19T13:00:00Z", "ends_at": "2026-09-19T12:00:00Z"}
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/schedule-blocks", bad).status_code, 422)
+        r = self.as_("operate", "post", f"/{t.pk}/break-rules", {"trigger_type": "game_count", "trigger_every_n_games": 3, "gap_minutes": 15})
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/break-rules", {"trigger_type": "game_count"}).status_code, 422)
+        setup = self.as_("operate", "get", f"/{t.pk}/setup").json()
+        self.assertEqual(len(setup["break_rules"]), 1)
+
+    # -- roster, lunch, PDFs --
+
+    def test_roster_crud_lunch_and_pdf(self):
+        t = self.make(lunch_mode="optional", lunch_price_per_day="8")
+        team = self.foreign(t, "Alpha")
+        path = f"/{t.pk}/teams/{team.pk}/roster"
+        r = self.as_("operate", "post", path, {"first_name": "Ann", "last_name": "A", "jersey_number": 9, "date_of_birth": "2010-01-01", "lunch_days": ["2026-09-20"]})
+        self.assertEqual(r.status_code, 201, r.content)
+        eid = r.json()["id"]
+        self.assertEqual(self.as_("operate", "post", path, {"first_name": "B", "last_name": "B", "jersey_number": 9}).status_code, 422)  # jersey taken
+        self.assertEqual(self.as_("operate", "put", f"{path}/{eid}/lunch", {"lunch_days": ["2026-09-19", "2026-09-20"]}).json()["lunch_days"], ["2026-09-19", "2026-09-20"])
+        r = self.as_("operate", "patch", f"{path}/{eid}", {"role": "staff"})
+        self.assertIsNone(r.json()["date_of_birth"])
+        doc = self.as_("manage", "get", path).json()
+        self.assertEqual(doc["lunch"][0]["staff_count"], 1)
+        with mock.patch("tournaments.services.pdf._write_pdf", return_value=b"%PDF-1") as write:
+            r = self.as_("manage", "get", f"{path}/pdf")
+            self.assertEqual((r.status_code, r["Content-Type"]), (200, "application/pdf"))
+            self.assertEqual(self.as_("manage", "get", f"/{t.pk}/lunch-summary/pdf").status_code, 200)
+            self.assertEqual(write.call_count, 2)
+        self.assertEqual(self.as_("operate", "delete", f"{path}/{eid}").status_code, 204)
+
+    def test_manual_teams(self):
+        t = self.make()
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/teams", {"kind": "foreign", "foreign_name": "X"}).status_code, 422)
+        r = self.as_("operate", "post", f"/{t.pk}/teams", {"kind": "foreign", "foreign_name": "X", "foreign_contact_name": "C", "foreign_contact_email": "c@x.test"})
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/teams", {"kind": "club", "team_id": str(self.club_team.pk)}).status_code, 201)
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/teams", {"kind": "club", "team_id": str(self.club_team.pk)}).status_code, 422)
+        self.assertEqual(self.as_("operate", "delete", f"/teams/{r.json()['id']}").status_code, 403)
+        self.assertEqual(self.as_("manage", "delete", f"/teams/{r.json()['id']}").status_code, 204)
+
+    # -- tasks, dressing rooms, portal --
+
+    def test_tasks_and_portal_claim(self):
+        t = self.make(status="published")
+        body = {"title": "Gate", "starts_at": "2026-09-19T09:00:00Z", "ends_at": "2026-09-19T10:30:00Z", "shift_minutes": 30, "needed_quantity": 1}
+        r = self.as_("operate", "post", f"/{t.pk}/tasks/generate", body)
+        self.assertEqual((r.status_code, r.json()["created_count"]), (201, 3), r.content)
+        task = TournamentTask.objects.order_by("starts_at").first()
+        plain = self.users["plain"]
+        r = self.call("post", f"/tasks/{task.pk}/claim", plain, prefix="/portal/tournaments")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.json()["claimed_by_me"])
+        self.assertEqual(self.call("post", f"/tasks/{task.pk}/claim", plain, prefix="/portal/tournaments").status_code, 409)
+        listed = self.call("get", f"/{t.slug}/tasks", plain, prefix="/portal/tournaments").json()["results"]
+        self.assertEqual([x["claimed"] for x in listed], [1, 0, 0])
+        self.assertEqual(self.as_("operate", "get", f"/{t.pk}/tasks").json()["results"][0]["claims"][0]["member"]["id"], str(self.users["plain_member"].pk))
+        r = self.as_("operate", "post", f"/{t.pk}/tasks/{task.pk}/assign", {"member_id": str(self.users["manage_member"].pk)})
+        self.assertEqual(r.status_code, 409)  # full
+        self.assertEqual(self.call("delete", f"/tasks/{task.pk}/claim", plain, prefix="/portal/tournaments").json()["claimed"], 0)
+        self.assertEqual(self.as_("operate", "get", f"/{t.pk}/tasks/print").status_code, 200)
+        self.features = Entitlements({})
+        self.assertEqual(self.call("get", "", plain, prefix="/portal/tournaments").status_code, 404)
+
+    def test_dressing_rooms_and_bookings(self):
+        t = self.make()
+        team = self.foreign(t, "Alpha")
+        room = self.as_("manage", "post", "", {"name": "Room 1", "capacity": 20}, prefix="/dressing-rooms").json()
+        r = self.as_("operate", "post", f"/{t.pk}/dressing-rooms/assignments", {"dressing_room_id": room["id"], "tournament_team_id": str(team.pk)})
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/dressing-rooms/assignments", {"dressing_room_id": room["id"], "tournament_team_id": str(team.pk)}).status_code, 409)
+        doc = self.as_("operate", "get", f"/{t.pk}/dressing-rooms").json()
+        self.assertEqual(len(doc["teams"][0]["assignments"]), 1)
+        self.assertEqual(self.as_("operate", "delete", f"/{t.pk}/dressing-rooms/assignments/{r.json()['id']}").status_code, 204)

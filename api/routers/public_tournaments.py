@@ -20,7 +20,7 @@ from ninja.errors import HttpError
 
 from api.routers import tournaments_common as c
 from api.routers.public_registration import _address, _count, _too_many
-from api.routers.tournaments_competition import standings_doc, stages_doc
+from api.routers.tournaments_competition import stages_doc, standings_doc
 from api.routers.tournaments_roster import check_birth_date, lunch_days_for
 from api.schemas_tournaments import PlayerRowIn, PlayersIn, PublicRegistrationIn
 from members.services.errors import Invalid
