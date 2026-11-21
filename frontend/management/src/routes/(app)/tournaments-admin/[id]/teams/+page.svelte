@@ -111,19 +111,21 @@
 								{/if}
 							</td>
 							<td class="text-right whitespace-nowrap">
-								<a class="btn btn-outline btn-xs" href="{TBASE}/{tn.id}/teams/{team.id}">{t('tn.teams.roster')}</a>
-								{#if canOperate}
-									<label class="btn btn-outline btn-xs focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-club">
-										{t('tn.teams.logo')}
-										<input type="file" accept="image/*" class="sr-only" onchange={(e) => { uploadLogo(team, e.currentTarget.files?.[0]); e.currentTarget.value = ''; }} />
-									</label>
-								{/if}
-								{#if canManage && !team.withdrawn_at}
-									<button class="btn btn-outline btn-warning btn-xs" type="button" onclick={() => { withdrawing = team; withdrawReason = ''; run.clear(); withdrawOpen = true; }}>{t('tn.teams.withdraw')}</button>
-								{/if}
-								{#if canManage && !team.registration_id}
-									<button class="btn btn-ghost btn-xs btn-square text-error" type="button" aria-label={t('tn.teams.delete_named', { name: team.name })} onclick={() => { deleting = team; run.clear(); deleteOpen = true; }}><Trash2 size={14} /></button>
-								{/if}
+								<div class="flex items-center justify-end gap-1">
+									<a class="btn btn-outline btn-xs" href="{TBASE}/{tn.id}/teams/{team.id}">{t('tn.teams.roster')}</a>
+									{#if canOperate}
+										<label class="btn btn-outline btn-xs focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-club">
+											{t('tn.teams.logo')}
+											<input type="file" accept="image/*" class="sr-only" onchange={(e) => { uploadLogo(team, e.currentTarget.files?.[0]); e.currentTarget.value = ''; }} />
+										</label>
+									{/if}
+									{#if canManage && !team.withdrawn_at}
+										<button class="btn btn-outline btn-warning btn-xs" type="button" onclick={() => { withdrawing = team; withdrawReason = ''; run.clear(); withdrawOpen = true; }}>{t('tn.teams.withdraw')}</button>
+									{/if}
+									{#if canManage && !team.registration_id}
+										<button class="btn btn-outline btn-error btn-xs btn-square w-6" type="button" aria-label={t('tn.teams.delete_named', { name: team.name })} onclick={() => { deleting = team; run.clear(); deleteOpen = true; }}><Trash2 size={14} /></button>
+									{/if}
+								</div>
 							</td>
 						</tr>
 					{/each}
