@@ -1950,6 +1950,38 @@ class AllocateScheduleTests(TournamentsTestCase):
         gap = ordered[1].scheduled_start - (ordered[0].scheduled_start + DEFAULT_MATCH_DURATION)
         self.assertEqual(gap, datetime.timedelta(minutes=30))
 
+    def _gaps(self):
+        teams = [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 7)]
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "23:00"}])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+        allocate_schedule(self.tournament)
+        ordered = list(Match.objects.filter(stage=stage).order_by("scheduled_start"))
+        return {ordered[i + 1].scheduled_start - (ordered[i].scheduled_start + DEFAULT_MATCH_DURATION) for i in range(len(ordered) - 1)}
+
+    def test_the_default_gap_is_five_minutes_unless_the_tournament_says_otherwise(self):
+        self.assertEqual(self.tournament.default_gap_minutes, 5)
+        self.assertEqual(self._gaps(), {datetime.timedelta(minutes=5)})
+
+    def test_the_tournaments_own_gap_is_used_between_matches(self):
+        self.tournament.default_gap_minutes = 12
+        self.tournament.save(update_fields=["default_gap_minutes"])
+
+        self.assertEqual(self._gaps(), {datetime.timedelta(minutes=12)})
+
+    def test_a_gap_of_zero_puts_matches_back_to_back(self):
+        self.tournament.default_gap_minutes = 0
+        self.tournament.save(update_fields=["default_gap_minutes"])
+
+        self.assertEqual(self._gaps(), {datetime.timedelta(0)})
+
+    def test_an_additive_break_rule_adds_to_the_tournaments_gap(self):
+        self.tournament.default_gap_minutes = 10
+        self.tournament.save(update_fields=["default_gap_minutes"])
+        BreakRule.objects.create(tournament=self.tournament, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=1, gap_minutes=5, replaces_default_gap=False)
+
+        self.assertEqual(self._gaps(), {datetime.timedelta(minutes=15)})
+
     def test_break_rule_recurs_consistently_across_multiple_cycles(self):
         # Regression test: the "games since last break" counter used to
         # reset to 0 instead of 1 once a break fired -- the match that just

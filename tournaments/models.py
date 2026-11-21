@@ -145,6 +145,8 @@ class Tournament(UUIDModel):
     #: tournaments.services.scheduling.DEFAULT_MATCH_DURATION's own 45-minute
     #: assumption, now a real per-tournament setting instead of a hardcoded
     #: module constant.
+    #: The standing gap between two matches on a field, which break rules then replace or add to.
+    default_gap_minutes = models.PositiveSmallIntegerField(_("gap between matches (minutes)"), default=5, help_text=_("The time left between two matches on a field. A break rule can replace it or add to it."))
     default_match_duration_minutes = models.PositiveSmallIntegerField(_("default match duration (minutes)"), default=45, help_text=_("How long a single match is assumed to run. Pre-fills the “Generate schedule” form -- still adjustable per run."))
     #: Set by ``tournaments.services.scheduling.reschedule_match`` on every
     #: manual hand-move (the schedule table's inline form, or a board-view
@@ -184,9 +186,12 @@ class Tournament(UUIDModel):
         immediately without anything else having to notice and react."""
         if self.status not in (self.Status.DRAFT, self.Status.PUBLISHED) or not self.registration_open:
             return False
-        if self.max_teams is not None and self.teams.filter(withdrawn_at__isnull=True).count() >= self.max_teams:
-            return False
-        return True
+        return not self.is_full
+
+    @property
+    def is_full(self) -> bool:
+        """Whether ``max_teams`` teams are already in: withdrawn teams don't count, so a withdrawal or a deletion frees a place."""
+        return self.max_teams is not None and self.teams.filter(withdrawn_at__isnull=True).count() >= self.max_teams
 
     @property
     def location(self):

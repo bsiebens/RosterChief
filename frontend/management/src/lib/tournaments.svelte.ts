@@ -25,6 +25,7 @@ export type TournamentItem = {
 export type TDay = { date: string; starts_at: string; ends_at: string };
 export type TournamentDetail = TournamentItem & {
 	days: TDay[];
+	is_full: boolean;
 	contact_email: string;
 	description: string;
 	earliest_birth_year: number | null;
@@ -37,6 +38,7 @@ export type TournamentDetail = TournamentItem & {
 	lunch_price_per_day: string | null;
 	lunch_billed_with_fee: boolean;
 	default_match_duration_minutes: number | null;
+	default_gap_minutes: number;
 	schedule_needs_regeneration: boolean;
 	dates: string[];
 	location: string | null;

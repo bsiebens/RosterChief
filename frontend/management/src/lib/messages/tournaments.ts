@@ -79,6 +79,8 @@ const rows: [string, string, string, string][] = [
 	['tn.f.lunch_mode', 'Lunch', 'Lunch', 'Déjeuner'],
 	['tn.f.lunch_price', 'Lunch price per day', 'Lunchprijs per dag', 'Prix du déjeuner par jour'],
 	['tn.f.lunch_with_fee', 'Bill the lunch together with the entry fee', 'Lunch factureren samen met het inschrijvingsgeld', 'Facturer le déjeuner avec les frais d’inscription'],
+	['tn.f.gap', 'Gap between matches (minutes)', 'Tijd tussen wedstrijden (minuten)', 'Intervalle entre les matchs (minutes)'],
+	['tn.f.gap_help', 'Left free on a field between two matches. Break rules can replace it or add to it.', 'Tijd die op een veld vrij blijft tussen twee wedstrijden. Pauzeregels kunnen dit vervangen of aanvullen.', 'Laissé libre sur un terrain entre deux matchs. Les règles de pause peuvent le remplacer ou s’y ajouter.'],
 	['tn.f.match_duration', 'Default match duration (minutes)', 'Standaardduur wedstrijd (minuten)', 'Durée de match par défaut (minutes)'],
 	['tn.f.match_duration_help', 'Used when generating the schedule, unless you enter another duration there.', 'Wordt gebruikt bij het genereren van het schema, tenzij je daar een andere duur invult.', 'Utilisée lors de la génération du calendrier, sauf si vous saisissez une autre durée.'],
 	['tn.lunch.none', 'No lunch', 'Geen lunch', 'Pas de déjeuner'],
@@ -105,6 +107,7 @@ const rows: [string, string, string, string][] = [
 	// teams
 	['tn.teams.count', '{n} teams', '{n} teams', '{n} équipes'],
 	['tn.teams.empty', 'No teams have been entered yet.', 'Er zijn nog geen teams ingeschreven.', 'Aucune équipe n’est encore inscrite.'],
+	['tn.teams.full_hint', 'The tournament is full (maximum {n} teams). Withdraw or delete a team to add another.', 'Het toernooi is vol (maximaal {n} teams). Trek een team terug of verwijder er een om een ander toe te voegen.', 'Le tournoi est complet (maximum {n} équipes). Retirez ou supprimez une équipe pour en ajouter une autre.'],
 	['tn.teams.add', 'Add team', 'Team toevoegen', 'Ajouter une équipe'],
 	['tn.teams.lunch_pdf', 'Lunch summary (PDF)', 'Lunchoverzicht (PDF)', 'Récapitulatif des déjeuners (PDF)'],
 	['tn.teams.col.team', 'Team', 'Team', 'Équipe'],
@@ -255,7 +258,7 @@ const rows: [string, string, string, string][] = [
 	['tn.setup.gap_minutes', 'Break (minutes)', 'Pauze (minuten)', 'Pause (minutes)'],
 	['tn.setup.rule_up', 'Move up (tried earlier)', 'Naar boven (eerder toegepast)', 'Monter (appliquée plus tôt)'],
 	['tn.setup.rule_down', 'Move down (tried later)', 'Naar beneden (later toegepast)', 'Descendre (appliquée plus tard)'],
-	['tn.setup.replaces_gap', 'Replaces the normal gap between matches', 'Vervangt de normale tijd tussen wedstrijden', 'Remplace l’intervalle normal entre les matchs'],
+	['tn.setup.replaces_gap', 'Replaces the standard gap between matches ({n} min); leave unticked to add it on top', 'Vervangt de standaardtijd tussen wedstrijden ({n} min); laat uit om het erbovenop te tellen', 'Remplace l’intervalle standard entre les matchs ({n} min) ; laissez décoché pour l’ajouter en plus'],
 
 	// seeding, next phase
 	['tn.seed.title', 'Seed the knockout', 'Knock-out plaatsen', 'Placer la phase éliminatoire'],

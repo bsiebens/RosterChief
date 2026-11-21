@@ -278,6 +278,26 @@ class TournamentApiTests(TestCase):
         # the rest of the rule is left alone by a priority-only update
         self.assertEqual(self.as_("operate", "get", f"/{t.pk}/setup").json()["break_rules"][0]["gap_minutes"], 10)
 
+    def test_a_full_tournament_refuses_another_team_until_one_leaves(self):
+        t = self.make(max_teams=1)
+        first = TournamentTeam.objects.create(tournament=t, team=self.club_team)
+        self.assertTrue(self.as_("operate", "get", f"/{t.pk}").json()["is_full"])
+        body = {"kind": "foreign", "foreign_name": "Walk-up FC", "foreign_contact_name": "Wes", "foreign_contact_email": "w@x.test"}
+        r = self.as_("operate", "post", f"/{t.pk}/teams", body)
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "full"))
+        # a withdrawal frees a place
+        self.assertEqual(self.as_("manage", "post", f"/teams/{first.pk}/withdraw", {"reason": "Injuries"}).status_code, 200)
+        self.assertFalse(self.as_("operate", "get", f"/{t.pk}").json()["is_full"])
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/teams", body).status_code, 201)
+
+    def test_the_gap_between_matches_is_a_tournament_setting(self):
+        body = {"name": "Gap Cup", "status": "draft", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}]}
+        out = self.as_("manage", "post", "", body).json()
+        self.assertEqual(out["default_gap_minutes"], 5)
+        r = self.as_("manage", "patch", f"/{out['id']}", {"default_gap_minutes": 10})
+        self.assertEqual((r.status_code, r.json()["default_gap_minutes"]), (200, 10))
+        self.assertEqual(self.as_("manage", "patch", f"/{out['id']}", {"default_gap_minutes": -1}).status_code, 422)
+
     def test_delete_only_a_draft_tournament(self):
         body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}
         tid = self.as_("manage", "post", "", body).json()["id"]

@@ -344,7 +344,7 @@
 		<div class="grid grid-cols-2 gap-3">
 			<Field label={t('tn.setup.gap_minutes')} type="number" min="0" bind:value={rf.gap_minutes} error={run.fields.gap_minutes} />
 		</div>
-		<label class="flex cursor-pointer items-center gap-3 rounded-lg border border-line p-3"><input type="checkbox" class="checkbox" bind:checked={rf.replaces_default_gap} /><span class="text-sm">{t('tn.setup.replaces_gap')}</span></label>
+		<label class="flex cursor-pointer items-center gap-3 rounded-lg border border-line p-3"><input type="checkbox" class="checkbox" bind:checked={rf.replaces_default_gap} /><span class="text-sm">{t('tn.setup.replaces_gap', { n: tn.default_gap_minutes })}</span></label>
 		<div class="modal-action mt-2 flex justify-end gap-2">
 			<button class="btn btn-outline" type="button" onclick={() => (ruleOpen = false)}>{t('common.cancel')}</button>
 			<button class="btn btn-primary" type="submit" disabled={run.busy}>{t('common.save')}</button>

@@ -48,7 +48,10 @@
 		<Field label={t('tn.f.earliest_birth_year')} type="number" min="1900" placeholder="2012" bind:value={v.earliest_birth_year} error={errors.earliest_birth_year} />
 		<Field label={t('tn.f.latest_birth_year')} type="number" min="1900" placeholder="2016" bind:value={v.latest_birth_year} error={errors.latest_birth_year} />
 	</div>
-	<Field label={t('tn.f.match_duration')} type="number" min="1" bind:value={v.default_match_duration_minutes} error={errors.default_match_duration_minutes} help={t('tn.f.match_duration_help')} />
+	<div class="grid gap-3 sm:grid-cols-2">
+		<Field label={t('tn.f.match_duration')} type="number" min="1" bind:value={v.default_match_duration_minutes} error={errors.default_match_duration_minutes} help={t('tn.f.match_duration_help')} />
+		<Field label={t('tn.f.gap')} type="number" min="0" bind:value={v.default_gap_minutes} error={errors.default_gap_minutes} help={t('tn.f.gap_help')} />
+	</div>
 {:else}
 	<div class="grid gap-3 sm:grid-cols-2">
 		<Field label={t('tn.f.entry_fee')} inputmode="decimal" bind:value={v.entry_fee_amount} error={errors.entry_fee_amount} />

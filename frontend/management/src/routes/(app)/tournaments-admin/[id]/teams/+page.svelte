@@ -54,13 +54,13 @@
 	}
 	const sorted = $derived([...data.rows].sort((a, b) => Number(!!a.withdrawn_at) - Number(!!b.withdrawn_at)));
 
-	const hdr = headerSnapshot(() => ({ base, canOperate }));
+	const hdr = headerSnapshot(() => ({ base, canOperate, full: tn.is_full, max: tn.max_teams ?? 0 }));
 	usePageHeader(() => ({ badge: statusPill, title: tn.name, context: t('tn.teams.count', { n: data.rows.filter((r) => !r.withdrawn_at).length }), actions }));
 </script>
 
 {#snippet actions()}
 	<a class="btn btn-outline gap-2" href="/api/v1{hdr.base}/lunch-summary/pdf" target="_blank" rel="noopener"><FileDown size={16} /> {t('tn.teams.lunch_pdf')}</a>
-	{#if hdr.canOperate}<button class="btn btn-primary gap-2" type="button" onclick={() => { run.clear(); addOpen = true; }}><Plus size={16} /> {t('tn.teams.add')}</button>{/if}
+	{#if hdr.canOperate}<button class="btn btn-primary gap-2" type="button" disabled={hdr.full} title={hdr.full ? t('tn.teams.full_hint', { n: hdr.max }) : undefined} onclick={() => { run.clear(); addOpen = true; }}><Plus size={16} /> {t('tn.teams.add')}</button>{/if}
 {/snippet}
 
 <svelte:head><title>{pageTitle(t('tn.tab.teams'))}</title></svelte:head>

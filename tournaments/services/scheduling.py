@@ -344,11 +344,13 @@ def blackout_windows(field) -> list[tuple[datetime.time, datetime.time]]:
     return [(rule.trigger_window_start, rule.trigger_window_end) for rule in rules]
 
 
-def gap_for_placement(field, *, games_since_last_break: int, minutes_since_last_break: int, round_number: int, just_finished_round_number: int | None) -> tuple[datetime.timedelta, bool]:
+def gap_for_placement(
+    field, *, games_since_last_break: int, minutes_since_last_break: int, round_number: int, just_finished_round_number: int | None, default_gap: datetime.timedelta = DEFAULT_GAP
+) -> tuple[datetime.timedelta, bool]:
     """The gap to insert before the next game on ``field``, and whether it
-    *replaces* the tournament's own ``DEFAULT_GAP`` or adds on top of it.
+    *replaces* the tournament's own default gap (``default_gap``, the tournament's ``default_gap_minutes``) or adds on top of it.
     Rules are checked in ``priority`` order, first match wins; nothing
-    firing falls back to ``(DEFAULT_GAP, True)``.
+    firing falls back to ``(default_gap, True)``.
 
     The three non-blackout trigger types are each judged against a counter
     that resets whenever *any* break fires on this field -- "every 3rd game"
@@ -370,7 +372,7 @@ def gap_for_placement(field, *, games_since_last_break: int, minutes_since_last_
         if fires:
             return datetime.timedelta(minutes=rule.gap_minutes), rule.replaces_default_gap
 
-    return DEFAULT_GAP, True
+    return default_gap, True
 
 
 # --------------------------------------------------------------------------
@@ -446,7 +448,7 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
 
     For each round, each match goes to whichever field's own clock is
     earliest; the break-rule engine supplies the gap before it fires (or the
-    tournament's own ``DEFAULT_GAP`` otherwise); each field and each team
+    tournament's own ``default_gap_minutes`` otherwise); each field and each team
     gets its own running clock, so no field and no team is ever
     double-booked *among matches this call itself places*. Any match this
     call is *not* placing but that already has a ``scheduled_start`` --
@@ -475,6 +477,8 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
     fields = list(tournament.fields.all())
     if not fields:
         raise SchedulingError(_("Add at least one field before generating a schedule."))
+
+    default_gap = datetime.timedelta(minutes=tournament.default_gap_minutes)  # the tournament's own setting, 5 minutes unless changed
 
     # Fetched once, not per-match -- a tournament has few enough blocks/
     # already-placed matches that re-checking every one of them against
@@ -530,9 +534,10 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
                     minutes_since_last_break=field_minutes_since_break[field.id],
                     round_number=round_number,
                     just_finished_round_number=field_last_round[field.id],
+                    default_gap=default_gap,
                 )
                 if not is_first_game_on_field:
-                    candidate_start += gap if replaces else DEFAULT_GAP + gap
+                    candidate_start += gap if replaces else default_gap + gap
                 pre_roll_date = candidate_start.date()
 
                 # Each push below (blackouts, an already-busy team, a
@@ -577,7 +582,7 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
                 # game before its own break fired (e.g. "every 3 games" was
                 # really honoured for the first block only, then drifted to
                 # 4 games per block from the second one on).
-                if gap != DEFAULT_GAP or not replaces or candidate_start.date() != pre_roll_date:
+                if gap != default_gap or not replaces or candidate_start.date() != pre_roll_date:
                     field_games_since_break[field.id] = 1
                     field_minutes_since_break[field.id] = int(match_duration.total_seconds() // 60)
                 else:

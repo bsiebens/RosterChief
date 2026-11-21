@@ -45,6 +45,7 @@ class TournamentIn(Schema):
     lunch_price_per_day: MoneyIn | None = None
     lunch_billed_with_fee: bool = True
     default_match_duration_minutes: int = Field(45, ge=1, le=1440)
+    default_gap_minutes: int = Field(5, ge=0, le=240)
 
 
 class TournamentPatch(Schema):
@@ -64,6 +65,7 @@ class TournamentPatch(Schema):
     lunch_price_per_day: MoneyIn | None = None
     lunch_billed_with_fee: bool | None = None
     default_match_duration_minutes: int | None = Field(None, ge=1, le=1440)
+    default_gap_minutes: int | None = Field(None, ge=0, le=240)
 
 
 class RejectIn(Schema):
