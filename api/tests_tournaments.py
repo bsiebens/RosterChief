@@ -15,7 +15,7 @@ from authorization.services import assign_role, create_role
 from club.models import Club, Domain
 from club.services import create_club, grant_login
 from controlpanel.tests import login_session, make_user
-from events.models import Season
+from events.models import Event, Season
 from features.entitlements import Entitlement, Entitlements
 from members.models import Member
 from teams.models import Team
@@ -176,6 +176,35 @@ class TournamentApiTests(TestCase):
         r = self.as_("manage", "patch", f"/{tid}", {"max_teams": 8, "entry_fee_amount": "25"})
         self.assertEqual((r.json()["max_teams"], r.json()["entry_fee_amount"]), (8, "25.00"))
         self.assertEqual(self.as_("operate", "get", "").json()["results"][0]["name"], "Autumn Cup")
+
+    def test_home_team_tournament_shows_on_the_calendar(self):
+        body = {"name": "Autumn Cup", "start_date": "2026-10-03", "end_date": "2026-10-04", "status": "published", "home_team_id": str(self.club_team.pk)}
+        tid = self.as_("manage", "post", "", body).json()["id"]
+        event = Tournament.objects.get(pk=tid).event
+        self.assertIsNotNone(event)
+        listing = self.call("get", "?from=2026-10-01&to=2026-10-31", self.owner, prefix="/events")
+        self.assertEqual(listing.status_code, 200, listing.content)
+        detail = self.call("get", f"/{event.pk}", self.owner, prefix="/events")
+        self.assertEqual(detail.status_code, 200, detail.content)
+        form = self.call("get", f"/{event.pk}/form", self.owner, prefix="/events")
+        self.assertEqual(form.status_code, 200, form.content)
+
+    def test_delete_only_a_draft_tournament(self):
+        body = {"name": "Spring Cup", "start_date": "2026-10-03", "end_date": "2026-10-04", "status": "draft", "home_team_id": str(self.club_team.pk)}
+        tid = self.as_("manage", "post", "", body).json()["id"]
+        event_id = Tournament.objects.get(pk=tid).event_id
+        self.assertEqual(self.as_("operate", "delete", f"/{tid}").status_code, 403)
+        self.assertEqual(self.call("delete", f"/{tid}").status_code, 401)
+        self.as_("manage", "patch", f"/{tid}", {"status": "published"})
+        r = self.as_("manage", "delete", f"/{tid}")
+        self.assertEqual(r.status_code, 409, r.content)
+        self.assertTrue(Tournament.objects.filter(pk=tid).exists())
+        self.as_("manage", "patch", f"/{tid}", {"status": "draft"})
+        r = self.as_("manage", "delete", f"/{tid}")
+        self.assertEqual(r.status_code, 204, r.content)
+        self.assertFalse(Tournament.objects.filter(pk=tid).exists())
+        self.assertFalse(Event.objects.filter(pk=event_id).exists())  # the calendar event it created goes too
+        self.assertEqual(self.as_("manage", "delete", f"/{tid}").status_code, 404)
 
     def test_public_registration_approve_and_status(self):
         t = self.make(status="published", lunch_mode="optional", entry_fee_amount="50")

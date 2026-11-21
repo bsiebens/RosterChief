@@ -4,6 +4,7 @@ tier includes it). Permission (403) is checked before the ``tournaments`` featur
 
 import uuid
 
+from django.db import transaction
 from django.db.models import Count, Q
 from ninja import File, Router, UploadedFile
 
@@ -129,6 +130,20 @@ def update_tournament(request, tournament_id: uuid.UUID, payload: TournamentPatc
     t.save()
     _after_save(t, request, was_published=was_published)
     return tournament_detail(c.get_tournament(t.pk), request.user)
+
+
+@router.delete("/{tournament_id}", summary="Delete a draft tournament (and the calendar event it created)", operation_id="tournaments_delete", response={204: None})
+def delete_tournament(request, tournament_id: uuid.UUID):
+    c.gate_manage(request)
+    t = c.get_tournament(tournament_id)
+    if t.status != Tournament.Status.DRAFT:
+        raise Conflict("Only a draft tournament can be deleted.", "not_draft")
+    with transaction.atomic():
+        event = t.event  # always the one ensure_home_team created: the API never links an event by hand
+        t.delete()
+        if event is not None:
+            event.delete()
+    return 204, None
 
 
 # --- registration queue -----------------------------------------------------------------------------------------------------

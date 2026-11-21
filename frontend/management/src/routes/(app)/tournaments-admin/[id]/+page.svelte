@@ -1,7 +1,11 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { CalendarClock, ClipboardList, Save, Trophy, Wallet } from '@lucide/svelte';
+	import { goto } from '$app/navigation';
+	import { CalendarClock, ClipboardList, Save, Trash2, Trophy, Wallet } from '@lucide/svelte';
+	import ActionList from '#lib/components/actions/ActionList.svelte';
+	import ActionRow from '#lib/components/actions/ActionRow.svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import Modal from '#lib/components/Modal.svelte';
 	import TournamentFields from '#lib/components/tournaments/TournamentFields.svelte';
 	import TournamentSummary from '#lib/components/tournaments/TournamentSummary.svelte';
 	import Toast from '#lib/components/Toast.svelte';
@@ -9,7 +13,7 @@
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
-	import { Runner } from '#lib/tournaments.svelte.ts';
+	import { Runner, TBASE } from '#lib/tournaments.svelte.ts';
 	import { formOf, payload } from '#lib/tournaments-form.ts';
 
 	let { data } = $props();
@@ -27,6 +31,12 @@
 		// The home team is set when the tournament is created; changing it afterwards is left to the contract's PATCH only when it differs.
 		const body = payload(v, { homeTeam: v.home_team_id !== (tn.home_team?.id ?? '') });
 		return run.patch(`/tournaments/${tn.id}`, body, undefined, { notice: t('tn.saved') });
+	};
+
+	let deleteOpen = $state(false);
+	const remove = async () => {
+		const ok = await run.del(`/tournaments/${tn.id}`, undefined, { reload: false });
+		if (ok) await goto(TBASE);
 	};
 
 	usePageHeader(() => ({ badge: statusPill, title: tn.name, context: t('tn.tab.settings') }));
@@ -56,8 +66,22 @@
 			<TournamentSummary {v} teams={data.teams} />
 			<div class="grid gap-2">
 				<button class="btn btn-primary w-full gap-2" type="submit" disabled={run.busy}><Save size={16} /> {t('common.save')}</button>
+				{#if tn.status === 'draft'}
+					<ActionList><ActionRow icon={Trash2} danger onclick={() => { run.clear(); deleteOpen = true; }}>{t('tn.delete')}</ActionRow></ActionList>
+				{/if}
 			</div>
 		</section>
 	</aside>
 </form>
 <Toast message={run.notice} onhide={() => (run.notice = '')} />
+
+<Modal bind:open={deleteOpen} title={t('tn.delete_title')}>
+	<div class="grid gap-3">
+		{#if run.error}<Alert kind="error">{run.error}</Alert>{/if}
+		<p>{t('tn.delete_body', { name: tn.name })}</p>
+		<div class="modal-action mt-2 flex justify-end gap-2">
+			<button class="btn btn-outline" type="button" onclick={() => (deleteOpen = false)}>{t('common.cancel')}</button>
+			<button class="btn btn-error gap-2" type="button" disabled={run.busy} onclick={remove}><Trash2 size={16} /> {t('common.delete')}</button>
+		</div>
+	</div>
+</Modal>
