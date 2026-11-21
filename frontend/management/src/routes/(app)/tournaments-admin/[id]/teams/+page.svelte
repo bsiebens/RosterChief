@@ -113,7 +113,7 @@
 							<td class="text-right whitespace-nowrap">
 								<a class="btn btn-outline btn-xs" href="{TBASE}/{tn.id}/teams/{team.id}">{t('tn.teams.roster')}</a>
 								{#if canOperate}
-									<label class="btn btn-ghost btn-xs">
+									<label class="btn btn-outline btn-xs focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-club">
 										{t('tn.teams.logo')}
 										<input type="file" accept="image/*" class="sr-only" onchange={(e) => { uploadLogo(team, e.currentTarget.files?.[0]); e.currentTarget.value = ''; }} />
 									</label>
@@ -134,12 +134,15 @@
 </div>
 
 <Modal bind:open={addOpen} title={t('tn.teams.add')}>
+	{#snippet aside()}
+		<div class="flex w-fit items-center gap-1" role="group" aria-label={t('tn.teams.kind')}>
+			{#each ['club', 'foreign'] as k (k)}
+				<button type="button" aria-pressed={kind === k} class="rounded-md px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {kind === k ? 'border border-ink bg-ink text-white' : 'border border-line text-muted hover:text-ink'}" onclick={() => (kind = k as 'club' | 'foreign')}>{t(`tn.teams.kind_${k}`)}</button>
+			{/each}
+		</div>
+	{/snippet}
 	<form class="grid gap-3" onsubmit={add}>
 		{#if run.error && !Object.keys(run.fields).length}<Alert kind="error">{run.error}</Alert>{/if}
-		<div class="flex gap-4" role="radiogroup" aria-label={t('tn.teams.kind')}>
-			<label class="flex items-center gap-2"><input type="radio" class="radio radio-sm" value="club" bind:group={kind} /> {t('tn.teams.kind_club')}</label>
-			<label class="flex items-center gap-2"><input type="radio" class="radio radio-sm" value="foreign" bind:group={kind} /> {t('tn.teams.kind_foreign')}</label>
-		</div>
 		{#if kind === 'club'}
 			<div class="form-control w-full">
 				<label class="label" for="add-club-team"><span class="label-text">{t('tn.teams.club_team')}</span></label>
