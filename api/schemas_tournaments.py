@@ -22,11 +22,16 @@ Trigger = Literal["game_count", "elapsed_time", "round_boundary", "clock_window"
 # --- tournament -----------------------------------------------------------------------------------------------------------
 
 
+class DayIn(Schema):
+    date: datetime.date
+    starts_at: datetime.time
+    ends_at: datetime.time
+
+
 class TournamentIn(Schema):
     name: str = Field(max_length=255, min_length=1)
     status: Status = "draft"
-    start_date: datetime.date
-    end_date: datetime.date
+    days: list[DayIn] = Field(min_length=1, max_length=60)
     registration_open: bool = True
     max_teams: int | None = Field(None, ge=1, le=32767)
     earliest_birth_year: int | None = Field(None, ge=1900, le=2200)
@@ -45,8 +50,7 @@ class TournamentIn(Schema):
 class TournamentPatch(Schema):
     name: str | None = Field(None, max_length=255, min_length=1)
     status: Status | None = None
-    start_date: datetime.date | None = None
-    end_date: datetime.date | None = None
+    days: list[DayIn] | None = Field(None, min_length=1, max_length=60)
     registration_open: bool | None = None
     max_teams: int | None = Field(None, ge=1, le=32767)
     earliest_birth_year: int | None = Field(None, ge=1900, le=2200)

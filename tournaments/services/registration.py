@@ -226,6 +226,14 @@ def create_manual_team(tournament, *, club_team=None, foreign_fields: dict | Non
 
 
 @transaction.atomic
+def _event_span(tournament):
+    """The calendar event's start and end: the first day's start until the last day's end, else (a tournament without days rows)
+    the whole of ``start_date`` until the end of ``end_date``."""
+    span = tournament.first_start_and_last_end()
+    start, end = span if span else (datetime.combine(tournament.start_date, time.min), datetime.combine(tournament.end_date, time(23, 59)))
+    return timezone.make_aware(start), timezone.make_aware(end)
+
+
 def ensure_home_team(tournament) -> TournamentTeam | None:
     """Auto-adds ``tournament.home_team`` as a ``TournamentTeam`` and gives
     the tournament its own linked calendar ``Event`` scoped to that team --
@@ -298,14 +306,17 @@ def ensure_home_team(tournament) -> TournamentTeam | None:
     if team is None:
         team = create_manual_team(tournament, club_team=tournament.home_team, snapshot_roster=False)
 
+    start, end = _event_span(tournament)
     if tournament.event_id is None:
         from events.models import Event  # local import -- see Tournament.location's own docstring for why every cross-app reference in this app is lazy
 
-        start = timezone.make_aware(datetime.combine(tournament.start_date, time.min))
-        end = timezone.make_aware(datetime.combine(tournament.end_date, time(23, 59)))
         event = Event.objects.create(season=tournament.season, kind=Event.EventKind.TOURNAMENT, title=tournament.name, start=start, end=end)
         tournament.event = event
         tournament.save(update_fields=["event"])
+    elif (tournament.event.start, tournament.event.end) != (start, end):
+        # The days were changed: the calendar item follows them (first day's start until the last day's end).
+        tournament.event.start, tournament.event.end = start, end
+        tournament.event.save(update_fields=["start", "end"])
 
     tournament.event.teams.set([tournament.home_team])
 

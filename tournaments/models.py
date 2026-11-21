@@ -9,7 +9,7 @@ Gated by the "tournaments" waffle flag (features.models.Flag, per-club like
 """
 
 import secrets
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -205,10 +205,21 @@ class Tournament(UUIDModel):
         return Location.objects.filter(is_home=True).first()
 
     def date_range(self) -> list:
-        """Every calendar day this tournament runs, inclusive -- e.g. the
+        """Every calendar day this tournament is played on -- e.g. the
         roster's per-day lunch picker only ever offers days the tournament
-        is actually on."""
-        return [self.start_date + timedelta(days=offset) for offset in range((self.end_date - self.start_date).days + 1)]
+        is actually on. The days need not be consecutive: a tournament can
+        run on a Saturday and the Sunday a week later. A tournament without
+        ``days`` rows (created before they existed) falls back to every day
+        between ``start_date`` and ``end_date``."""
+        dates = list(self.days.order_by("date").values_list("date", flat=True)) if self.pk else []
+        return dates or [self.start_date + timedelta(days=offset) for offset in range((self.end_date - self.start_date).days + 1)]
+
+    def first_start_and_last_end(self):
+        """(first day's start, last day's end) as naive datetimes -- the span the linked calendar event covers -- or ``None`` without days."""
+        days = list(self.days.order_by("date"))
+        if not days:
+            return None
+        return datetime.combine(days[0].date, days[0].starts_at), datetime.combine(days[-1].date, days[-1].ends_at)
 
     def birth_year_out_of_range(self, date_of_birth) -> bool:
         """Whether a player born on ``date_of_birth`` falls outside
@@ -233,6 +244,28 @@ class Tournament(UUIDModel):
 def tournament_field_availability_default():
     """Empty per-day availability list -- see TournamentField.availability."""
     return []
+
+
+class TournamentDay(UUIDModel):
+    """One day the tournament is played on, with its own opening hours. The tournament's ``start_date``/``end_date`` are the first and
+    last of these, and its calendar event runs from the first day's start to the last day's end."""
+
+    tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE, related_name="days", verbose_name=_("tournament"))
+    date = models.DateField(_("date"))
+    starts_at = models.TimeField(_("starts at"))
+    ends_at = models.TimeField(_("ends at"))
+
+    class Meta:
+        verbose_name = _("tournament day")
+        verbose_name_plural = _("tournament days")
+        ordering = ["date"]
+        constraints = [
+            models.UniqueConstraint(fields=["tournament", "date"], name="unique_tournament_day_date"),
+            models.CheckConstraint(condition=Q(ends_at__gt=models.F("starts_at")), name="tournament_day_ends_after_start"),
+        ]
+
+    def __str__(self):
+        return f"{self.date} {self.starts_at:%H:%M}-{self.ends_at:%H:%M}"
 
 
 class TournamentField(UUIDModel):

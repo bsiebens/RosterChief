@@ -9,6 +9,7 @@ from unittest import mock
 from django.core.cache import cache
 from django.db import connection
 from django.test import Client, TestCase
+from django.utils import timezone
 from django_tenants.utils import schema_context
 
 from authorization.services import assign_role, create_role
@@ -118,7 +119,7 @@ class TournamentApiTests(TestCase):
             ("get", f"/{t.pk}/standings", None, {"manage", "operate"}),
             ("get", f"/{t.pk}/setup", None, {"manage", "operate"}),
             ("get", f"/{t.pk}/tasks", None, {"manage", "operate"}),
-            ("post", "", {"name": "X", "start_date": "2026-09-19", "end_date": "2026-09-20"}, {"manage"}),
+            ("post", "", {"name": "X", "days": [{"date": "2026-09-19", "starts_at": "09:00", "ends_at": "17:00"}]}, {"manage"}),
             ("patch", f"/{t.pk}", {"name": "Y"}, {"manage"}),
             ("post", f"/registrations/{i}/approve", None, {"manage"}),
             ("post", f"/teams/{i}/withdraw", {}, {"manage"}),
@@ -165,20 +166,20 @@ class TournamentApiTests(TestCase):
     # -- tournament and registration queue --
 
     def test_create_update_and_season_rules(self):
-        body = {"name": "Autumn Cup", "start_date": "2026-10-03", "end_date": "2026-10-04", "status": "published", "home_team_id": str(self.club_team.pk)}
+        body = {"name": "Autumn Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "published", "home_team_id": str(self.club_team.pk)}
         r = self.as_("manage", "post", "", body)
         self.assertEqual(r.status_code, 201, r.content)
         tid = r.json()["id"]
         self.assertEqual(r.json()["slug"], "autumn-cup")
         self.assertTrue(TournamentTeam.objects.filter(tournament_id=tid, team=self.club_team).exists())  # home team entered
-        self.assertEqual(self.as_("manage", "post", "", {**body, "start_date": "2030-01-01", "end_date": "2030-01-02"}).status_code, 422)  # no season
-        self.assertEqual(self.as_("manage", "post", "", {**body, "end_date": "2026-10-01"}).status_code, 422)
+        self.assertEqual(self.as_("manage", "post", "", {**body, "days": [{"date": "2030-01-01", "starts_at": "09:00", "ends_at": "17:00"}]}).status_code, 422)  # no season
+        self.assertEqual(self.as_("manage", "post", "", {**body, "days": [{"date": "2026-10-03", "starts_at": "17:00", "ends_at": "09:00"}]}).status_code, 422)
         r = self.as_("manage", "patch", f"/{tid}", {"max_teams": 8, "entry_fee_amount": "25"})
         self.assertEqual((r.json()["max_teams"], r.json()["entry_fee_amount"]), (8, "25.00"))
         self.assertEqual(self.as_("operate", "get", "").json()["results"][0]["name"], "Autumn Cup")
 
     def test_home_team_tournament_shows_on_the_calendar(self):
-        body = {"name": "Autumn Cup", "start_date": "2026-10-03", "end_date": "2026-10-04", "status": "published", "home_team_id": str(self.club_team.pk)}
+        body = {"name": "Autumn Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "published", "home_team_id": str(self.club_team.pk)}
         tid = self.as_("manage", "post", "", body).json()["id"]
         event = Tournament.objects.get(pk=tid).event
         self.assertIsNotNone(event)
@@ -189,8 +190,40 @@ class TournamentApiTests(TestCase):
         form = self.call("get", f"/{event.pk}/form", self.owner, prefix="/events")
         self.assertEqual(form.status_code, 200, form.content)
 
+    def test_days_drive_the_dates_and_the_calendar_event(self):
+        body = {"name": "Days Cup", "status": "draft", "home_team_id": str(self.club_team.pk), "days": [
+            {"date": "2026-10-10", "starts_at": "10:30", "ends_at": "18:00"},
+            {"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"},  # out of order and not consecutive on purpose
+        ]}
+        r = self.as_("manage", "post", "", body)
+        self.assertEqual(r.status_code, 201, r.content)
+        out = r.json()
+        self.assertEqual((out["start_date"], out["end_date"]), ("2026-10-03", "2026-10-10"))
+        self.assertEqual(out["dates"], ["2026-10-03", "2026-10-10"])  # only the days played, not everything in between
+        self.assertEqual([(d["date"], d["starts_at"], d["ends_at"]) for d in out["days"]], [("2026-10-03", "09:00", "17:00"), ("2026-10-10", "10:30", "18:00")])
+        event = Event.objects.get(pk=out["event_id"])
+        local = timezone.localtime
+        self.assertEqual((local(event.start).strftime("%Y-%m-%d %H:%M"), local(event.end).strftime("%Y-%m-%d %H:%M")), ("2026-10-03 09:00", "2026-10-10 18:00"))
+        # changing the days moves the range and the calendar event with them
+        r = self.as_("manage", "patch", f"/{out['id']}", {"days": [{"date": "2026-10-04", "starts_at": "08:00", "ends_at": "12:00"}]})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual((r.json()["start_date"], r.json()["end_date"], r.json()["dates"]), ("2026-10-04", "2026-10-04", ["2026-10-04"]))
+        event.refresh_from_db()
+        self.assertEqual((local(event.start).strftime("%Y-%m-%d %H:%M"), local(event.end).strftime("%H:%M")), ("2026-10-04 08:00", "12:00"))
+        # a patch without days leaves them alone
+        self.as_("manage", "patch", f"/{out['id']}", {"max_teams": 4})
+        self.assertEqual(len(self.as_("manage", "get", f"/{out['id']}").json()["days"]), 1)
+
+    def test_day_validation(self):
+        base = {"name": "Bad Days", "days": []}
+        self.assertEqual(self.as_("manage", "post", "", base).status_code, 422)  # at least one day
+        twice = {**base, "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}] * 2}
+        self.assertEqual(self.as_("manage", "post", "", twice).status_code, 422)  # a date only once
+        backwards = {**base, "days": [{"date": "2026-10-03", "starts_at": "17:00", "ends_at": "09:00"}]}
+        self.assertEqual(self.as_("manage", "post", "", backwards).status_code, 422)  # ends after it starts
+
     def test_delete_only_a_draft_tournament(self):
-        body = {"name": "Spring Cup", "start_date": "2026-10-03", "end_date": "2026-10-04", "status": "draft", "home_team_id": str(self.club_team.pk)}
+        body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}
         tid = self.as_("manage", "post", "", body).json()["id"]
         event_id = Tournament.objects.get(pk=tid).event_id
         self.assertEqual(self.as_("operate", "delete", f"/{tid}").status_code, 403)

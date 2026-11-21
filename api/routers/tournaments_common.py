@@ -186,3 +186,7 @@ def stage_summary(stage: TournamentStage) -> dict:
 
 def date_window(value: datetime.time) -> str:
     return value.strftime("%H:%M")
+
+
+def days_out(t: Tournament) -> list[dict]:
+    return [{"date": d.date, "starts_at": f"{d.starts_at:%H:%M}", "ends_at": f"{d.ends_at:%H:%M}"} for d in t.days.order_by("date")]

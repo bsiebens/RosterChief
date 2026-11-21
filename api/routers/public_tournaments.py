@@ -50,7 +50,7 @@ def _money(value):
 def item(t: Tournament) -> dict:
     location = t.location
     return {
-        "slug": t.slug, "name": t.name, "start_date": t.start_date, "end_date": t.end_date, "status": t.status, "location": location.name if location else None,
+        "slug": t.slug, "name": t.name, "start_date": t.start_date, "end_date": t.end_date, "days": c.days_out(t), "status": t.status, "location": location.name if location else None,
         "accepts_registrations": t.accepts_registrations and t.status in OPEN_FOR_REGISTRATION,
     }  # fmt: skip
 

@@ -10,20 +10,20 @@ from ninja import File, Router, UploadedFile
 
 from api.auth import AUTHENTICATORS
 from api.routers import tournaments_common as c
-from api.schemas_tournaments import ManualTeamIn, PaymentIn, RejectIn, TournamentIn, TournamentPatch, WithdrawIn
+from api.schemas_tournaments import DayIn, ManualTeamIn, PaymentIn, RejectIn, TournamentIn, TournamentPatch, WithdrawIn
 from events.models import Season
 from formbuilder.services.management import Conflict
 from members.services import access
 from members.services.errors import Invalid
 from teams.models import Team
-from tournaments.models import Tournament, TournamentRegistration, TournamentTeam
+from tournaments.models import Tournament, TournamentDay, TournamentRegistration, TournamentTeam
 from tournaments.services import notifications
 from tournaments.services import registration as svc
 
 router = Router(auth=AUTHENTICATORS)
 
 SETTINGS = (
-    "name", "status", "start_date", "end_date", "registration_open", "max_teams", "earliest_birth_year", "latest_birth_year", "contact_email", "description", "deposit_amount", "entry_fee_amount",
+    "name", "status", "registration_open", "max_teams", "earliest_birth_year", "latest_birth_year", "contact_email", "description", "deposit_amount", "entry_fee_amount",
     "lunch_mode", "lunch_price_per_day", "lunch_billed_with_fee", "default_match_duration_minutes",
 )  # fmt: skip
 
@@ -47,11 +47,26 @@ def tournament_detail(t: Tournament, user) -> dict:
         "contact_email": t.contact_email, "description": t.description, "earliest_birth_year": t.earliest_birth_year, "latest_birth_year": t.latest_birth_year, "home_team": c.ref(t.home_team), "event_id": t.event_id,
         "deposit_amount": _money(t.deposit_amount), "entry_fee_amount": _money(t.entry_fee_amount), "lunch_mode": t.lunch_mode, "lunch_price_per_day": _money(t.lunch_price_per_day),
         "lunch_billed_with_fee": t.lunch_billed_with_fee, "default_match_duration_minutes": t.default_match_duration_minutes, "schedule_needs_regeneration": t.schedule_needs_regeneration,
-        "dates": t.date_range(), "location": c.ref(location),
+        "dates": t.date_range(), "days": c.days_out(t), "location": c.ref(location),
         "pending_registration_count": t.registrations.filter(status=TournamentRegistration.Status.PENDING).count(),
         "teams_in_count": t.teams.filter(withdrawn_at__isnull=True).count(),
         "can_manage": access.can_manage_tournaments(user), "can_operate": access.can_operate_tournaments(user),
     }  # fmt: skip
+
+
+def _day_rows(days: list[DayIn]) -> list[dict]:
+    """The submitted days, sorted, each date once and every day ending after it starts."""
+    rows = sorted(({"date": d.date, "starts_at": d.starts_at, "ends_at": d.ends_at} for d in days), key=lambda r: r["date"])
+    if len({r["date"] for r in rows}) != len(rows):
+        raise Invalid("Each date can only be added once.", {"days": ["Each date can only be added once."]})
+    if any(r["ends_at"] <= r["starts_at"] for r in rows):
+        raise Invalid("Every day must end after it starts.", {"days": ["Every day must end after it starts."]})
+    return rows
+
+
+def _save_days(t: Tournament, rows: list[dict]):
+    t.days.all().delete()
+    TournamentDay.objects.bulk_create([TournamentDay(tournament=t, **r) for r in rows])
 
 
 def _season_for(start, end):
@@ -101,11 +116,15 @@ def list_tournaments(request, season: uuid.UUID | None = None, status: str | Non
 def create_tournament(request, payload: TournamentIn):
     c.gate_manage(request)
     data = payload.dict()
+    days = _day_rows(payload.days)
+    data.pop("days")
     home = _home_team(data.pop("home_team_id"))
-    t = Tournament(home_team=home, **data)
+    t = Tournament(home_team=home, start_date=days[0]["date"], end_date=days[-1]["date"], **data)
     _check_dates(t)
     c.validate(t, exclude=["season"])
-    t.save()
+    with transaction.atomic():
+        t.save()
+        _save_days(t, days)
     _after_save(t, request, was_published=False)
     return 201, tournament_detail(t, request.user)
 
@@ -125,9 +144,15 @@ def update_tournament(request, tournament_id: uuid.UUID, payload: TournamentPatc
     if "home_team_id" in data:
         t.home_team = _home_team(data.pop("home_team_id"))
     c.apply(t, {k: v for k, v in data.items() if k in SETTINGS})
+    days = _day_rows(payload.days) if payload.days is not None else None
+    if days is not None:
+        t.start_date, t.end_date = days[0]["date"], days[-1]["date"]
     _check_dates(t)
     c.validate(t, exclude=["season"])
-    t.save()
+    with transaction.atomic():
+        t.save()
+        if days is not None:
+            _save_days(t, days)
     _after_save(t, request, was_published=was_published)
     return tournament_detail(c.get_tournament(t.pk), request.user)
 
