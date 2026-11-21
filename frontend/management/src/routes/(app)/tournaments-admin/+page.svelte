@@ -3,20 +3,13 @@
 	import { page } from '$app/state';
 	import { Plus, Trophy } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
-	import Modal from '#lib/components/Modal.svelte';
-	import TournamentFields from '#lib/components/tournaments/TournamentFields.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
-	import { api } from '#lib/management-api.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
-	import { fmtDateRange, Runner, STATUSES, statusBadge, TBASE, type TournamentDetail } from '#lib/tournaments.svelte.ts';
-	import { formOf, payload } from '#lib/tournaments-form.ts';
+	import { fmtDateRange, STATUSES, statusBadge, TBASE } from '#lib/tournaments.svelte.ts';
 
 	let { data } = $props();
 	const canManage = $derived(!!data.me?.can_manage_tournaments);
-	const run = new Runner();
-	let open = $state(false);
-	let v = $state(formOf());
 
 	function filter(key: string, value: string) {
 		const u = new URL(page.url.href);
@@ -24,18 +17,11 @@
 		else u.searchParams.delete(key);
 		goto(u, { reset: false });
 	}
-	async function create(e: SubmitEvent) {
-		e.preventDefault();
-		let id = '';
-		const ok = await run.run(() => api<TournamentDetail>('POST', '/tournaments', { body: payload(v) }), (d) => void (id = d?.id ?? ''), { reload: false });
-		if (ok && id) await goto(`${TBASE}/${id}`);
-	}
-
 	usePageHeader(() => ({ title: t('tn.title'), context: t('tn.count', { n: data.rows.length }), actions }));
 </script>
 
 {#snippet actions()}
-	{#if canManage}<button class="btn btn-primary gap-2" type="button" onclick={() => { v = formOf(); run.clear(); open = true; }}><Plus size={16} /> {t('tn.add')}</button>{/if}
+	{#if canManage}<a class="btn btn-primary gap-2" href="{TBASE}/new"><Plus size={16} /> {t('tn.add')}</a>{/if}
 {/snippet}
 
 <svelte:head><title>{pageTitle(t('tn.title'))}</title></svelte:head>
@@ -93,14 +79,3 @@
 		</div>
 	{/if}
 </div>
-
-<Modal bind:open title={t('tn.add')} wide>
-	<form class="grid gap-3" onsubmit={create}>
-		{#if run.error && !Object.keys(run.fields).length}<Alert kind="error">{run.error}</Alert>{/if}
-		<TournamentFields bind:v errors={run.fields} teams={data.teams} />
-		<div class="modal-action mt-2 flex justify-end gap-2">
-			<button class="btn btn-outline" type="button" onclick={() => (open = false)}>{t('common.cancel')}</button>
-			<button class="btn btn-primary" type="submit" disabled={run.busy}>{t('tn.create')}</button>
-		</div>
-	</form>
-</Modal>
