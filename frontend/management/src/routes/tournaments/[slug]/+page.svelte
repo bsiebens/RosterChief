@@ -32,8 +32,8 @@
 		{#if tn.lunch_mode !== 'none'}
 			<div class="flex items-start gap-2"><Utensils size={16} class="mt-0.5 shrink-0 text-muted" aria-hidden="true" /><div><dt class="sr-only">{t('tp.lunch')}</dt><dd>{t(`tp.lunch.${tn.lunch_mode}`)}{#if tn.lunch_price_per_day} · {t('tp.lunch.per_day', { price: money(tn.lunch_price_per_day) })}{/if}</dd></div></div>
 		{/if}
-		{#if tn.min_age !== null || tn.max_age !== null}
-			<div class="text-muted">{#if tn.min_age !== null && tn.max_age !== null}{t('tp.age.range', { min: tn.min_age, max: tn.max_age })}{:else if tn.min_age !== null}{t('tp.age.min', { min: tn.min_age })}{:else}{t('tp.age.max', { max: tn.max_age ?? '' })}{/if}</div>
+		{#if tn.earliest_birth_year !== null || tn.latest_birth_year !== null}
+			<div class="text-muted">{#if tn.earliest_birth_year !== null && tn.latest_birth_year !== null}{t('tp.born.range', { earliest: tn.earliest_birth_year, latest: tn.latest_birth_year })}{:else if tn.earliest_birth_year !== null}{t('tp.born.from', { earliest: tn.earliest_birth_year })}{:else}{t('tp.born.until', { latest: tn.latest_birth_year ?? '' })}{/if}</div>
 		{/if}
 		{#if tn.contact_email}<div class="flex items-start gap-2"><Mail size={16} class="mt-0.5 shrink-0 text-muted" aria-hidden="true" /><div><dt class="sr-only">{t('tp.contact')}</dt><dd><a class="link" href="mailto:{tn.contact_email}">{tn.contact_email}</a></dd></div></div>{/if}
 	</dl>

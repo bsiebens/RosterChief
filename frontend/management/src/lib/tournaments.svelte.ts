@@ -24,8 +24,8 @@ export type TournamentItem = {
 export type TournamentDetail = TournamentItem & {
 	contact_email: string;
 	description: string;
-	min_age: number | null;
-	max_age: number | null;
+	earliest_birth_year: number | null;
+	latest_birth_year: number | null;
 	home_team: { id: string; name: string } | null;
 	event_id: string | null;
 	deposit_amount: string | null;

@@ -205,47 +205,43 @@ class TournamentModelTests(TournamentsTestCase):
         self.assertIsNone(self.tournament.lunch_price_per_day)
 
     def test_age_range_defaults_to_blank(self):
-        self.assertIsNone(self.tournament.min_age)
-        self.assertIsNone(self.tournament.max_age)
+        self.assertIsNone(self.tournament.earliest_birth_year)
+        self.assertIsNone(self.tournament.latest_birth_year)
 
-    def test_age_out_of_range_false_when_neither_bound_is_set(self):
-        self.assertFalse(self.tournament.age_out_of_range(datetime.date(2020, 1, 1)))
+    def test_birth_year_out_of_range_false_when_neither_bound_is_set(self):
+        self.assertFalse(self.tournament.birth_year_out_of_range(datetime.date(2020, 1, 1)))
 
-    def test_age_out_of_range_false_when_no_date_of_birth(self):
-        self.tournament.min_age, self.tournament.max_age = 8, 12
-        self.assertFalse(self.tournament.age_out_of_range(None))
+    def test_birth_year_out_of_range_false_when_no_date_of_birth(self):
+        self.tournament.earliest_birth_year, self.tournament.latest_birth_year = 2014, 2018
+        self.assertFalse(self.tournament.birth_year_out_of_range(None))
 
-    def test_age_out_of_range_true_below_the_minimum(self):
-        self.tournament.min_age, self.tournament.max_age = 8, 12
-        self.assertTrue(self.tournament.age_out_of_range(datetime.date(2019, 9, 19)))  # turns 7 on start_date
+    def test_birth_year_out_of_range_true_before_the_earliest(self):
+        self.tournament.earliest_birth_year, self.tournament.latest_birth_year = 2014, 2018
+        self.assertTrue(self.tournament.birth_year_out_of_range(datetime.date(2013, 12, 31)))
 
-    def test_age_out_of_range_true_above_the_maximum(self):
-        self.tournament.min_age, self.tournament.max_age = 8, 12
-        self.assertTrue(self.tournament.age_out_of_range(datetime.date(2013, 9, 19)))  # turns 13 on start_date
+    def test_birth_year_out_of_range_true_after_the_latest(self):
+        self.tournament.earliest_birth_year, self.tournament.latest_birth_year = 2014, 2018
+        self.assertTrue(self.tournament.birth_year_out_of_range(datetime.date(2019, 1, 1)))
 
-    def test_age_out_of_range_false_within_bounds(self):
-        self.tournament.min_age, self.tournament.max_age = 8, 12
-        self.assertFalse(self.tournament.age_out_of_range(datetime.date(2016, 9, 19)))  # turns 10 on start_date
+    def test_birth_year_out_of_range_false_within_bounds_and_on_each_boundary_year(self):
+        self.tournament.earliest_birth_year, self.tournament.latest_birth_year = 2014, 2018
+        for dob in (datetime.date(2014, 1, 1), datetime.date(2016, 6, 15), datetime.date(2018, 12, 31)):
+            self.assertFalse(self.tournament.birth_year_out_of_range(dob))
 
-    def test_age_out_of_range_exactly_at_each_boundary_is_not_out_of_range(self):
-        self.tournament.min_age, self.tournament.max_age = 8, 12
-        self.assertFalse(self.tournament.age_out_of_range(datetime.date(2018, 9, 19)))  # turns 8 exactly
-        self.assertFalse(self.tournament.age_out_of_range(datetime.date(2014, 9, 19)))  # turns 12 exactly
+    def test_birth_year_out_of_range_with_only_the_earliest_set(self):
+        self.tournament.earliest_birth_year = 2014
+        self.assertTrue(self.tournament.birth_year_out_of_range(datetime.date(2013, 9, 19)))
+        self.assertFalse(self.tournament.birth_year_out_of_range(datetime.date(2022, 9, 19)))  # no upper bound
 
-    def test_age_out_of_range_respects_the_birthday_not_yet_reached(self):
-        self.tournament.min_age = 10
-        # Born the day after start_date's month/day -- hasn't turned 10 yet as of start_date, so still 9.
-        self.assertTrue(self.tournament.age_out_of_range(datetime.date(2016, 9, 20)))
+    def test_birth_year_out_of_range_with_only_the_latest_set(self):
+        self.tournament.latest_birth_year = 2018
+        self.assertTrue(self.tournament.birth_year_out_of_range(datetime.date(2019, 9, 19)))
+        self.assertFalse(self.tournament.birth_year_out_of_range(datetime.date(2000, 9, 19)))  # no lower bound
 
-    def test_age_out_of_range_with_only_min_age_set(self):
-        self.tournament.min_age = 8
-        self.assertTrue(self.tournament.age_out_of_range(datetime.date(2019, 9, 19)))  # 7
-        self.assertFalse(self.tournament.age_out_of_range(datetime.date(2000, 9, 19)))  # 26, no upper bound
-
-    def test_age_out_of_range_with_only_max_age_set(self):
-        self.tournament.max_age = 12
-        self.assertTrue(self.tournament.age_out_of_range(datetime.date(2013, 9, 19)))  # 13
-        self.assertFalse(self.tournament.age_out_of_range(datetime.date(2021, 9, 19)))  # 5, no lower bound
+    def test_earliest_after_latest_is_invalid(self):
+        self.tournament.earliest_birth_year, self.tournament.latest_birth_year = 2018, 2014
+        with self.assertRaises(ValidationError):
+            self.tournament.full_clean(exclude=["season", "slug"])
 
     def test_slug_is_unique(self):
         with self.assertRaises(IntegrityError):

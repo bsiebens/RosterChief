@@ -29,8 +29,8 @@ class TournamentIn(Schema):
     end_date: datetime.date
     registration_open: bool = True
     max_teams: int | None = Field(None, ge=1, le=32767)
-    min_age: int | None = Field(None, ge=0, le=120)
-    max_age: int | None = Field(None, ge=0, le=120)
+    earliest_birth_year: int | None = Field(None, ge=1900, le=2200)
+    latest_birth_year: int | None = Field(None, ge=1900, le=2200)
     contact_email: str = Field("", max_length=254)
     description: str = ""
     home_team_id: uuid.UUID | None = None
@@ -49,8 +49,8 @@ class TournamentPatch(Schema):
     end_date: datetime.date | None = None
     registration_open: bool | None = None
     max_teams: int | None = Field(None, ge=1, le=32767)
-    min_age: int | None = Field(None, ge=0, le=120)
-    max_age: int | None = Field(None, ge=0, le=120)
+    earliest_birth_year: int | None = Field(None, ge=1900, le=2200)
+    latest_birth_year: int | None = Field(None, ge=1900, le=2200)
     contact_email: str | None = Field(None, max_length=254)
     description: str | None = None
     home_team_id: uuid.UUID | None = None

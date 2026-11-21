@@ -73,8 +73,8 @@
 	{#if !roster}
 		<Alert kind="error">{t('common.error.generic')}</Alert>
 	{:else}
-		{#if roster.min_age !== null || roster.max_age !== null}
-			<Alert kind="info">{t('tn.roster.age_range', { min: roster.min_age ?? '—', max: roster.max_age ?? '—' })}</Alert>
+		{#if roster.earliest_birth_year !== null || roster.latest_birth_year !== null}
+			<Alert kind="info">{t('tn.roster.age_range', { earliest: roster.earliest_birth_year ?? '—', latest: roster.latest_birth_year ?? '—' })}</Alert>
 		{/if}
 		<div class="card overflow-x-auto">
 			<table class="table">

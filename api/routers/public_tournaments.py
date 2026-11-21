@@ -76,7 +76,7 @@ def detail(request, slug: str):
     t = _tournament(request, slug)
     return {
         **item(t),
-        "description_html": render_body_html(t.description) if t.description else "", "contact_email": t.contact_email, "min_age": t.min_age, "max_age": t.max_age,
+        "description_html": render_body_html(t.description) if t.description else "", "contact_email": t.contact_email, "earliest_birth_year": t.earliest_birth_year, "latest_birth_year": t.latest_birth_year,
         "entry_fee_amount": _money(t.entry_fee_amount), "deposit_amount": _money(t.deposit_amount), "lunch_mode": t.lunch_mode, "lunch_price_per_day": _money(t.lunch_price_per_day),
         "dates": t.date_range(), "registration_open": t.registration_open, "stages": [c.stage_summary(s) for s in t.stages.order_by("sequence")],
         "upcoming_matches": _upcoming_matches(t), **standings_doc(t),
@@ -188,7 +188,7 @@ def register(request, slug: str, payload: PublicRegistrationIn):
         )  # fmt: skip
         TournamentRegistrationPlayer.objects.bulk_create([TournamentRegistrationPlayer(registration=registration, **p) for p in players])
     notifications.send_registration_confirmation_email(registration, request=request)
-    return 201, {"status_token": registration.status_token, "status": registration.status, "age_flagged_count": sum(1 for p in players if t.age_out_of_range(p["date_of_birth"]))}
+    return 201, {"status_token": registration.status_token, "status": registration.status, "age_flagged_count": sum(1 for p in players if t.birth_year_out_of_range(p["date_of_birth"]))}
 
 
 def _registration(request, slug, token) -> TournamentRegistration:
@@ -237,7 +237,10 @@ def _registration_doc(r: TournamentRegistration) -> dict:
     rows = list(team.roster_entries.all()) if approved else list(r.players.all())
     mandatory_total, lunch_total = _lunch_totals(t, rows)
     return {
-        "tournament": {**item(t), "contact_email": t.contact_email, "lunch_mode": t.lunch_mode, "lunch_price_per_day": _money(t.lunch_price_per_day), "dates": t.date_range(), "min_age": t.min_age, "max_age": t.max_age},
+        "tournament": {
+            **item(t), "contact_email": t.contact_email, "lunch_mode": t.lunch_mode, "lunch_price_per_day": _money(t.lunch_price_per_day), "dates": t.date_range(),
+            "earliest_birth_year": t.earliest_birth_year, "latest_birth_year": t.latest_birth_year,
+        },
         "registration": {
             "status": r.status, "name": r.foreign_name, "contact_name": r.foreign_contact_name, "contact_email": r.foreign_contact_email, "contact_phone": r.foreign_contact_phone,
             "primary_color": r.foreign_primary_color, "secondary_color": r.foreign_secondary_color, "logo_url": c.url(r.foreign_logo), "rejection_reason": r.rejection_reason, "submitted_at": r.submitted_at,

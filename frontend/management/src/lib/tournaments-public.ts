@@ -37,8 +37,8 @@ export type Bracket = { stage: StageSummary; rounds: Round[] };
 export type TournamentDetail = TournamentItem & {
 	description_html: string;
 	contact_email: string;
-	min_age: number | null;
-	max_age: number | null;
+	earliest_birth_year: number | null;
+	latest_birth_year: number | null;
 	entry_fee_amount: string | null;
 	deposit_amount: string | null;
 	lunch_mode: LunchMode;
@@ -74,7 +74,7 @@ export type PlayerRow = {
 	age_flagged?: boolean;
 };
 export type RegistrationStatus = {
-	tournament: TournamentItem & { contact_email: string; lunch_mode: LunchMode; lunch_price_per_day: string | null; dates: string[]; min_age: number | null; max_age: number | null };
+	tournament: TournamentItem & { contact_email: string; lunch_mode: LunchMode; lunch_price_per_day: string | null; dates: string[]; earliest_birth_year: number | null; latest_birth_year: number | null };
 	registration: { status: 'pending' | 'approved' | 'rejected'; name: string; contact_name: string; contact_email: string; contact_phone: string; primary_color: string; secondary_color: string; logo_url: string | null; rejection_reason: string; submitted_at: string };
 	team: { slug: string; withdrawn_at: string | null; withdrawal_reason: string; payment_status: 'unpaid' | 'deposit_received' | 'fully_paid' } | null;
 	players: PlayerRow[];
@@ -108,17 +108,12 @@ export const playerBody = (p: PlayerDraft) => ({
 });
 export const isBlank = (p: PlayerDraft) => !p.first_name.trim() && !p.last_name.trim();
 
-/** Age on the first day of the tournament, the same rule the backend flags with (whole years). */
-export function ageOn(dob: string, start: string): number | null {
-	const b = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dob);
-	const s = /^(\d{4})-(\d{2})-(\d{2})$/.exec(start);
-	if (!b || !s) return null;
-	const before = Number(s[2]) < Number(b[2]) || (Number(s[2]) === Number(b[2]) && Number(s[3]) < Number(b[3]));
-	return Number(s[1]) - Number(b[1]) - (before ? 1 : 0);
-}
-export const outOfRange = (dob: string, start: string, min: number | null, max: number | null) => {
-	const age = ageOn(dob, start);
-	return age !== null && ((min !== null && age < min) || (max !== null && age > max));
+/** Whether a date of birth (YYYY-MM-DD) falls outside the tournament's birth years: the same rule the backend flags with. */
+export const outOfRange = (dob: string, earliest: number | null, latest: number | null) => {
+	const m = /^(\d{4})-\d{2}-\d{2}$/.exec(dob);
+	if (!m) return false;
+	const year = Number(m[1]);
+	return (earliest !== null && year < earliest) || (latest !== null && year > latest);
 };
 
 /** Dates are YYYY-MM-DD (shown without a time zone shift) or ISO datetimes. */

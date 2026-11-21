@@ -8,8 +8,8 @@ export type RosterData = {
 	lunch_mode: 'none' | 'optional' | 'mandatory';
 	lunch_price_per_day: string | null;
 	dates: string[];
-	min_age: number | null;
-	max_age: number | null;
+	earliest_birth_year: number | null;
+	latest_birth_year: number | null;
 	lunch: { date: string; player_count: number; staff_count: number; dietary_notes: string[] | string }[];
 };
 

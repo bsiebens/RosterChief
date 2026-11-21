@@ -15,15 +15,15 @@
 		errors = {}
 	}: {
 		players: PlayerDraft[];
-		tournament: { dates: string[]; start_date: string; lunch_mode: LunchMode; lunch_price_per_day: string | null; min_age: number | null; max_age: number | null };
+		tournament: { dates: string[]; start_date: string; lunch_mode: LunchMode; lunch_price_per_day: string | null; earliest_birth_year: number | null; latest_birth_year: number | null };
 		errors?: Record<string, string>;
 	} = $props();
 
 	const err = (i: number, field: string) => errors[`players.${i}.${field}`] ?? '';
 	const mandatory = $derived(tournament.lunch_mode === 'mandatory');
 	const optional = $derived(tournament.lunch_mode === 'optional');
-	const hasRange = $derived(tournament.min_age !== null || tournament.max_age !== null);
-	const flagged = (p: PlayerDraft) => p.role === 'player' && !!p.date_of_birth && outOfRange(p.date_of_birth, tournament.start_date, tournament.min_age, tournament.max_age);
+	const hasRange = $derived(tournament.earliest_birth_year !== null || tournament.latest_birth_year !== null);
+	const flagged = (p: PlayerDraft) => p.role === 'player' && !!p.date_of_birth && outOfRange(p.date_of_birth, tournament.earliest_birth_year, tournament.latest_birth_year);
 
 	const add = (role: 'player' | 'staff') => (players = [...players, blankPlayer(role, mandatory ? [...tournament.dates] : [])]);
 	const remove = (uid: number) => (players = players.filter((p) => p.uid !== uid));
@@ -36,9 +36,9 @@
 <div class="grid gap-3">
 	{#if hasRange}
 		<p class="text-xs text-muted">
-			{#if tournament.min_age !== null && tournament.max_age !== null}{t('tp.age.range', { min: tournament.min_age, max: tournament.max_age })}
-			{:else if tournament.min_age !== null}{t('tp.age.min', { min: tournament.min_age })}
-			{:else}{t('tp.age.max', { max: tournament.max_age ?? '' })}{/if}
+			{#if tournament.earliest_birth_year !== null && tournament.latest_birth_year !== null}{t('tp.born.range', { earliest: tournament.earliest_birth_year, latest: tournament.latest_birth_year })}
+			{:else if tournament.earliest_birth_year !== null}{t('tp.born.from', { earliest: tournament.earliest_birth_year })}
+			{:else}{t('tp.born.until', { latest: tournament.latest_birth_year ?? '' })}{/if}
 			{t('tp.age.note')}
 		</p>
 	{/if}

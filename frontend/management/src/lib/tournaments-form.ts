@@ -8,8 +8,8 @@ export type TournamentForm = {
 	end_date: string;
 	registration_open: boolean;
 	max_teams: string;
-	min_age: string;
-	max_age: string;
+	earliest_birth_year: string;
+	latest_birth_year: string;
 	contact_email: string;
 	description: string;
 	home_team_id: string;
@@ -31,8 +31,8 @@ export function formOf(d?: Partial<TournamentDetail>): TournamentForm {
 		end_date: d?.end_date ?? '',
 		registration_open: d?.registration_open ?? false,
 		max_teams: s(d?.max_teams),
-		min_age: s(d?.min_age),
-		max_age: s(d?.max_age),
+		earliest_birth_year: s(d?.earliest_birth_year),
+		latest_birth_year: s(d?.latest_birth_year),
 		contact_email: d?.contact_email ?? '',
 		description: d?.description ?? '',
 		home_team_id: d?.home_team?.id ?? '',
@@ -53,8 +53,8 @@ export function payload(v: TournamentForm, opts: { homeTeam?: boolean } = { home
 		end_date: v.end_date,
 		registration_open: v.registration_open,
 		max_teams: numOrNull(v.max_teams),
-		min_age: numOrNull(v.min_age),
-		max_age: numOrNull(v.max_age),
+		earliest_birth_year: numOrNull(v.earliest_birth_year),
+		latest_birth_year: numOrNull(v.latest_birth_year),
 		contact_email: v.contact_email.trim(),
 		description: v.description,
 		...(opts.homeTeam ? { home_team_id: strOrNull(v.home_team_id) } : {}),

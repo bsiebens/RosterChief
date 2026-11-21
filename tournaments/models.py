@@ -68,13 +68,13 @@ class Tournament(UUIDModel):
     #: back on. Blank means uncapped.
     max_teams = models.PositiveSmallIntegerField(_("maximum teams"), null=True, blank=True, help_text=_("Registration closes automatically once this many teams are approved. Leave blank for no cap."))
     #: A soft, read-time-only flag -- never enforced anywhere (a registering
-    #: team can still submit a too-old/too-young player, "no warning" is the
+    #: team can still submit a player outside the range, "no warning" is the
     #: whole point), just something staff can spot and check on the Teams
-    #: list / roster screen. Age is computed as of ``start_date``, not
-    #: today's date, since that's the date that actually matters for
-    #: eligibility.
-    min_age = models.PositiveSmallIntegerField(_("minimum age"), null=True, blank=True, help_text=_("Age as of the tournament's start date. Leave blank for no minimum -- players outside the range are flagged for staff to check, never blocked."))
-    max_age = models.PositiveSmallIntegerField(_("maximum age"), null=True, blank=True, help_text=_("Age as of the tournament's start date. Leave blank for no maximum."))
+    #: list / roster screen. Expressed as birth years rather than ages: a
+    #: tournament's age group ("born 2014 or later") is defined by the
+    #: calendar year, not by how old someone happens to be on the start date.
+    earliest_birth_year = models.PositiveSmallIntegerField(_("earliest birth year"), null=True, blank=True, help_text=_("Players born before this year are flagged for staff to check, never blocked. Leave blank for no limit."))
+    latest_birth_year = models.PositiveSmallIntegerField(_("latest birth year"), null=True, blank=True, help_text=_("Players born after this year are flagged for staff to check, never blocked. Leave blank for no limit."))
 
     class LunchMode(models.TextChoices):
         NONE = "none", _("No lunch")
@@ -210,21 +210,21 @@ class Tournament(UUIDModel):
         is actually on."""
         return [self.start_date + timedelta(days=offset) for offset in range((self.end_date - self.start_date).days + 1)]
 
-    def age_out_of_range(self, date_of_birth) -> bool:
+    def birth_year_out_of_range(self, date_of_birth) -> bool:
         """Whether a player born on ``date_of_birth`` falls outside
-        ``[min_age, max_age]`` as of this tournament's own ``start_date`` --
-        a single shared age-math home for the Teams list and roster screen
-        (both need the same computation; neither should reimplement it).
-        Always ``False`` when there's no birth date to check or neither
-        bound is set."""
-        if date_of_birth is None or (self.min_age is None and self.max_age is None):
+        ``[earliest_birth_year, latest_birth_year]`` -- a single shared home
+        for the Teams list, roster screen and registration flags. Always
+        ``False`` when there's no birth date to check or neither bound is
+        set."""
+        if date_of_birth is None:
             return False
-        age = self.start_date.year - date_of_birth.year - ((self.start_date.month, self.start_date.day) < (date_of_birth.month, date_of_birth.day))
-        if self.min_age is not None and age < self.min_age:
+        if self.earliest_birth_year is not None and date_of_birth.year < self.earliest_birth_year:
             return True
-        return self.max_age is not None and age > self.max_age
+        return self.latest_birth_year is not None and date_of_birth.year > self.latest_birth_year
 
     def clean(self):
+        if self.earliest_birth_year is not None and self.latest_birth_year is not None and self.earliest_birth_year > self.latest_birth_year:
+            raise ValidationError({"latest_birth_year": _("Must be the same as or after the earliest birth year.")})
         if self.event_id is not None:
             if self.event.season_id is not None and self.event.season_id != self.season_id:
                 raise ValidationError({"event": _("Must belong to the same season.")})

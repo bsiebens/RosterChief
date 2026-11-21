@@ -46,8 +46,8 @@
 	</label>
 	<div class="grid gap-3 sm:grid-cols-3">
 		<Field label={t('tn.f.max_teams')} type="number" min="1" bind:value={v.max_teams} error={errors.max_teams} />
-		<Field label={t('tn.f.min_age')} type="number" min="0" bind:value={v.min_age} error={errors.min_age} />
-		<Field label={t('tn.f.max_age')} type="number" min="0" bind:value={v.max_age} error={errors.max_age} />
+		<Field label={t('tn.f.earliest_birth_year')} type="number" min="1900" placeholder="2012" bind:value={v.earliest_birth_year} error={errors.earliest_birth_year} />
+		<Field label={t('tn.f.latest_birth_year')} type="number" min="1900" placeholder="2016" bind:value={v.latest_birth_year} error={errors.latest_birth_year} />
 	</div>
 	<Field label={t('tn.f.match_duration')} type="number" min="1" bind:value={v.default_match_duration_minutes} error={errors.default_match_duration_minutes} help={t('tn.f.match_duration_help')} />
 {:else}

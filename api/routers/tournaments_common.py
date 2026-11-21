@@ -127,7 +127,7 @@ def team_out(team: TournamentTeam, tournament: Tournament, entries=None) -> dict
         "registration_id": team.registration_id,
         "player_count": sum(1 for e in entries if e.role == TournamentRosterRole.PLAYER),
         "staff_count": sum(1 for e in entries if e.role == TournamentRosterRole.STAFF),
-        "has_age_flag": any(tournament.age_out_of_range(e.date_of_birth) for e in entries),
+        "has_age_flag": any(tournament.birth_year_out_of_range(e.date_of_birth) for e in entries),
     }
 
 
@@ -140,7 +140,7 @@ def person_out(row, tournament: Tournament) -> dict:
         "id": row.pk, "member_id": row.member_id if is_entry else None, "name": row.display_name if is_entry else f"{first} {last}".strip(),
         "first_name": first, "last_name": last, "jersey_number": row.jersey_number, "role": row.role, "position_label": row.position_label,
         "date_of_birth": row.date_of_birth, "license_number": row.license_number, "dietary_restrictions": row.dietary_restrictions,
-        "lunch_days": row.lunch_days, "age_flagged": tournament.age_out_of_range(row.date_of_birth),
+        "lunch_days": row.lunch_days, "age_flagged": tournament.birth_year_out_of_range(row.date_of_birth),
     }
 
 

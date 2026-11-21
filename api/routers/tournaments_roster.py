@@ -45,7 +45,7 @@ def roster_doc(tournament: Tournament, team) -> dict:
     return {
         "team": c.team_out(team, tournament, entries), "entries": [c.person_out(e, tournament) for e in entries], "lunch_mode": tournament.lunch_mode,
         "lunch_price_per_day": None if tournament.lunch_price_per_day is None else f"{tournament.lunch_price_per_day:.2f}", "dates": tournament.date_range(),
-        "min_age": tournament.min_age, "max_age": tournament.max_age, "lunch": lunch_out(tournament, entries),
+        "earliest_birth_year": tournament.earliest_birth_year, "latest_birth_year": tournament.latest_birth_year, "lunch": lunch_out(tournament, entries),
     }  # fmt: skip
 
 

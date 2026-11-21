@@ -23,7 +23,7 @@ from tournaments.services import registration as svc
 router = Router(auth=AUTHENTICATORS)
 
 SETTINGS = (
-    "name", "status", "start_date", "end_date", "registration_open", "max_teams", "min_age", "max_age", "contact_email", "description", "deposit_amount", "entry_fee_amount",
+    "name", "status", "start_date", "end_date", "registration_open", "max_teams", "earliest_birth_year", "latest_birth_year", "contact_email", "description", "deposit_amount", "entry_fee_amount",
     "lunch_mode", "lunch_price_per_day", "lunch_billed_with_fee", "default_match_duration_minutes",
 )  # fmt: skip
 
@@ -44,7 +44,7 @@ def tournament_detail(t: Tournament, user) -> dict:
     location = t.location
     return {
         **tournament_item(t),
-        "contact_email": t.contact_email, "description": t.description, "min_age": t.min_age, "max_age": t.max_age, "home_team": c.ref(t.home_team), "event_id": t.event_id,
+        "contact_email": t.contact_email, "description": t.description, "earliest_birth_year": t.earliest_birth_year, "latest_birth_year": t.latest_birth_year, "home_team": c.ref(t.home_team), "event_id": t.event_id,
         "deposit_amount": _money(t.deposit_amount), "entry_fee_amount": _money(t.entry_fee_amount), "lunch_mode": t.lunch_mode, "lunch_price_per_day": _money(t.lunch_price_per_day),
         "lunch_billed_with_fee": t.lunch_billed_with_fee, "default_match_duration_minutes": t.default_match_duration_minutes, "schedule_needs_regeneration": t.schedule_needs_regeneration,
         "dates": t.date_range(), "location": c.ref(location),
