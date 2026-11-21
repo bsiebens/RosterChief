@@ -298,6 +298,16 @@ class TournamentApiTests(TestCase):
         self.assertEqual((r.status_code, r.json()["default_gap_minutes"]), (200, 10))
         self.assertEqual(self.as_("manage", "patch", f"/{out['id']}", {"default_gap_minutes": -1}).status_code, 422)
 
+    def test_stages_are_added_last_and_reordered_with_the_sequence(self):
+        t = self.make()
+        ids = [self.as_("operate", "post", f"/{t.pk}/stages", {"name": name, "format": "round_robin"}).json()["id"] for name in ("Groups", "Final", "Placement")]
+        order = lambda: [s["id"] for s in self.as_("operate", "get", f"/{t.pk}/setup").json()["stages"]]  # noqa: E731
+        self.assertEqual(order(), ids)  # each new stage goes after the others
+        # moving the first stage down renumbers the sequence of the two that change
+        self.as_("operate", "patch", f"/{t.pk}/stages/{ids[0]}", {"sequence": 1})
+        self.as_("operate", "patch", f"/{t.pk}/stages/{ids[1]}", {"sequence": 0})
+        self.assertEqual(order(), [ids[1], ids[0], ids[2]])
+
     def test_delete_only_a_draft_tournament(self):
         body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}
         tid = self.as_("manage", "post", "", body).json()["id"]

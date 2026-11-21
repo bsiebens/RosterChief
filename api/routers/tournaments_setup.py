@@ -80,7 +80,7 @@ def _stage_values(stage: TournamentStage, payload: dict):
 def setup(request, tournament_id: uuid.UUID):
     c.gate_view(request)
     t = c.get_tournament(tournament_id)
-    stages = list(t.stages.all())
+    stages = list(t.stages.order_by("sequence", "pk"))  # in the order they are played
     return {
         "fields": [field_out(f) for f in t.fields.all()], "stages": [_stage_doc(s, len(stages)) for s in stages],
         "break_rules": [rule_out(r) for r in t.break_rules.select_related("field").order_by("priority", "pk")]  # the order the scheduler tries them in, "dates": t.date_range(),

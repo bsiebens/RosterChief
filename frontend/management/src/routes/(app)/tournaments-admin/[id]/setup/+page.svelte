@@ -52,8 +52,8 @@
 	}
 
 	// --- stages
-	type StageForm = { name: string; format: string; sequence: string; rounds: string; num_groups: string; points_win: string; points_draw: string; points_loss: string; tiebreaker_1: string; tiebreaker_2: string };
-	const blankStage = (): StageForm => ({ name: '', format: 'round_robin', sequence: '', rounds: '', num_groups: '', points_win: '3', points_draw: '1', points_loss: '0', tiebreaker_1: 'goal_diff', tiebreaker_2: 'goals_for' });
+	type StageForm = { name: string; format: string; rounds: string; num_groups: string; points_win: string; points_draw: string; points_loss: string; tiebreaker_1: string; tiebreaker_2: string };
+	const blankStage = (): StageForm => ({ name: '', format: 'round_robin', rounds: '', num_groups: '', points_win: '3', points_draw: '1', points_loss: '0', tiebreaker_1: 'goal_diff', tiebreaker_2: 'goals_for' });
 	let stageOpen = $state(false);
 	let editStage = $state<StageDoc | null>(null);
 	let sf = $state<StageForm>(blankStage());
@@ -62,7 +62,7 @@
 	function openStage(s: StageDoc | null) {
 		editStage = s;
 		sf = s
-			? { name: s.name, format: s.format, sequence: String(s.sequence), rounds: s.rounds === null ? '' : String(s.rounds), num_groups: s.num_groups === null ? '' : String(s.num_groups), points_win: String(s.points_win), points_draw: String(s.points_draw), points_loss: String(s.points_loss), tiebreaker_1: s.tiebreaker_1, tiebreaker_2: s.tiebreaker_2 }
+			? { name: s.name, format: s.format, rounds: s.rounds === null ? '' : String(s.rounds), num_groups: s.num_groups === null ? '' : String(s.num_groups), points_win: String(s.points_win), points_draw: String(s.points_draw), points_loss: String(s.points_loss), tiebreaker_1: s.tiebreaker_1, tiebreaker_2: s.tiebreaker_2 }
 			: blankStage();
 		run.clear();
 		stageOpen = true;
@@ -72,7 +72,6 @@
 		const body = {
 			name: sf.name.trim(),
 			format: sf.format,
-			sequence: numOrNull(sf.sequence) ?? undefined,
 			rounds: sf.format === 'swiss' ? numOrNull(sf.rounds) : null,
 			num_groups: sf.format === 'groups' ? numOrNull(sf.num_groups) : null,
 			points_win: Number(sf.points_win || 0),
@@ -92,6 +91,18 @@
 		for (const [k, r] of list.entries()) {
 			if (r.priority === k) continue;
 			if (!(await run.patch(`${base}/break-rules/${r.id}`, { priority: k }, undefined, { reload: false }))) break;
+		}
+		await invalidateAll();
+	}
+	/** Stages are played in list order, first on top. Moving one renumbers the sequence to match, changing only the stages whose number differs. */
+	async function moveStage(i: number, by: -1 | 1) {
+		const list = [...(setup?.stages ?? [])];
+		const j = i + by;
+		if (j < 0 || j >= list.length) return;
+		[list[i], list[j]] = [list[j], list[i]];
+		for (const [k, s] of list.entries()) {
+			if (s.sequence === k) continue;
+			if (!(await run.patch(`${base}/stages/${s.id}`, { sequence: k }, undefined, { reload: false }))) break;
 		}
 		await invalidateAll();
 	}
@@ -183,11 +194,11 @@
 				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Layers size={16} class="shrink-0" aria-hidden="true" /> {t('tn.setup.stages')}</h2>
 				{#if canOperate}<button class="btn btn-outline btn-sm gap-1" type="button" onclick={() => openStage(null)}><Plus size={14} /> {t('tn.setup.add_stage')}</button>{/if}
 			</div>
-			{#each setup.stages as s (s.id)}
+			{#each setup.stages as s, i (s.id)}
 				<div class="flex flex-wrap items-start gap-3 rounded-lg border border-line p-3">
 					<div class="min-w-0 flex-1">
 						<div class="flex flex-wrap items-center gap-2">
-							<strong class="text-ink">{s.sequence}. {s.name}</strong>
+							<strong class="text-ink">{i + 1}. {s.name}</strong>
 							<span class="badge badge-sm badge-outline">{t(`tn.format.${s.format}`)}</span>
 							<span class="badge badge-sm badge-ghost">{s.status}</span>
 						</div>
@@ -204,6 +215,10 @@
 								<button class="btn btn-primary btn-sm" type="button" disabled={run.busy} onclick={() => generate(s)}>{s.match_count ? t('tn.setup.regenerate') : t('tn.setup.generate')}</button>
 							{/if}
 							{#if s.format === 'groups'}<a class="btn btn-outline btn-sm" href="{TBASE}/{tn.id}/stages/{s.id}/next-phase">{t('tn.setup.next_phase')}</a>{/if}
+							<span class="flex items-center gap-0.5">
+								<button class="btn btn-ghost btn-xs btn-square" type="button" disabled={i === 0 || run.busy} aria-label={t('tn.setup.stage_up')} title={t('tn.setup.stage_up')} onclick={() => moveStage(i, -1)}><ArrowUp size={14} /></button>
+								<button class="btn btn-ghost btn-xs btn-square" type="button" disabled={i === setup.stages.length - 1 || run.busy} aria-label={t('tn.setup.stage_down')} title={t('tn.setup.stage_down')} onclick={() => moveStage(i, 1)}><ArrowDown size={14} /></button>
+							</span>
 							<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.setup.edit_named', { name: s.name })} onclick={() => openStage(s)}><Pencil size={13} /></button>
 							<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.setup.delete_named', { name: s.name })} onclick={() => { delStage = s; run.clear(); delStageOpen = true; }}><Trash2 size={13} /></button>
 						</div>
@@ -288,7 +303,6 @@
 			</div>
 			{#if run.fields.format}<span class="text-xs text-error">{run.fields.format}</span>{/if}
 		</fieldset>
-		<Field label={t('tn.setup.sequence')} type="number" min="1" bind:value={sf.sequence} error={run.fields.sequence} help={t('tn.setup.sequence_help')} />
 		{#if sf.format === 'swiss'}<Field label={t('tn.setup.rounds')} type="number" min="1" bind:value={sf.rounds} error={run.fields.rounds} required />{/if}
 		{#if sf.format === 'groups'}<Field label={t('tn.setup.num_groups')} type="number" min="1" bind:value={sf.num_groups} error={run.fields.num_groups} required />{/if}
 		<div class="grid grid-cols-3 gap-3">
