@@ -54,6 +54,9 @@ export type Me = {
 	can_manage_shop_orders: boolean;
 	can_manage_shop_discounts: boolean;
 	can_manage_shop_invoices: boolean;
+	/** Tournaments (false without the `tournaments` feature): manage = settings, registrations, payments; operate = teams, rosters, schedule, scores, tasks. Manage implies operate. */
+	can_manage_tournaments: boolean;
+	can_operate_tournaments: boolean;
 	/** The shop's VAT setting: 'included' while shop prices contain VAT, otherwise 'off'. */
 	shop_vat_mode: string;
 	/** Teams where the user holds a management position this season: they may edit those teams. */

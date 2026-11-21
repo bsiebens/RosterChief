@@ -1,5 +1,5 @@
 import type { Component } from 'svelte';
-import { Banknote, CalendarDays, ClipboardCheck, ClipboardList, LayoutDashboard, Newspaper, Settings, Shirt, ShoppingBag, Users, Whistle } from '@lucide/svelte';
+import { Banknote, CalendarDays, ClipboardCheck, ClipboardList, LayoutDashboard, Newspaper, Settings, Shirt, ShoppingBag, Trophy, Users, Whistle } from '@lucide/svelte';
 import type { Me } from './types.ts';
 
 /**
@@ -109,6 +109,18 @@ export const NAV: NavItem[] = [
 			{ href: '/shop/vouchers', label: 'shop.nav.vouchers', match: (p) => p.startsWith('/shop/vouchers'), visible: (me) => me.can_manage_shop_discounts },
 			{ href: '/shop/invoices', label: 'shop.nav.invoices', match: (p) => p.startsWith('/shop/invoices'), visible: (me) => me.can_manage_shop_invoices },
 			{ href: '/shop/settings', label: 'shop.nav.settings', match: (p) => p.startsWith('/shop/settings'), visible: (me) => me.can_manage_shop_orders }
+		]
+	},
+	{
+		key: 'tournaments',
+		href: '/tournaments-admin',
+		label: 'tn.nav',
+		icon: Trophy,
+		match: (p) => p === '/tournaments-admin' || p.startsWith('/tournaments-admin/'),
+		visible: (me) => me.features.includes('tournaments') && (me.can_manage_tournaments || me.can_operate_tournaments),
+		children: [
+			{ href: '/tournaments-admin', label: 'tn.nav.list', match: (p) => p === '/tournaments-admin' || (p.startsWith('/tournaments-admin/') && !p.startsWith('/tournaments-admin/dressing-rooms')) },
+			{ href: '/tournaments-admin/dressing-rooms', label: 'tn.nav.dressing_rooms', match: (p) => p.startsWith('/tournaments-admin/dressing-rooms'), visible: (me) => me.can_manage_tournaments }
 		]
 	},
 	{
