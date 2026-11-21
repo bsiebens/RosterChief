@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { ArrowDown, ArrowUp, Coffee, GripVertical, Layers, LayoutGrid, MapPin, Network, Pencil, Plus, Repeat, Shuffle, Swords, Trash2, Wrench, X, GitFork } from '@lucide/svelte';
-	import { invalidateAll } from '$app/navigation';
+	import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUp, CalendarClock, Coffee, GripVertical, Layers, LayoutGrid, MapPin, Network, Pencil, Plus, Repeat, Shuffle, Swords, Trash2, Users, Wrench, X, GitFork } from '@lucide/svelte';
+	import { goto, invalidateAll } from '$app/navigation';
+	import { page } from '$app/state';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
@@ -9,7 +10,7 @@
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
-	import { fmtDay, FORMATS, numOrNull, Runner, strOrNull, TBASE, TIEBREAKERS, type BreakRule, type FieldDoc, type StageDoc } from '#lib/tournaments.svelte.ts';
+	import { fmtDateTime, fmtDay, FORMATS, fromLocalInput, numOrNull, Runner, strOrNull, TBASE, TIEBREAKERS, toLocalInput, type BreakRule, type FieldDoc, type MatchDoc, type StageDoc } from '#lib/tournaments.svelte.ts';
 
 	let { data } = $props();
 	const tn = $derived(data.tournament);
@@ -105,17 +106,125 @@
 		if (dragRuleId && dragRuleId !== targetId) moveRule(ruleList.findIndex((r) => r.id === dragRuleId), ruleList.findIndex((r) => r.id === targetId));
 		dragRuleId = overRuleId = null;
 	};
-	/** Stages are played in list order, first on top. Moving one renumbers the sequence to match, changing only the stages whose number differs. */
-	async function moveStage(i: number, by: -1 | 1) {
-		const list = [...(setup?.stages ?? [])];
-		const j = i + by;
-		if (j < 0 || j >= list.length) return;
-		[list[i], list[j]] = [list[j], list[i]];
-		for (const [k, s] of list.entries()) {
+	// The visible order of the stages: follows the server, changes at once while dragging or using the arrows, then is saved.
+	let stageList = $state<StageDoc[]>([]);
+	$effect(() => {
+		stageList = [...(setup?.stages ?? [])];
+	});
+	let dragStageId = $state<string | null>(null);
+	let overStageId = $state<string | null>(null);
+	/** Stages are played in list order, first on the left. Moving one renumbers the sequence to match, changing only the stages whose number differs. */
+	async function moveStage(from: number, to: number) {
+		if (from === to || to < 0 || to >= stageList.length) return;
+		const next = [...stageList];
+		next.splice(to, 0, next.splice(from, 1)[0]);
+		stageList = next;
+		for (const [k, s] of next.entries()) {
 			if (s.sequence === k) continue;
 			if (!(await run.patch(`${base}/stages/${s.id}`, { sequence: k }, undefined, { reload: false }))) break;
 		}
 		await invalidateAll();
+	}
+	const dropStage = (targetId: string) => {
+		if (dragStageId && dragStageId !== targetId) moveStage(stageList.findIndex((x) => x.id === dragStageId), stageList.findIndex((x) => x.id === targetId));
+		dragStageId = overStageId = null;
+	};
+
+	// --- selected stage and its matches
+	const selectedId = $derived(page.url.searchParams.get('stage'));
+	const selected = $derived(stageList.find((x) => x.id === selectedId) ?? null);
+	function selectStage(id: string) {
+		if (id === selectedId) return;
+		const u = new URL(page.url.href);
+		u.searchParams.set('stage', id);
+		goto(u, { replace: true, reset: false });
+	}
+	type Section = { key: string; title: string; matches: MatchDoc[] };
+	const hasGroups = $derived((selected?.groups.length ?? 0) > 0);
+	const sections = $derived.by<Section[]>(() => {
+		const rounds = data.schedule?.stages.find((x) => x.stage.id === selectedId)?.rounds ?? [];
+		if (!hasGroups) return rounds.map((r) => ({ key: `r${r.round_number}`, title: r.label, matches: r.matches }));
+		const byKey = new Map<string, Section>();
+		for (const r of rounds)
+			for (const m of r.matches) {
+				const key = m.group ? `g${m.group.id}` : `r${r.round_number}`;
+				if (!byKey.has(key)) byKey.set(key, { key, title: m.group ? m.group.name : r.label, matches: [] });
+				byKey.get(key)!.matches.push(m);
+			}
+		return [...byKey.values()];
+	});
+	const matchTotal = $derived(sections.reduce((n, x) => n + x.matches.length, 0));
+	const locked = (m: MatchDoc) => m.status === 'completed' || m.status === 'complete';
+	const matchLabel = (m: MatchDoc) => `${m.home_display} – ${m.away_display}`;
+	const matchUrl = (id: string) => `/tournaments/matches/${id}`;
+
+	let swapping = $state<string | null>(null);
+	/** One click: home becomes away and away becomes home. */
+	async function swap(m: MatchDoc) {
+		swapping = m.id;
+		await run.patch(`${matchUrl(m.id)}/teams`, { home_team_id: m.away_team?.id ?? null, away_team_id: m.home_team?.id ?? null });
+		swapping = null;
+	}
+
+	let replaceOpen = $state(false);
+	let replacing = $state<MatchDoc | null>(null);
+	let repHome = $state('');
+	let repAway = $state('');
+	function openReplace(m: MatchDoc) {
+		replacing = m;
+		repHome = m.home_team?.id ?? '';
+		repAway = m.away_team?.id ?? '';
+		run.clear();
+		replaceOpen = true;
+	}
+	async function saveReplace(e: SubmitEvent) {
+		e.preventDefault();
+		if (replacing && (await run.patch(`${matchUrl(replacing.id)}/teams`, { home_team_id: strOrNull(repHome), away_team_id: strOrNull(repAway) }))) replaceOpen = false;
+	}
+
+	let moveOpen = $state(false);
+	let moving = $state<MatchDoc | null>(null);
+	let moveField = $state('');
+	let moveStart = $state('');
+	function openMove(m: MatchDoc) {
+		moving = m;
+		moveField = m.field?.id ?? setup?.fields[0]?.id ?? '';
+		moveStart = toLocalInput(m.scheduled_start);
+		run.clear();
+		moveOpen = true;
+	}
+	async function saveMove(e: SubmitEvent) {
+		e.preventDefault();
+		if (moving && (await run.post(`${matchUrl(moving.id)}/reschedule`, { field_id: moveField, scheduled_start: fromLocalInput(moveStart) }))) moveOpen = false;
+	}
+
+	let delMatchOpen = $state(false);
+	let delMatch = $state<MatchDoc | null>(null);
+	async function removeMatch() {
+		if (delMatch && (await run.del(matchUrl(delMatch.id)))) delMatchOpen = false;
+	}
+
+	let addOpen = $state(false);
+	let af = $state({ home: '', away: '', round: '1', label: '', group: '', field: '', start: '' });
+	function openAdd() {
+		const last = sections.at(-1)?.matches.at(-1);
+		af = { home: '', away: '', round: String(last?.round_number ?? 1), label: '', group: '', field: '', start: '' };
+		run.clear();
+		addOpen = true;
+	}
+	async function saveAdd(e: SubmitEvent) {
+		e.preventDefault();
+		if (!selected) return;
+		const body = {
+			home_team_id: strOrNull(af.home),
+			away_team_id: strOrNull(af.away),
+			round_number: numOrNull(af.round),
+			round_label: af.label.trim(),
+			group_id: hasGroups ? strOrNull(af.group) : null,
+			field_id: strOrNull(af.field),
+			scheduled_start: af.field && af.start ? fromLocalInput(af.start) : null
+		};
+		if (await run.post(`${base}/stages/${selected.id}/matches`, body)) addOpen = false;
 	}
 	async function removeStage() {
 		if (delStage && (await run.del(`${base}/stages/${delStage.id}`))) delStageOpen = false;
@@ -175,7 +284,7 @@
 	{#if data.error || !setup}
 		<Alert kind="error">{t('common.error.generic')}</Alert>
 	{:else}
-		{#if run.error && !fieldOpen && !stageOpen && !ruleOpen && !delFieldOpen && !delStageOpen && !delRuleOpen}<Alert kind="error">{run.error}</Alert>{/if}
+		{#if run.error && !fieldOpen && !stageOpen && !ruleOpen && !delFieldOpen && !delStageOpen && !delRuleOpen && !replaceOpen && !moveOpen && !delMatchOpen && !addOpen}<Alert kind="error">{run.error}</Alert>{/if}
 
 		<section class="card card-body card-hl gap-3">
 			<div class="flex flex-wrap items-center justify-between gap-2">
@@ -205,39 +314,135 @@
 				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Layers size={16} class="shrink-0" aria-hidden="true" /> {t('tn.setup.stages')}</h2>
 				{#if canOperate}<button class="btn btn-outline btn-sm gap-1" type="button" onclick={() => openStage(null)}><Plus size={14} /> {t('tn.setup.add_stage')}</button>{/if}
 			</div>
-			{#each setup.stages as s, i (s.id)}
-				<div class="flex flex-wrap items-start gap-3 rounded-lg border border-line p-3">
-					<div class="min-w-0 flex-1">
-						<div class="flex flex-wrap items-center gap-2">
-							<strong class="text-ink">{i + 1}. {s.name}</strong>
-							<span class="badge badge-sm badge-outline">{t(`tn.format.${s.format}`)}</span>
-							<span class="badge badge-sm badge-ghost">{s.status}</span>
-						</div>
-						<p class="font-mono text-xs text-muted">
-							{t('tn.setup.matches', { n: s.match_count })}{s.groups.length ? ` · ${s.groups.map((g) => g.name).join(', ')}` : ''} · {t('tn.setup.points', { w: s.points_win, d: s.points_draw, l: s.points_loss })}
-						</p>
-					</div>
-					{#if canOperate}
-						<div class="flex flex-wrap items-center gap-2">
-							{#if isKnockout(s) || s.needs_seed_choice}
-								<a class="btn btn-primary btn-sm gap-1" href="{TBASE}/{tn.id}/stages/{s.id}/seed"><Swords size={14} /> {t('tn.setup.seed')}</a>
-							{:else}
-								{#if s.supports_placement}<label class="flex items-center gap-1 text-xs"><input type="checkbox" class="checkbox checkbox-xs" bind:checked={placement[s.id]} /> {t('tn.setup.placement')}</label>{/if}
-								<button class="btn btn-primary btn-sm" type="button" disabled={run.busy} onclick={() => generate(s)}>{s.match_count ? t('tn.setup.regenerate') : t('tn.setup.generate')}</button>
-							{/if}
-							{#if s.format === 'groups'}<a class="btn btn-outline btn-sm" href="{TBASE}/{tn.id}/stages/{s.id}/next-phase">{t('tn.setup.next_phase')}</a>{/if}
-							<span class="flex items-center gap-0.5">
-								<button class="btn btn-ghost btn-xs btn-square" type="button" disabled={i === 0 || run.busy} aria-label={t('tn.setup.stage_up')} title={t('tn.setup.stage_up')} onclick={() => moveStage(i, -1)}><ArrowUp size={14} /></button>
-								<button class="btn btn-ghost btn-xs btn-square" type="button" disabled={i === setup.stages.length - 1 || run.busy} aria-label={t('tn.setup.stage_down')} title={t('tn.setup.stage_down')} onclick={() => moveStage(i, 1)}><ArrowDown size={14} /></button>
-							</span>
-							<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.setup.edit_named', { name: s.name })} onclick={() => openStage(s)}><Pencil size={13} /></button>
-							<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.setup.delete_named', { name: s.name })} onclick={() => { delStage = s; run.clear(); delStageOpen = true; }}><Trash2 size={13} /></button>
-						</div>
-					{/if}
-				</div>
-			{:else}
+			{#if !stageList.length}
 				<p class="text-sm text-muted">{t('tn.setup.no_stages')}</p>
-			{/each}
+			{:else}
+				<p class="text-xs text-muted">{t('tn.setup.flow_hint')}</p>
+				<div class="grid items-start gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+					<div class="flex flex-col gap-y-2 md:flex-row md:flex-wrap md:gap-y-3">
+						{#each stageList as s, i (s.id)}
+							{@const Icon = FORMAT_ICONS[s.format]}
+							{@const isSel = selectedId === s.id}
+							<div class="flex flex-col items-stretch md:flex-row md:items-center">
+								<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+								<div
+									class="flex w-full flex-col gap-2 rounded-lg border p-3 transition-colors md:w-72 {isSel ? 'border-ink bg-row-sel' : 'border-line bg-white hover:bg-surface'} {overStageId === s.id && dragStageId !== s.id ? 'outline outline-2 -outline-offset-2 outline-club' : ''} {dragStageId === s.id ? 'opacity-50' : ''}"
+									draggable={canOperate}
+									onclick={(e) => {
+										if (!(e.target as HTMLElement).closest('button, a, label, input')) selectStage(s.id);
+									}}
+									ondragstart={(e) => {
+										dragStageId = s.id;
+										if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+									}}
+									ondragover={(e) => {
+										if (!dragStageId) return;
+										e.preventDefault();
+										overStageId = s.id;
+									}}
+									ondrop={(e) => {
+										e.preventDefault();
+										dropStage(s.id);
+									}}
+									ondragend={() => (dragStageId = overStageId = null)}>
+									<div class="flex items-start gap-2">
+										<span class="flex size-9 shrink-0 items-center justify-center rounded-md {isSel ? 'bg-ink text-white' : 'bg-subhead text-muted'}"><Icon size={18} aria-hidden="true" /></span>
+										<button class="min-w-0 flex-1 cursor-pointer text-left" type="button" aria-pressed={isSel} onclick={() => selectStage(s.id)}>
+											<strong class="block truncate text-ink"><span class="font-mono text-xs text-muted">{i + 1}.</span> {s.name}</strong>
+											<span class="mt-1 flex flex-wrap items-center gap-1">
+												<span class="badge badge-sm badge-outline">{t(`tn.format.${s.format}`)}</span>
+												<span class="badge badge-sm badge-ghost">{s.status}</span>
+											</span>
+										</button>
+										{#if canOperate}<GripVertical size={16} class="mt-1 shrink-0 cursor-grab text-muted" aria-hidden="true" />{/if}
+									</div>
+									<p class="font-mono text-xs text-muted">
+										{t('tn.setup.matches', { n: s.match_count })}{s.groups.length ? ` · ${s.groups.map((g) => g.name).join(', ')}` : ''} · {t('tn.setup.points', { w: s.points_win, d: s.points_draw, l: s.points_loss })}
+									</p>
+									{#if canOperate}
+										<div class="flex flex-wrap items-center gap-2">
+											{#if isKnockout(s) || s.needs_seed_choice}
+												<a class="btn btn-primary btn-xs gap-1" href="{TBASE}/{tn.id}/stages/{s.id}/seed"><Swords size={13} /> {t('tn.setup.seed')}</a>
+											{:else if s.format !== 'custom'}
+												<button class="btn btn-primary btn-xs" type="button" disabled={run.busy} onclick={() => generate(s)}>{s.match_count ? t('tn.setup.regenerate') : t('tn.setup.generate')}</button>
+											{/if}
+											{#if s.format === 'groups'}<a class="btn btn-outline btn-xs" href="{TBASE}/{tn.id}/stages/{s.id}/next-phase">{t('tn.setup.next_phase')}</a>{/if}
+										</div>
+										{#if s.supports_placement && !isKnockout(s) && !s.needs_seed_choice}
+											<label class="flex items-center gap-1 text-xs"><input type="checkbox" class="checkbox checkbox-xs" bind:checked={placement[s.id]} /> {t('tn.setup.placement')}</label>
+										{/if}
+										<div class="flex items-center justify-between gap-1">
+											<span class="flex items-center gap-0.5">
+												<button class="btn btn-ghost btn-xs btn-square" type="button" disabled={i === 0 || run.busy} aria-label={t('tn.setup.stage_left')} title={t('tn.setup.stage_left')} onclick={() => moveStage(i, i - 1)}><ArrowLeft size={14} /></button>
+												<button class="btn btn-ghost btn-xs btn-square" type="button" disabled={i === stageList.length - 1 || run.busy} aria-label={t('tn.setup.stage_right')} title={t('tn.setup.stage_right')} onclick={() => moveStage(i, i + 1)}><ArrowRight size={14} /></button>
+											</span>
+											<span class="flex items-center gap-1">
+												<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.setup.edit_named', { name: s.name })} title={t('tn.setup.edit_named', { name: s.name })} onclick={() => openStage(s)}><Pencil size={13} /></button>
+												<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.setup.delete_named', { name: s.name })} title={t('tn.setup.delete_named', { name: s.name })} onclick={() => { delStage = s; run.clear(); delStageOpen = true; }}><Trash2 size={13} /></button>
+											</span>
+										</div>
+									{/if}
+								</div>
+								{#if i < stageList.length - 1}
+									<div class="flex flex-col items-center justify-center gap-0.5 px-2 py-1 text-muted md:w-24" aria-hidden="true">
+										<ArrowRight size={20} class="rotate-90 md:rotate-0" />
+										{#if s.format === 'groups' && isKnockout(stageList[i + 1])}<span class="text-center text-[11px] leading-tight">{t('tn.setup.feeds_advance')}</span>{/if}
+									</div>
+								{/if}
+							</div>
+						{/each}
+					</div>
+
+					<div class="grid gap-3 rounded-lg border border-line p-3">
+						{#if !selected}
+							<p class="text-sm text-muted">{t('tn.setup.panel_select')}</p>
+						{:else}
+							<div class="flex flex-wrap items-center justify-between gap-2">
+								<h3 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('tn.setup.panel_title', { name: selected.name })}</h3>
+								{#if canOperate}<button class="btn btn-outline btn-sm gap-1" type="button" onclick={openAdd}><Plus size={14} /> {t('tn.setup.add_match')}</button>{/if}
+							</div>
+							{#if !data.schedule}
+								<Alert kind="error">{t('common.error.generic')}</Alert>
+							{:else if !matchTotal}
+								<p class="text-sm text-muted">{selected.format === 'custom' ? t('tn.setup.panel_empty_custom') : t('tn.setup.panel_empty')}</p>
+							{:else}
+								{#each sections as sec (sec.key)}
+									<div class="grid gap-1">
+										<h4 class="text-xs font-bold text-muted">{sec.title}</h4>
+										<ul class="grid divide-y divide-line rounded-lg border border-line">
+											{#each sec.matches as m (m.id)}
+												{@const lock = locked(m)}
+												<li class="flex flex-wrap items-center gap-x-3 gap-y-1 p-2 hover:bg-paper">
+													<div class="min-w-0 flex-1">
+														<p class="text-sm text-ink">{m.home_display} <span class="text-muted">–</span> {m.away_display}</p>
+														<p class="font-mono text-xs text-muted">
+															{#if hasGroups && m.group}{m.round_label || `R${m.round_number}`} · {/if}{m.scheduled_start ? fmtDateTime(m.scheduled_start) : t('tn.sched.unscheduled')}{m.field ? ` · ${m.field.name}` : ''}
+														</p>
+													</div>
+													{#if lock && m.score_home !== null}
+														<span class="badge badge-sm badge-neutral font-mono">{m.score_home}–{m.score_away}</span>
+													{:else}
+														<span class="badge badge-sm badge-ghost">{m.status}</span>
+													{/if}
+													{#if canOperate}
+														{@const tip = lock ? t('tn.setup.match_locked') : ''}
+														<div class="flex items-center gap-1" title={tip}>
+															<button class="btn btn-outline btn-xs btn-square" type="button" disabled={lock || run.busy || (!m.home_team && !m.away_team)} aria-label={t('tn.setup.match_swap')} title={tip || t('tn.setup.match_swap')} onclick={() => swap(m)}><ArrowLeftRight size={13} /></button>
+															<button class="btn btn-outline btn-xs btn-square" type="button" disabled={lock || run.busy} aria-label={t('tn.setup.match_replace')} title={tip || t('tn.setup.match_replace')} onclick={() => openReplace(m)}><Users size={13} /></button>
+															<button class="btn btn-outline btn-xs btn-square" type="button" disabled={lock || run.busy} aria-label={t('tn.setup.match_move')} title={tip || t('tn.setup.match_move')} onclick={() => openMove(m)}><CalendarClock size={13} /></button>
+															<button class="btn btn-outline btn-error btn-xs btn-square" type="button" disabled={lock || run.busy} aria-label={t('tn.setup.match_delete')} title={tip || t('tn.setup.match_delete')} onclick={() => { delMatch = m; run.clear(); delMatchOpen = true; }}><Trash2 size={13} /></button>
+														</div>
+													{/if}
+												</li>
+											{/each}
+										</ul>
+									</div>
+								{/each}
+							{/if}
+						{/if}
+					</div>
+				</div>
+			{/if}
 		</section>
 
 		<section class="card card-body card-hl gap-3">
@@ -455,5 +660,98 @@
 			<button class="btn btn-error gap-2" type="button" disabled={run.busy} onclick={removeRule}><Trash2 size={16} /> {t('common.delete')}</button>
 		</div>
 	</div>
+</Modal>
+{#snippet teamSelect(id: string, text: string, value: string, set: (v: string) => void, errorMsg?: string)}
+	<div class="form-control w-full">
+		<label class="label" for={id}><span class="label-text">{text}</span></label>
+		<select {id} class="select select-bordered w-full" {value} onchange={(e) => set(e.currentTarget.value)}>
+			<option value="">{t('tn.setup.match_tbd')}</option>
+			{#each data.teams as team (team.id)}<option value={team.id}>{team.name}</option>{/each}
+		</select>
+		{#if errorMsg}<span class="mt-1 block text-xs text-error">{errorMsg}</span>{/if}
+	</div>
+{/snippet}
+
+<Modal bind:open={replaceOpen} wide title={t('tn.setup.match_replace')}>
+	<form class="grid gap-3" onsubmit={saveReplace}>
+		{#if run.error}<Alert kind="error">{run.error}</Alert>{/if}
+		{#if replacing}<p class="text-sm font-semibold">{matchLabel(replacing)}</p>{/if}
+		<div class="grid gap-3 sm:grid-cols-2">
+			{@render teamSelect('rp-home', t('tn.setup.match_home'), repHome, (v) => (repHome = v), run.fields.home_team_id)}
+			{@render teamSelect('rp-away', t('tn.setup.match_away'), repAway, (v) => (repAway = v), run.fields.away_team_id)}
+		</div>
+		<div class="modal-action mt-2 flex justify-end gap-2">
+			<button class="btn btn-outline" type="button" onclick={() => (replaceOpen = false)}>{t('common.cancel')}</button>
+			<button class="btn btn-primary" type="submit" disabled={run.busy}>{t('common.save')}</button>
+		</div>
+	</form>
+</Modal>
+
+<Modal bind:open={moveOpen} wide title={t('tn.setup.match_move')}>
+	<form class="grid gap-3" onsubmit={saveMove}>
+		{#if run.error}<Alert kind="error">{run.error}</Alert>{/if}
+		{#if moving}<p class="text-sm font-semibold">{matchLabel(moving)}</p>{/if}
+		<div class="form-control w-full">
+			<label class="label" for="mv-field"><span class="label-text">{t('tn.sched.field')}</span></label>
+			<select id="mv-field" class="select select-bordered w-full" bind:value={moveField} required>
+				{#each setup?.fields ?? [] as f (f.id)}<option value={f.id}>{f.name}</option>{/each}
+			</select>
+		</div>
+		<Field label={t('tn.sched.start')} type="datetime-local" bind:value={moveStart} required />
+		<div class="modal-action mt-2 flex justify-end gap-2">
+			<button class="btn btn-outline" type="button" onclick={() => (moveOpen = false)}>{t('common.cancel')}</button>
+			<button class="btn btn-primary" type="submit" disabled={run.busy}>{t('common.save')}</button>
+		</div>
+	</form>
+</Modal>
+
+<Modal bind:open={delMatchOpen} title={t('tn.setup.match_delete')}>
+	<div class="grid gap-3">
+		{#if run.error}<Alert kind="error">{run.error}</Alert>{/if}
+		<p>{t('tn.setup.match_delete_body', { name: delMatch ? matchLabel(delMatch) : '' })}</p>
+		<div class="modal-action mt-2 flex justify-end gap-2">
+			<button class="btn btn-outline" type="button" onclick={() => (delMatchOpen = false)}>{t('common.cancel')}</button>
+			<button class="btn btn-error gap-2" type="button" disabled={run.busy} onclick={removeMatch}><Trash2 size={16} /> {t('common.delete')}</button>
+		</div>
+	</div>
+</Modal>
+
+<Modal bind:open={addOpen} wide title={t('tn.setup.add_match')}>
+	<form class="grid gap-3" onsubmit={saveAdd}>
+		{#if run.error && !Object.keys(run.fields).length}<Alert kind="error">{run.error}</Alert>{/if}
+		<div class="grid gap-3 sm:grid-cols-2">
+			{@render teamSelect('am-home', t('tn.setup.match_home'), af.home, (v) => (af.home = v), run.fields.home_team_id)}
+			{@render teamSelect('am-away', t('tn.setup.match_away'), af.away, (v) => (af.away = v), run.fields.away_team_id)}
+		</div>
+		<div class="grid gap-3 sm:grid-cols-2">
+			<Field label={t('tn.setup.match_round')} type="number" min="1" bind:value={af.round} error={run.fields.round_number} />
+			<Field label={t('tn.setup.match_round_label')} bind:value={af.label} error={run.fields.round_label} />
+		</div>
+		{#if hasGroups}
+			<div class="form-control w-full">
+				<label class="label" for="am-group"><span class="label-text">{t('tn.setup.match_group')}</span></label>
+				<select id="am-group" class="select select-bordered w-full" bind:value={af.group}>
+					<option value="">{t('tn.setup.match_no_group')}</option>
+					{#each selected?.groups ?? [] as g (g.id)}<option value={g.id}>{g.name}</option>{/each}
+				</select>
+				{#if run.fields.group_id}<span class="mt-1 block text-xs text-error">{run.fields.group_id}</span>{/if}
+			</div>
+		{/if}
+		<div class="grid gap-3 sm:grid-cols-2">
+			<div class="form-control w-full">
+				<label class="label" for="am-field"><span class="label-text">{t('tn.sched.field')}</span></label>
+				<select id="am-field" class="select select-bordered w-full" bind:value={af.field}>
+					<option value="">{t('tn.setup.match_no_field')}</option>
+					{#each setup?.fields ?? [] as f (f.id)}<option value={f.id}>{f.name}</option>{/each}
+				</select>
+				{#if run.fields.field_id}<span class="mt-1 block text-xs text-error">{run.fields.field_id}</span>{/if}
+			</div>
+			<Field label={t('tn.sched.start')} type="datetime-local" bind:value={af.start} error={run.fields.scheduled_start} help={t('tn.setup.match_start_help')} />
+		</div>
+		<div class="modal-action mt-2 flex justify-end gap-2">
+			<button class="btn btn-outline" type="button" onclick={() => (addOpen = false)}>{t('common.cancel')}</button>
+			<button class="btn btn-primary" type="submit" disabled={run.busy}>{t('common.save')}</button>
+		</div>
+	</form>
 </Modal>
 <Toast message={run.notice} onhide={() => (run.notice = '')} />
