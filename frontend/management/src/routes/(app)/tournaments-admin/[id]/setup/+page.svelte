@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Coffee, Layers, MapPin, Pencil, Plus, Swords, Trash2, X } from '@lucide/svelte';
+	import { Coffee, Layers, LayoutGrid, MapPin, Network, Pencil, Plus, Repeat, Shuffle, Swords, Trash2, Wrench, X, GitFork } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
@@ -22,6 +22,8 @@
 		const day = tn.days?.find((x) => x.date === d);
 		return { start: day?.starts_at ?? '09:00', end: day?.ends_at ?? '18:00' };
 	};
+	/** One icon per stage format, shown on top of its card in the add stage dialog. */
+	const FORMAT_ICONS = { single_elim: Network, double_elim: GitFork, round_robin: Repeat, groups: LayoutGrid, swiss: Shuffle, custom: Wrench } as const;
 	const isKnockout = (s: StageDoc) => s.format === 'single_elim' || s.format === 'double_elim';
 
 	// --- fields
@@ -249,20 +251,20 @@
 	</form>
 </Modal>
 
-<Modal bind:open={stageOpen} title={editStage ? t('tn.setup.edit_stage') : t('tn.setup.add_stage')}>
+<Modal bind:open={stageOpen} wide title={editStage ? t('tn.setup.edit_stage') : t('tn.setup.add_stage')}>
 	<form class="grid gap-3" onsubmit={saveStage}>
 		{@render err()}
 		<Field label={t('tn.setup.stage_name')} bind:value={sf.name} error={run.fields.name} required />
 		<fieldset class="grid gap-2">
 			<legend class="label"><span class="label-text">{t('tn.setup.format')}</span></legend>
-			<div class="grid gap-2" role="radiogroup" aria-label={t('tn.setup.format')}>
+			<div class="grid grid-cols-2 gap-2 lg:grid-cols-3" role="radiogroup" aria-label={t('tn.setup.format')}>
 				{#each FORMATS as f (f)}
-					<label class="flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 hover:bg-surface {sf.format === f ? 'border-ink bg-row-sel' : 'border-line'}">
-						<input type="radio" class="radio radio-sm mt-1" name="st-format" value={f} bind:group={sf.format} />
-						<span class="min-w-0 flex-1">
-							<span class="block font-semibold text-ink">{t(`tn.format.${f}`)}</span>
-							<span class="block text-xs text-muted">{t(`tn.format.${f}.help`)}</span>
-						</span>
+					{@const Icon = FORMAT_ICONS[f]}
+					<label class="flex cursor-pointer flex-col gap-1.5 rounded-lg border p-3 hover:bg-surface focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-club {sf.format === f ? 'border-ink bg-row-sel' : 'border-line'}">
+						<input type="radio" class="sr-only" name="st-format" value={f} bind:group={sf.format} />
+						<span class="flex size-9 items-center justify-center rounded-md {sf.format === f ? 'bg-ink text-white' : 'bg-subhead text-muted'}"><Icon size={18} aria-hidden="true" /></span>
+						<span class="block font-display text-sm font-extrabold tracking-[.06em] text-ink uppercase">{t(`tn.format.${f}`)}</span>
+						<span class="block text-xs text-muted">{t(`tn.format.${f}.help`)}</span>
 					</label>
 				{/each}
 			</div>
