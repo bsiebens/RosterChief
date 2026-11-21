@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ArrowDown, ArrowUp, Coffee, Layers, LayoutGrid, MapPin, Network, Pencil, Plus, Repeat, Shuffle, Swords, Trash2, Wrench, X, GitFork } from '@lucide/svelte';
+	import { ArrowDown, ArrowUp, Coffee, GripVertical, Layers, LayoutGrid, MapPin, Network, Pencil, Plus, Repeat, Shuffle, Swords, Trash2, Wrench, X, GitFork } from '@lucide/svelte';
 	import { invalidateAll } from '$app/navigation';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
@@ -82,18 +82,29 @@
 		};
 		if (await (editStage ? run.patch(`${base}/stages/${editStage.id}`, body) : run.post(`${base}/stages`, body))) stageOpen = false;
 	}
+	// The visible order of the break rules: follows the server, changes at once while dragging or using the arrows, then is saved.
+	let ruleList = $state<BreakRule[]>([]);
+	$effect(() => {
+		ruleList = [...(setup?.break_rules ?? [])];
+	});
+	let dragRuleId = $state<string | null>(null);
+	let overRuleId = $state<string | null>(null);
 	/** Rules are tried in list order, top first. Moving one renumbers the priorities to match, changing only the rules whose number differs. */
-	async function moveRule(i: number, by: -1 | 1) {
-		const list = [...(setup?.break_rules ?? [])];
-		const j = i + by;
-		if (j < 0 || j >= list.length) return;
-		[list[i], list[j]] = [list[j], list[i]];
-		for (const [k, r] of list.entries()) {
+	async function moveRule(from: number, to: number) {
+		if (from === to || to < 0 || to >= ruleList.length) return;
+		const next = [...ruleList];
+		next.splice(to, 0, next.splice(from, 1)[0]);
+		ruleList = next;
+		for (const [k, r] of next.entries()) {
 			if (r.priority === k) continue;
 			if (!(await run.patch(`${base}/break-rules/${r.id}`, { priority: k }, undefined, { reload: false }))) break;
 		}
 		await invalidateAll();
 	}
+	const dropRule = (targetId: string) => {
+		if (dragRuleId && dragRuleId !== targetId) moveRule(ruleList.findIndex((r) => r.id === dragRuleId), ruleList.findIndex((r) => r.id === targetId));
+		dragRuleId = overRuleId = null;
+	};
 	/** Stages are played in list order, first on top. Moving one renumbers the sequence to match, changing only the stages whose number differs. */
 	async function moveStage(i: number, by: -1 | 1) {
 		const list = [...(setup?.stages ?? [])];
@@ -235,24 +246,73 @@
 				{#if canOperate}<button class="btn btn-outline btn-sm gap-1" type="button" onclick={() => openRule(null)}><Plus size={14} /> {t('tn.setup.add_rule')}</button>{/if}
 			</div>
 			<p class="text-xs text-muted">{t('tn.setup.breaks_help')}</p>
-			{#each setup.break_rules as r, i (r.id)}
-				<div class="flex flex-wrap items-center gap-3 rounded-lg border border-line p-3">
-					<div class="min-w-0 flex-1">
-						<span class="text-sm text-ink">{r.summary}</span>
-						<p class="font-mono text-xs text-muted">{fieldName_(r.field_id)}</p>
-					</div>
-					{#if canOperate}
-						<span class="flex items-center gap-0.5">
-							<button class="btn btn-ghost btn-xs btn-square" type="button" disabled={i === 0 || run.busy} aria-label={t('tn.setup.rule_up')} title={t('tn.setup.rule_up')} onclick={() => moveRule(i, -1)}><ArrowUp size={14} /></button>
-							<button class="btn btn-ghost btn-xs btn-square" type="button" disabled={i === setup.break_rules.length - 1 || run.busy} aria-label={t('tn.setup.rule_down')} title={t('tn.setup.rule_down')} onclick={() => moveRule(i, 1)}><ArrowDown size={14} /></button>
-						</span>
-						<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.setup.edit_rule')} onclick={() => openRule(r)}><Pencil size={13} /></button>
-						<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.setup.delete_rule')} onclick={() => { delRule = r; run.clear(); delRuleOpen = true; }}><Trash2 size={13} /></button>
-					{/if}
-				</div>
-			{:else}
+			{#if !ruleList.length}
 				<p class="text-sm text-muted">{t('tn.setup.no_rules')}</p>
-			{/each}
+			{:else}
+				{#if canOperate}<p class="text-xs text-muted">{t('tn.setup.rules_drag_hint')}</p>{/if}
+				<div class="overflow-x-auto rounded-lg border border-line">
+					<table class="table">
+						<thead>
+							<tr>
+								{#if canOperate}<th class="w-24"><span class="sr-only">{t('tn.setup.col.move')}</span></th>{/if}
+								<th>{t('tn.setup.col.rule')}</th>
+								<th class="hidden md:table-cell">{t('tn.setup.col.field')}</th>
+								<th class="hidden sm:table-cell">{t('tn.setup.col.gap')}</th>
+								{#if canOperate}<th></th>{/if}
+							</tr>
+						</thead>
+						<tbody>
+							{#each ruleList as r, i (r.id)}
+								<tr
+									class="hover:bg-paper {overRuleId === r.id && dragRuleId !== r.id ? 'outline outline-2 -outline-offset-2 outline-club' : ''} {dragRuleId === r.id ? 'opacity-50' : ''}"
+									draggable={canOperate}
+									ondragstart={(e) => {
+										dragRuleId = r.id;
+										if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+									}}
+									ondragover={(e) => {
+										if (!dragRuleId) return;
+										e.preventDefault();
+										overRuleId = r.id;
+									}}
+									ondrop={(e) => {
+										e.preventDefault();
+										dropRule(r.id);
+									}}
+									ondragend={() => (dragRuleId = overRuleId = null)}>
+									{#if canOperate}
+										<td class="whitespace-nowrap">
+											<span class="inline-flex items-center gap-0.5 text-muted">
+												<GripVertical size={16} class="cursor-grab" aria-hidden="true" />
+												<button class="btn btn-ghost btn-xs btn-square" type="button" disabled={i === 0 || run.busy} aria-label={t('tn.setup.rule_up')} title={t('tn.setup.rule_up')} onclick={() => moveRule(i, i - 1)}><ArrowUp size={14} /></button>
+												<button class="btn btn-ghost btn-xs btn-square" type="button" disabled={i === ruleList.length - 1 || run.busy} aria-label={t('tn.setup.rule_down')} title={t('tn.setup.rule_down')} onclick={() => moveRule(i, i + 1)}><ArrowDown size={14} /></button>
+											</span>
+										</td>
+									{/if}
+									<td class="text-sm text-ink">{r.summary}</td>
+									<td class="hidden text-sm md:table-cell">{fieldName_(r.field_id)}</td>
+									<td class="hidden sm:table-cell">
+										{#if r.gap_minutes}
+											<span class="font-mono text-xs">{r.gap_minutes} min</span>
+											<span class="badge badge-sm {r.replaces_default_gap ? 'badge-warning' : 'badge-ghost'} ml-1">{r.replaces_default_gap ? t('tn.setup.gap_replaces') : t('tn.setup.gap_adds')}</span>
+										{:else}
+											<span class="badge badge-sm badge-outline">{t('tn.setup.gap_blackout')}</span>
+										{/if}
+									</td>
+									{#if canOperate}
+										<td class="text-right whitespace-nowrap">
+											<div class="flex items-center justify-end gap-1">
+												<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.setup.edit_rule')} title={t('tn.setup.edit_rule')} onclick={() => openRule(r)}><Pencil size={13} /></button>
+												<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.setup.delete_rule')} title={t('tn.setup.delete_rule')} onclick={() => { delRule = r; run.clear(); delRuleOpen = true; }}><Trash2 size={13} /></button>
+											</div>
+										</td>
+									{/if}
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
 		</section>
 	{/if}
 </div>
