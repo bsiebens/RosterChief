@@ -1,11 +1,10 @@
-import { numOrNull, strOrNull, type TournamentDetail } from './tournaments.svelte.ts';
+import { numOrNull, strOrNull, type TDay, type TournamentDetail } from './tournaments.svelte.ts';
 
 /** The tournament form as strings (inputs bind to strings); `payload` turns it into the API body. */
 export type TournamentForm = {
 	name: string;
 	status: string;
-	start_date: string;
-	end_date: string;
+	days: TDay[];
 	registration_open: boolean;
 	max_teams: string;
 	earliest_birth_year: string;
@@ -27,8 +26,7 @@ export function formOf(d?: Partial<TournamentDetail>): TournamentForm {
 	return {
 		name: d?.name ?? '',
 		status: d?.status ?? 'draft',
-		start_date: d?.start_date ?? '',
-		end_date: d?.end_date ?? '',
+		days: d?.days?.length ? d.days.map((x) => ({ ...x })) : [{ date: '', starts_at: '09:00', ends_at: '17:00' }],
 		registration_open: d?.registration_open ?? false,
 		max_teams: s(d?.max_teams),
 		earliest_birth_year: s(d?.earliest_birth_year),
@@ -49,8 +47,7 @@ export function payload(v: TournamentForm, opts: { homeTeam?: boolean } = { home
 	return {
 		name: v.name.trim(),
 		status: v.status,
-		start_date: v.start_date,
-		end_date: v.end_date,
+		days: v.days.filter((x) => x.date).map((x) => ({ date: x.date, starts_at: x.starts_at, ends_at: x.ends_at })),
 		registration_open: v.registration_open,
 		max_teams: numOrNull(v.max_teams),
 		earliest_birth_year: numOrNull(v.earliest_birth_year),

@@ -47,6 +47,13 @@ const rows: [string, string, string, string][] = [
 
 	// settings form
 	['tn.card.details', 'Details', 'Details', 'Détails'],
+	['tn.card.days', 'Days and hours', 'Dagen en uren', 'Jours et horaires'],
+	['tn.days.help', 'Add every day the tournament is played, with its start and end time. The days do not have to follow each other. The calendar shows the tournament from the first day’s start until the last day’s end.', 'Voeg elke dag toe waarop het toernooi gespeeld wordt, met start- en einduur. De dagen hoeven niet op elkaar aan te sluiten. De kalender toont het toernooi vanaf de start van de eerste dag tot het einde van de laatste dag.', 'Ajoutez chaque jour où le tournoi est joué, avec son heure de début et de fin. Les jours ne doivent pas être consécutifs. Le calendrier affiche le tournoi du début du premier jour à la fin du dernier.'],
+	['tn.days.date', 'Date', 'Datum', 'Date'],
+	['tn.days.starts', 'Starts', 'Start', 'Début'],
+	['tn.days.ends', 'Ends', 'Einde', 'Fin'],
+	['tn.days.add', 'Add day', 'Dag toevoegen', 'Ajouter un jour'],
+	['tn.days.remove', 'Remove day', 'Dag verwijderen', 'Retirer le jour'],
 	['tn.card.entries', 'Entries and schedule', 'Inschrijvingen en schema', 'Inscriptions et calendrier'],
 	['tn.card.fees', 'Fees and lunch', 'Kosten en lunch', 'Frais et déjeuner'],
 	['tn.delete', 'Delete tournament', 'Toernooi verwijderen', 'Supprimer le tournoi'],

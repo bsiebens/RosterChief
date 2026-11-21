@@ -1,21 +1,18 @@
 
 <script lang="ts">
+	import DaysEditor from '#lib/components/tournaments/DaysEditor.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { STATUSES } from '#lib/tournaments.svelte.ts';
 	import type { TournamentForm } from '#lib/tournaments-form.ts';
 
-	let { v = $bindable(), errors = {}, teams = [], part }: { v: TournamentForm; errors?: Record<string, string>; teams?: { id: string; name: string }[]; part: 'basics' | 'entries' | 'fees' } = $props();
+	let { v = $bindable(), errors = {}, teams = [], part }: { v: TournamentForm; errors?: Record<string, string>; teams?: { id: string; name: string }[]; part: 'basics' | 'days' | 'entries' | 'fees' } = $props();
 	const id = $props.id();
 </script>
 
 <div class="grid gap-3">
 {#if part === 'basics'}
 	<Field label={t('tn.f.name')} bind:value={v.name} error={errors.name} required maxlength={200} />
-	<div class="grid gap-3 sm:grid-cols-2">
-		<Field label={t('tn.f.start_date')} type="date" bind:value={v.start_date} error={errors.start_date} required />
-		<Field label={t('tn.f.end_date')} type="date" bind:value={v.end_date} error={errors.end_date} required />
-	</div>
 	<div class="grid gap-3 sm:grid-cols-2">
 		<div class="form-control w-full">
 			<label class="label" for="{id}-status"><span class="label-text">{t('tn.f.status')}</span></label>
@@ -39,6 +36,8 @@
 		<textarea id="{id}-desc" class="textarea textarea-bordered min-h-28 w-full" bind:value={v.description}></textarea>
 		<span class="label-text-alt mt-1 block {errors.description ? 'text-error' : ''}">{errors.description || t('tn.f.description_help')}</span>
 	</div>
+{:else if part === 'days'}
+	<DaysEditor bind:days={v.days} error={errors.days} />
 {:else if part === 'entries'}
 	<label class="flex cursor-pointer items-center gap-3 rounded-lg border border-line p-3">
 		<input type="checkbox" class="checkbox" bind:checked={v.registration_open} />

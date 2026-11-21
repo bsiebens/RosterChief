@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { CalendarClock, ClipboardList, Save, Trophy, Wallet } from '@lucide/svelte';
+	import { CalendarClock, CalendarDays, ClipboardList, Save, Trophy, Wallet } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import TournamentFields from '#lib/components/tournaments/TournamentFields.svelte';
 	import TournamentSummary from '#lib/components/tournaments/TournamentSummary.svelte';
@@ -33,6 +33,10 @@
 			<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Trophy size={16} aria-hidden="true" />{t('tn.card.details')}</h2>
 			{#if run.error && !Object.keys(run.fields).length}<Alert kind="error">{run.error}</Alert>{/if}
 			<TournamentFields bind:v errors={run.fields} teams={data.teams} part="basics" />
+		</section>
+		<section class="card card-body card-hl gap-3">
+			<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><CalendarDays size={16} aria-hidden="true" />{t('tn.card.days')}</h2>
+			<TournamentFields bind:v errors={run.fields} teams={data.teams} part="days" />
 		</section>
 		<section class="card card-body card-hl gap-3">
 			<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><CalendarClock size={16} aria-hidden="true" />{t('tn.card.entries')}</h2>

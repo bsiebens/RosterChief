@@ -21,7 +21,10 @@ export type TournamentItem = {
 	pending_registration_count: number;
 	teams_in_count: number;
 };
+/** One day the tournament is played on, with its opening hours (HH:MM). */
+export type TDay = { date: string; starts_at: string; ends_at: string };
 export type TournamentDetail = TournamentItem & {
+	days: TDay[];
 	contact_email: string;
 	description: string;
 	earliest_birth_year: number | null;
