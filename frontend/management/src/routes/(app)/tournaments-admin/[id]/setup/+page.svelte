@@ -17,6 +17,11 @@
 	const base = $derived(`/tournaments/${tn.id}`);
 	const run = new Runner();
 	const dates = $derived(setup?.dates?.length ? setup.dates : tn.dates);
+	/** The tournament's own opening hours for a date: what a new field is available by default. */
+	const hoursOf = (d: string) => {
+		const day = tn.days?.find((x) => x.date === d);
+		return { start: day?.starts_at ?? '09:00', end: day?.ends_at ?? '18:00' };
+	};
 	const isKnockout = (s: StageDoc) => s.format === 'single_elim' || s.format === 'double_elim';
 
 	// --- fields
@@ -30,7 +35,7 @@
 	function openField(f: FieldDoc | null) {
 		editField = f;
 		fieldName = f?.name ?? '';
-		windows = f ? f.availability.map((w) => ({ ...w })) : dates.map((d) => ({ date: d, start: '09:00', end: '18:00' }));
+		windows = f ? f.availability.map((w) => ({ ...w })) : dates.map((d) => ({ date: d, ...hoursOf(d) }));
 		run.clear();
 		fieldOpen = true;
 	}
@@ -235,7 +240,7 @@
 			{/each}
 			{#if run.fields.availability}<span class="text-xs text-error">{run.fields.availability}</span>{/if}
 			{#each Object.entries(run.fields).filter(([k]) => k.startsWith('availability.')) as [k, m] (k)}<span class="text-xs text-error">{m}</span>{/each}
-			<button class="btn btn-outline btn-sm w-fit gap-1" type="button" onclick={() => (windows = [...windows, { date: dates[0] ?? '', start: '09:00', end: '18:00' }])}><Plus size={14} /> {t('tn.setup.add_window')}</button>
+			<button class="btn btn-outline btn-sm w-fit gap-1" type="button" onclick={() => { const d = dates.find((x) => !windows.some((w) => w.date === x)) ?? dates[0] ?? ''; windows = [...windows, { date: d, ...hoursOf(d) }]; }}><Plus size={14} /> {t('tn.setup.add_window')}</button>
 		</fieldset>
 		<div class="modal-action mt-2 flex justify-end gap-2">
 			<button class="btn btn-outline" type="button" onclick={() => (fieldOpen = false)}>{t('common.cancel')}</button>
