@@ -45,6 +45,7 @@ export function activePortalKey(url: { pathname: string; hash: string; searchPar
 	if (pathname.startsWith('/member/stats')) return 'stats';
 	if (pathname.startsWith('/member/notifications')) return 'notifications';
 	if (pathname.startsWith('/member/shop')) return 'shop';
+	if (pathname.startsWith('/member/tournaments')) return 'volunteer';
 	if (pathname.startsWith('/coach/teams/')) return 'teams';
 	if (pathname.startsWith('/coach/news')) return 'news';
 	if (pathname.startsWith('/coach/notifications')) return 'home';
@@ -53,6 +54,6 @@ export function activePortalKey(url: { pathname: string; hash: string; searchPar
 }
 
 /** The Me entry stays selected on its sub pages. */
-export const ME_PAGES = ['me', 'payments', 'documents', 'profile', 'stats', 'notifications'];
+export const ME_PAGES = ['me', 'payments', 'documents', 'profile', 'stats', 'volunteer', 'notifications'];
 /** On a phone these also sit behind Me. */
 export const ME_PHONE_PAGES = [...ME_PAGES, 'forms'];

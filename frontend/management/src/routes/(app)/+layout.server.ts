@@ -33,9 +33,17 @@ export const load: LayoutServerLoad = async ({ locals, url, fetch }) => {
 		shopOpen = access.ok ? access.data?.shop_enabled === true : null;
 	}
 
+	// Volunteer shifts of the club's tournaments: the member app links to them only while there are some (the API answers 404 without the feature).
+	let volunteerShifts = false;
+	if (parentRoute && locals.mode === 'club' && a.status === 'authenticated') {
+		const shifts = await api<{ results: unknown[] }>('GET', '/portal/tournaments', { f: fetch });
+		volunteerShifts = shifts.ok && (shifts.data?.results.length ?? 0) > 0;
+	}
+
 	return {
 		me: (a.status === 'authenticated' ? a.me : null) as Me,
 		clubs: locals.myClubs,
-		shopOpen
+		shopOpen,
+		volunteerShifts
 	};
 };

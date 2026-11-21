@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { ChartColumn, UserRound, Wallet, Bell } from '@lucide/svelte';
+	import { ChartColumn, HandHeart, UserRound, Wallet, Bell } from '@lucide/svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { activePortalKey, ME_PAGES, ME_PHONE_PAGES, portalItems, portalPhoneItems, type PortalMode } from '#lib/portal-nav.ts';
 
@@ -34,6 +34,7 @@
 		{#if !compact && item.key === 'me' && meActive}
 			<a class="nav-subitem {active === 'profile' ? 'active' : ''}" href="/member/profile"><UserRound size={14} aria-hidden="true" /> {t('portal.profile')}</a>
 			<a class="nav-subitem {active === 'stats' ? 'active' : ''}" href="/member/stats"><ChartColumn size={14} aria-hidden="true" /> {t('portal.stats_page')}</a>
+			{#if page.data.volunteerShifts}<a class="nav-subitem {active === 'volunteer' ? 'active' : ''}" href="/member/tournaments"><HandHeart size={14} aria-hidden="true" /> {t('tv.title')}</a>{/if}
 			<a class="nav-subitem {active === 'notifications' ? 'active' : ''}" href="/member/notifications"><Bell size={14} aria-hidden="true" /> {t('portal.notifications')}</a>
 			<a class="nav-subitem {active === 'payments' ? 'active' : ''}" href="/member?tab=payments"><Wallet size={14} aria-hidden="true" /> {t('portal.payments')}</a>
 		{/if}

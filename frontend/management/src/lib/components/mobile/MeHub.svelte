@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
 	import { CalendarDays } from '@lucide/svelte';
 	import { api } from '#lib/management-api.ts';
-	import { ArrowRightLeft, Bell, ChartColumn, ChevronRight, IdCard, Ticket, ClipboardList, FileText, KeyRound, Shirt, UserRound, UsersRound, Wallet, Whistle, ReceiptText } from '@lucide/svelte';
+	import { ArrowRightLeft, Bell, ChartColumn, ChevronRight, HandHeart, IdCard, Ticket, ClipboardList, FileText, KeyRound, Shirt, UserRound, UsersRound, Wallet, Whistle, ReceiptText } from '@lucide/svelte';
 	import AccountMenu from '#lib/components/AccountMenu.svelte';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import ThemeSwitch from '#lib/components/portal/ThemeSwitch.svelte';
@@ -47,6 +48,7 @@
 		...(shop ? [{ key: 'orders', href: '/member/shop?view=orders', icon: ReceiptText, label: t('portal.shop.orders'), hint: '' }] : []),
 		{ key: 'memberships', href: '/member/profile?view=memberships', icon: IdCard, label: t('portal.mem_title'), hint: '' },
 		{ key: 'vouchers', href: '/member/profile?view=vouchers', icon: Ticket, label: t('portal.vouchers'), hint: '' },
+		...(page.data.volunteerShifts ? [{ key: 'volunteer', href: '/member/tournaments', icon: HandHeart, label: t('tv.title'), hint: '' }] : []),
 		{ key: 'stats', href: '/member/stats', icon: ChartColumn, label: t('portal.stats_page'), hint: '' },
 		{ key: 'teams', href: '/member/profile?view=follow', icon: Shirt, label: t('portal.follow_title'), hint: '' }
 	]);
