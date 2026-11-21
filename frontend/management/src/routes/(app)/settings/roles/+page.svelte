@@ -82,7 +82,7 @@
 							<td class="text-right font-mono text-sm">{r.member_count}</td>
 							<td class="text-right whitespace-nowrap">
 								<div class="flex justify-end gap-1">
-									{#if !r.is_system}<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('roles.delete_named', { name: r.name })} onclick={() => ((deleting = r), (deleteOpen = true))}><Trash2 size={13} /></button>{:else}<span class="inline-block w-6" aria-hidden="true"></span>{/if}
+									{#if !r.is_system}<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('roles.delete_named', { name: r.name })} onclick={() => ((deleting = r), (deleteOpen = true))}><Trash2 size={13} /></button>{:else}<span class="inline-block w-9" aria-hidden="true"></span>{/if}
 									<a class="btn btn-ghost btn-xs btn-square text-muted" href={roleHref(r.id)} aria-label={t('roles.edit_named', { name: r.name })}><ChevronRight size={16} /></a>
 								</div>
 							</td>
