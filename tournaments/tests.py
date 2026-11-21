@@ -13,10 +13,11 @@ from django_tenants.utils import schema_context
 from club.models import Club, Domain
 from club.services import create_club, grant_login
 from controlpanel.tests import make_user
-from events.models import Attendance, Event, Location, Season
+from events.models import Attendance, Event, Lineup, LineupSelection, Location, Season
+from events.services.lineup import lineup_changed
 from members.models import Member
 from notifications.models import InboxNotification
-from teams.models import Position, Team, TeamMembership
+from teams.models import Position, StaffAssignment, Team, TeamMembership
 
 from .models import (
     BreakRule,
@@ -1105,20 +1106,15 @@ class EnsureHomeTeamServiceTests(TournamentsTestCase):
 
         self.assertEqual(team.roster_entries.count(), 0)
 
-    def test_a_pre_existing_teams_selected_member_survives_reconciliation(self):
+    def test_a_pre_existing_teams_picked_member_survives_reconciliation(self):
         TeamMembership.objects.create(team=self.team, member=self.member, season=self.season)
         team = create_manual_team(self.tournament, club_team=self.team)
         self.tournament.home_team = self.team
         self.tournament.save(update_fields=["home_team"])
         ensure_home_team(self.tournament)  # creates the event, purges the stale entry
         self.tournament.refresh_from_db()
-        # The event's own teams.set() above already auto-created a NO_RESPONSE
-        # Attendance row for every team member (events.signals' own audience
-        # sync) -- update it rather than create(), which would collide with
-        # the (event, member) unique constraint.
-        # (No row exists yet when the tournament is already in the past: events.services.attendance only syncs future events.)
-        Attendance.objects.get_or_create(event=self.tournament.event, member=self.member)
-        Attendance.objects.filter(event=self.tournament.event, member=self.member).update(status=Attendance.AttendanceStatus.SELECTED)
+        lineup = Lineup.objects.create(event=self.tournament.event, team=self.team)
+        LineupSelection.objects.create(lineup=lineup, member=self.member)
 
         ensure_home_team(self.tournament)
 
@@ -1177,39 +1173,66 @@ class WithdrawHomeTeamGuardTests(TournamentsTestCase):
 
 
 class HomeTeamRosterSyncSignalTests(TournamentsTestCase):
+    """The home team's roster mirrors the line-up of the tournament's calendar event."""
+
     def setUp(self):
         self.tournament.home_team = self.team
         self.tournament.save(update_fields=["home_team"])
         self.tournament_team = ensure_home_team(self.tournament)
         self.tournament.refresh_from_db()
+        self.lineup = Lineup.objects.create(event=self.tournament.event, team=self.team)
 
-    def test_present_attendance_does_not_add_a_roster_entry(self):
-        # A plain "I'm coming" RSVP isn't the same as the coach actually
-        # picking this person for the roster -- only SELECTED counts (see
-        # ATTENDING_STATUSES' own comment).
-        Attendance.objects.create(event=self.tournament.event, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+    def pick(self, member):
+        """What the line-up service does when the coach picks someone: rows are written in bulk, then the signal tells the listeners."""
+        LineupSelection.objects.create(lineup=self.lineup, member=member)
+        lineup_changed.send(sender=Lineup, lineup=self.lineup)
 
-        self.assertFalse(TournamentRosterEntry.objects.filter(tournament_team=self.tournament_team, member=self.member).exists())
+    def unpick(self, member):
+        LineupSelection.objects.filter(lineup=self.lineup, member=member).delete()
+        lineup_changed.send(sender=Lineup, lineup=self.lineup)
 
-    def test_selected_attendance_adds_a_roster_entry(self):
-        Attendance.objects.create(event=self.tournament.event, member=self.member, status=Attendance.AttendanceStatus.SELECTED)
+    def on_roster(self, member):
+        return TournamentRosterEntry.objects.filter(tournament_team=self.tournament_team, member=member).exists()
+
+    def test_a_picked_player_is_added_as_a_player(self):
+        self.pick(self.member)
 
         entry = TournamentRosterEntry.objects.get(tournament_team=self.tournament_team, member=self.member)
         self.assertEqual(entry.role, TournamentRosterRole.PLAYER)
 
-    def test_leaving_the_attending_set_removes_the_roster_entry(self):
-        attendance = Attendance.objects.create(event=self.tournament.event, member=self.member, status=Attendance.AttendanceStatus.SELECTED)
-        self.assertTrue(TournamentRosterEntry.objects.filter(tournament_team=self.tournament_team, member=self.member).exists())
+    def test_picking_does_not_need_the_line_up_to_be_published(self):
+        self.assertIsNone(self.lineup.published_at)
+        self.pick(self.member)
+
+        self.assertTrue(self.on_roster(self.member))
+
+    def test_unpicking_removes_the_player(self):
+        self.pick(self.member)
+        self.unpick(self.member)
+
+        self.assertFalse(self.on_roster(self.member))
+
+    def test_a_picked_player_who_declines_is_removed(self):
+        self.pick(self.member)
+        attendance = Attendance.objects.create(event=self.tournament.event, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        self.assertTrue(self.on_roster(self.member))
 
         attendance.status = Attendance.AttendanceStatus.ABSENT
         attendance.save()
 
-        self.assertFalse(TournamentRosterEntry.objects.filter(tournament_team=self.tournament_team, member=self.member).exists())
+        self.assertFalse(self.on_roster(self.member))
 
-    def test_no_response_does_not_add_a_roster_entry(self):
-        Attendance.objects.create(event=self.tournament.event, member=self.member, status=Attendance.AttendanceStatus.NO_RESPONSE)
+    def test_a_player_who_declined_is_not_added_when_picked(self):
+        Attendance.objects.create(event=self.tournament.event, member=self.member, status=Attendance.AttendanceStatus.EXCUSED)
+        self.pick(self.member)
 
-        self.assertFalse(TournamentRosterEntry.objects.filter(tournament_team=self.tournament_team, member=self.member).exists())
+        self.assertFalse(self.on_roster(self.member))
+
+    def test_attending_without_a_pick_does_not_add_anyone(self):
+        for status in (Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.SELECTED, Attendance.AttendanceStatus.NO_RESPONSE):
+            Attendance.objects.update_or_create(event=self.tournament.event, member=self.member, defaults={"status": status})
+
+        self.assertFalse(self.on_roster(self.member))
 
     def test_a_normal_events_attendance_is_unaffected(self):
         other_member = Member.objects.create(first_name="Sam", last_name="Smith")
@@ -1217,22 +1240,81 @@ class HomeTeamRosterSyncSignalTests(TournamentsTestCase):
 
         Attendance.objects.create(event=plain_event, member=other_member, status=Attendance.AttendanceStatus.PRESENT)
 
-        self.assertFalse(TournamentRosterEntry.objects.filter(tournament_team=self.tournament_team, member=other_member).exists())
+        self.assertFalse(self.on_roster(other_member))
 
-    def test_getting_or_creating_does_not_duplicate_an_existing_entry(self):
-        # A coach may have already filled in position/DOB/etc by hand on the
-        # roster screen (a club-team row's only way to get that info at
-        # all) -- re-saving the same Attendance (e.g. a note edit, not a
-        # status change) must not clobber it.
+    def test_a_player_who_stays_picked_keeps_the_details_filled_in_by_hand(self):
         entry = TournamentRosterEntry.objects.create(tournament_team=self.tournament_team, member=self.member, position_label="Striker")
-        attendance = Attendance.objects.create(event=self.tournament.event, member=self.member, status=Attendance.AttendanceStatus.SELECTED)
-
-        attendance.note = "running late"
-        attendance.save()
+        self.pick(self.member)
+        other = Member.objects.create(first_name="Other", last_name="Player")
+        self.pick(other)  # a later change to the line-up re-syncs everyone
 
         entry.refresh_from_db()
         self.assertEqual(entry.position_label, "Striker")
         self.assertEqual(TournamentRosterEntry.objects.filter(tournament_team=self.tournament_team, member=self.member).count(), 1)
+
+    def test_staff_and_guests_added_by_hand_are_never_removed_by_the_sync(self):
+        coach = Member.objects.create(first_name="Coach", last_name="Carter")
+        TournamentRosterEntry.objects.create(tournament_team=self.tournament_team, member=coach, role=TournamentRosterRole.STAFF)
+        guest = TournamentRosterEntry.objects.create(tournament_team=self.tournament_team, foreign_first_name="Guest", foreign_last_name="Player")
+        self.pick(self.member)
+        self.unpick(self.member)
+
+        self.assertTrue(self.on_roster(coach))
+        self.assertTrue(TournamentRosterEntry.objects.filter(pk=guest.pk).exists())
+
+    def test_a_staff_member_who_is_also_picked_is_not_added_twice(self):
+        TournamentRosterEntry.objects.create(tournament_team=self.tournament_team, member=self.member, role=TournamentRosterRole.STAFF)
+        self.pick(self.member)
+
+        self.assertEqual(TournamentRosterEntry.objects.filter(tournament_team=self.tournament_team, member=self.member).count(), 1)
+
+
+class HomeTeamStaffTests(TournamentsTestCase):
+    """The home team's staff is copied onto the roster once, when the home team enters; after that it is kept by hand."""
+
+    def setUp(self):
+        self.coach = Member.objects.create(first_name="Coach", last_name="Carter")
+        self.physio = Member.objects.create(first_name="Pat", last_name="Physio")
+        self.head_coach = Position.objects.create(name="Head coach", short_name="HC", staff_position=True)
+        self.physio_position = Position.objects.create(name="Physio", short_name="PH", staff_position=True)
+        StaffAssignment.objects.create(team=self.team, member=self.coach, season=self.season, position=self.head_coach)
+        StaffAssignment.objects.create(team=self.team, member=self.physio, season=self.season, position=self.physio_position)
+        self.tournament.home_team = self.team
+        self.tournament.save(update_fields=["home_team"])
+
+    def test_the_teams_staff_is_added_as_staff_with_their_position(self):
+        team = ensure_home_team(self.tournament)
+
+        entries = {e.member_id: e for e in team.roster_entries.all()}
+        self.assertEqual(set(entries), {self.coach.pk, self.physio.pk})
+        self.assertEqual({e.role for e in entries.values()}, {TournamentRosterRole.STAFF})
+        self.assertEqual(entries[self.coach.pk].position_label, "Head coach")
+
+    def test_only_staff_of_the_tournaments_season_is_added(self):
+        other_season = Season.objects.create(start_date=datetime.date(2030, 7, 1), end_date=datetime.date(2031, 6, 30))
+        StaffAssignment.objects.create(team=self.team, member=Member.objects.create(first_name="Old", last_name="Coach"), season=other_season, position=self.head_coach)
+
+        team = ensure_home_team(self.tournament)
+
+        self.assertEqual(team.roster_entries.count(), 2)
+
+    def test_a_manual_change_to_the_staff_sticks(self):
+        team = ensure_home_team(self.tournament)
+        team.roster_entries.filter(member=self.physio).delete()
+        extra = Member.objects.create(first_name="Extra", last_name="Helper")
+        TournamentRosterEntry.objects.create(tournament_team=team, member=extra, role=TournamentRosterRole.STAFF)
+
+        ensure_home_team(self.tournament)  # every save of the tournament calls this again
+
+        self.assertEqual(set(team.roster_entries.values_list("member_id", flat=True)), {self.coach.pk, extra.pk})
+
+    def test_staff_survive_the_line_up_sync(self):
+        team = ensure_home_team(self.tournament)
+        self.tournament.refresh_from_db()
+        lineup = Lineup.objects.create(event=self.tournament.event, team=self.team)
+        lineup_changed.send(sender=Lineup, lineup=lineup)
+
+        self.assertEqual(team.roster_entries.filter(role=TournamentRosterRole.STAFF).count(), 2)
 
 
 class NotifyTournamentShiftsOpenServiceTests(TournamentsTestCase):

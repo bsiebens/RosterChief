@@ -149,6 +149,8 @@ const rows: [string, string, string, string][] = [
 	['tn.roster.delete_body', 'Remove {name} from the roster?', '{name} uit de selectie verwijderen?', 'Retirer {name} de l’effectif ?'],
 	['tn.roster.empty', 'The roster is empty.', 'De selectie is leeg.', 'L’effectif est vide.'],
 	['tn.roster.age_range', 'Birth years of this tournament: {earliest} to {latest}. People outside it are flagged, not blocked.', 'Geboortejaren van dit toernooi: {earliest} tot {latest}. Personen daarbuiten worden aangeduid, niet geweigerd.', 'Années de naissance du tournoi : {earliest} à {latest}. Les personnes hors tranche sont signalées, pas bloquées.'],
+	['tn.roster.home_note', 'Players follow the line-up of this tournament’s calendar event: pick them there. The staff of the team was copied when the tournament was created; add or remove people here as needed.', 'De spelers volgen de opstelling van het kalenderitem van dit toernooi: kies ze daar. De staf van het team werd gekopieerd bij het aanmaken van het toernooi; voeg hier personen toe of verwijder ze naar behoefte.', 'Les joueurs suivent la composition de l’événement du calendrier de ce tournoi : choisissez-les là-bas. Le staff de l’équipe a été copié à la création du tournoi ; ajoutez ou retirez des personnes ici selon les besoins.'],
+	['tn.roster.home_note_link', 'Open the line-up', 'Opstelling openen', 'Ouvrir la composition'],
 	['tn.roster.age_flag', 'Birth year', 'Geboortejaar', 'Année de naissance'],
 	['tn.roster.name', 'Name', 'Naam', 'Nom'],
 	['tn.roster.first_name', 'First name', 'Voornaam', 'Prénom'],

@@ -16,10 +16,10 @@ from authorization.services import assign_role, create_role
 from club.models import Club, Domain
 from club.services import create_club, grant_login
 from controlpanel.tests import login_session, make_user
-from events.models import Event, Season
+from events.models import Attendance, Event, Season
 from features.entitlements import Entitlement, Entitlements
 from members.models import Member
-from teams.models import Team
+from teams.models import Position, StaffAssignment, Team, TeamMembership
 from tournaments.models import Match, Tournament, TournamentField, TournamentTask, TournamentTeam
 
 BASE = "/api/v1"
@@ -221,6 +221,31 @@ class TournamentApiTests(TestCase):
         self.assertEqual(self.as_("manage", "post", "", twice).status_code, 422)  # a date only once
         backwards = {**base, "days": [{"date": "2026-10-03", "starts_at": "17:00", "ends_at": "09:00"}]}
         self.assertEqual(self.as_("manage", "post", "", backwards).status_code, 422)  # ends after it starts
+
+    def test_the_home_roster_follows_the_events_lineup_and_staff_is_copied_once(self):
+        player = self.users["plain_member"]
+        coach = self.users["operate_member"]
+        with schema_context(self.club.schema_name):
+            TeamMembership.objects.create(team=self.club_team, member=player, season=self.season)
+            position = Position.objects.create(name="Head coach", short_name="HC", staff_position=True)
+            StaffAssignment.objects.create(team=self.club_team, member=coach, season=self.season, position=position)
+        body = {"name": "Lineup Cup", "status": "draft", "home_team_id": str(self.club_team.pk), "days": [{"date": "2026-12-12", "starts_at": "09:00", "ends_at": "17:00"}]}
+        tid = self.as_("manage", "post", "", body).json()["id"]
+        team = TournamentTeam.objects.get(tournament_id=tid, team=self.club_team)
+        self.assertEqual(list(team.roster_entries.values_list("member_id", "role", "position_label")), [(coach.pk, "staff", "Head coach")])  # staff copied on creation
+        event = Tournament.objects.get(pk=tid).event
+        # the coach picks the player on the event's line-up screen
+        Attendance.objects.filter(event=event, member=player).update(status=Attendance.AttendanceStatus.PRESENT)  # only players who said they can come are pickable
+        r = self.call("put", f"/{event.pk}/lineup", self.owner, {"member_ids": [str(player.pk)]}, prefix="/events")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(set(team.roster_entries.values_list("member_id", "role")), {(coach.pk, "staff"), (player.pk, "player")})
+        # un-picking removes the player, never the staff
+        self.call("put", f"/{event.pk}/lineup", self.owner, {"member_ids": []}, prefix="/events")
+        self.assertEqual(list(team.roster_entries.values_list("member_id", flat=True)), [coach.pk])
+        # staff kept by hand sticks across saves of the tournament
+        team.roster_entries.all().delete()
+        self.as_("manage", "patch", f"/{tid}", {"max_teams": 6})
+        self.assertEqual(team.roster_entries.count(), 0)
 
     def test_delete_only_a_draft_tournament(self):
         body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}

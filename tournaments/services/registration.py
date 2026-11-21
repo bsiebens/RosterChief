@@ -226,6 +226,39 @@ def create_manual_team(tournament, *, club_team=None, foreign_fields: dict | Non
 
 
 @transaction.atomic
+def add_team_staff(tournament_team: TournamentTeam, team, season) -> None:
+    """Adds ``team``'s staff for ``season`` (coaches, managers ...) to ``tournament_team``'s roster as staff, with their position as the
+    label. A one-time copy, unlike the players, so the organisers can then add and remove staff by hand as the tournament needs."""
+    from teams.models import StaffAssignment  # local import -- see ensure_home_team
+
+    assignments = StaffAssignment.objects.filter(team=team, season=season).select_related("position")
+    TournamentRosterEntry.objects.bulk_create(
+        [TournamentRosterEntry(tournament_team=tournament_team, member_id=a.member_id, role=TournamentRosterRole.STAFF, position_label=a.position.name) for a in assignments]
+    )
+
+
+def sync_home_roster(tournament) -> None:
+    """Makes the home team's roster mirror the line-up of the tournament's calendar event: the players the coach picked there, minus
+    anyone who has since declined (absent or excused). Live, whether or not the line-up has been published, because the roster is who
+    the coach is fielding. Only member players are added and removed: staff and guests typed in by hand are never touched, and someone
+    who stays picked keeps whatever was filled in on their roster line (position, licence, lunch ...)."""
+    if tournament.home_team_id is None or tournament.event_id is None:
+        return
+    team = TournamentTeam.objects.filter(tournament=tournament, team_id=tournament.home_team_id).first()
+    if team is None:
+        return
+
+    from events.models import Attendance, LineupSelection  # local import -- see ensure_home_team
+
+    declined = {Attendance.AttendanceStatus.ABSENT, Attendance.AttendanceStatus.EXCUSED}
+    picked = set(LineupSelection.objects.filter(lineup__event_id=tournament.event_id).values_list("member_id", flat=True))
+    wanted = picked - set(Attendance.objects.filter(event_id=tournament.event_id, status__in=declined).values_list("member_id", flat=True))
+    on_roster = set(team.roster_entries.filter(member__isnull=False).values_list("member_id", flat=True))  # any role: a staff member who is also picked is not added twice
+
+    team.roster_entries.filter(member__isnull=False, role=TournamentRosterRole.PLAYER).exclude(member_id__in=wanted).delete()
+    TournamentRosterEntry.objects.bulk_create([TournamentRosterEntry(tournament_team=team, member_id=member_id, role=TournamentRosterRole.PLAYER) for member_id in wanted - on_roster])
+
+
 def _event_span(tournament):
     """The calendar event's start and end: the first day's start until the last day's end, else (a tournament without days rows)
     the whole of ``start_date`` until the end of ``end_date``."""
@@ -305,6 +338,7 @@ def ensure_home_team(tournament) -> TournamentTeam | None:
     team = TournamentTeam.objects.filter(tournament=tournament, team_id=tournament.home_team_id).first()
     if team is None:
         team = create_manual_team(tournament, club_team=tournament.home_team, snapshot_roster=False)
+        add_team_staff(team, tournament.home_team, tournament.season)  # once, when the home team enters: staff is then maintained by hand
 
     start, end = _event_span(tournament)
     if tournament.event_id is None:
@@ -320,14 +354,6 @@ def ensure_home_team(tournament) -> TournamentTeam | None:
 
     tournament.event.teams.set([tournament.home_team])
 
-    from events.models import Attendance  # local import -- see above
-
-    from ..signals import ATTENDING_STATUSES  # local import -- avoids importing events.models at tournaments/services/registration.py's own module-load time (see above)
-
-    selected_member_ids = set(Attendance.objects.filter(event=tournament.event, status__in=ATTENDING_STATUSES).values_list("member_id", flat=True))
-    on_roster_member_ids = set(team.roster_entries.filter(member__isnull=False).values_list("member_id", flat=True))
-
-    team.roster_entries.filter(member__isnull=False).exclude(member_id__in=selected_member_ids).delete()
-    TournamentRosterEntry.objects.bulk_create([TournamentRosterEntry(tournament_team=team, member_id=member_id, role=TournamentRosterRole.PLAYER) for member_id in selected_member_ids - on_roster_member_ids])
+    sync_home_roster(tournament)
 
     return team

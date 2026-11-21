@@ -6,6 +6,7 @@
 	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
+	import { eventHref } from '#lib/events/types.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { fmtDate, fmtDay, headerSnapshot, numOrNull, Runner, strOrNull, TBASE, type Person } from '#lib/tournaments.svelte.ts';
 
@@ -74,6 +75,12 @@
 	{#if !roster}
 		<Alert kind="error">{t('common.error.generic')}</Alert>
 	{:else}
+		{#if roster.team.is_home_team}
+			<Alert kind="info">
+				{t('tn.roster.home_note')}
+				{#if tn.event_id}<a class="link font-semibold" href={eventHref(tn.event_id)}>{t('tn.roster.home_note_link')}</a>{/if}
+			</Alert>
+		{/if}
 		{#if roster.earliest_birth_year !== null || roster.latest_birth_year !== null}
 			<Alert kind="info">{t('tn.roster.age_range', { earliest: roster.earliest_birth_year ?? '—', latest: roster.latest_birth_year ?? '—' })}</Alert>
 		{/if}
