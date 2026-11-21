@@ -74,10 +74,10 @@
 							<td><a class="link inline-flex items-center gap-2 font-semibold" href={a.download_url} download={a.name} data-sveltekit-reload><FileText size={14} aria-hidden="true" /> {a.name}</a></td>
 							<td class="font-mono text-xs">{formatSize(a.size)}</td>
 							<td class="text-sm text-muted">{formatDateTime(a.created)}{#if a.uploaded_by}<span class="block text-xs">{a.uploaded_by.name}</span>{/if}</td>
-							<td class="text-right whitespace-nowrap">
+							<td class="text-right whitespace-nowrap"><div class="flex items-center justify-end gap-1">
 								<a class="btn btn-outline btn-xs gap-1" href={a.download_url} download={a.name} data-sveltekit-reload aria-label={t('events.files.download_named', { name: a.name })}><Download size={13} /> {t('events.files.download')}</a>
-								{#if list.can_manage}<button class="btn btn-outline btn-error btn-xs gap-1" type="button" aria-label={t('events.files.delete_named', { name: a.name })} onclick={() => ((deleting = a), (deleteOpen = true))}><Trash2 size={13} /> {t('common.delete')}</button>{/if}
-							</td>
+								{#if list.can_manage}<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('events.files.delete_named', { name: a.name })} onclick={() => ((deleting = a), (deleteOpen = true))} title={t('common.delete')}><Trash2 size={13} /></button>{/if}
+							</div></td>
 						</tr>
 					{/each}
 				</tbody>

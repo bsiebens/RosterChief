@@ -143,12 +143,12 @@
 										{/if}
 									</td>
 								{/if}
-								<td class="text-right whitespace-nowrap">
+								<td class="text-right whitespace-nowrap"><div class="flex items-center justify-end gap-1">
 									{#if canOperate}
-										<button class="btn btn-ghost btn-xs btn-square text-muted" type="button" aria-label={t('tn.roster.edit_named', { name: p.name })} onclick={() => openForm(p)}><Pencil size={14} /></button>
+										<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.roster.edit_named', { name: p.name })} onclick={() => openForm(p)}><Pencil size={13} /></button>
 										<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.roster.delete_named', { name: p.name })} onclick={() => { deleting = p; run.clear(); deleteOpen = true; }}><Trash2 size={13} /></button>
 									{/if}
-								</td>
+								</div></td>
 							</tr>
 						{:else}
 							<tr><td colspan="8" class="py-6 text-center text-muted">{staff ? t('tn.roster.empty_staff') : t('tn.roster.empty_players')}</td></tr>

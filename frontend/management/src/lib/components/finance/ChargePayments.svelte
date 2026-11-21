@@ -55,7 +55,7 @@
 							<td class="text-right font-mono text-sm">{money(p.amount)}</td>
 							<td class="text-sm">{p.reference || '—'}{#if p.note}<div class="text-xs text-muted">{p.note}</div>{/if}</td>
 							<td class="font-mono text-xs whitespace-nowrap text-muted">{p.paid_at ? dateTime(p.paid_at) : '—'}</td>
-							<td class="text-right"><button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('common.delete')} onclick={() => ((target = p), (delOpen = true))}><Trash2 size={12} /></button></td>
+							<td class="text-right"><div class="flex items-center justify-end gap-1"><button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('common.delete')} onclick={() => ((target = p), (delOpen = true))}><Trash2 size={13} /></button></div></td>
 						</tr>
 					{/each}
 				</tbody>

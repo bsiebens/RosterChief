@@ -73,9 +73,9 @@
 							<td class="text-right font-mono text-xs">
 								{#if r.pending_registration_count && canManage}<a class="badge badge-warning badge-sm" href="{TBASE}/{r.id}/registrations">{r.pending_registration_count}</a>{:else}{r.pending_registration_count || '—'}{/if}
 							</td>
-							<td class="text-right whitespace-nowrap">
-								<a class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-rule hover:text-ink" href="{TBASE}/{r.id}" aria-label={t('tn.open_named', { name: r.name })} title={t('tn.open')}><ChevronRight size={18} /></a>
-							</td>
+							<td class="text-right whitespace-nowrap"><div class="flex items-center justify-end gap-1">
+								<a class="btn btn-ghost btn-xs btn-square" href="{TBASE}/{r.id}" aria-label={t('tn.open_named', { name: r.name })} title={t('tn.open')}><ChevronRight size={16} /></a>
+							</div></td>
 						</tr>
 					{/each}
 				</tbody>

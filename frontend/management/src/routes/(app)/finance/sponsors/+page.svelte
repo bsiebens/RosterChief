@@ -111,9 +111,9 @@
 								<td class="hidden font-mono text-xs whitespace-nowrap lg:table-cell">{formatDay(sponsor.start_date)}</td>
 								<td class="hidden font-mono text-xs whitespace-nowrap lg:table-cell">{sponsor.end_date ? formatDay(sponsor.end_date) : '—'}</td>
 								<td>
-									<div class="flex justify-end gap-2 whitespace-nowrap">
-										<button class="btn btn-outline btn-xs gap-1" type="button" aria-label={t('sponsors.edit_named', { name: sponsor.name })} onclick={() => edit(sponsor)}><Pencil size={13} aria-hidden="true" /> <span class="sr-only xl:not-sr-only">{t('common.edit')}</span></button>
-										<button class="btn btn-outline btn-error btn-xs gap-1" type="button" aria-label={t('sponsors.delete_named', { name: sponsor.name })} onclick={() => remove(sponsor)}><Trash2 size={13} aria-hidden="true" /> <span class="sr-only xl:not-sr-only">{t('common.delete')}</span></button>
+									<div class="flex items-center justify-end gap-1">
+										<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('sponsors.edit_named', { name: sponsor.name })} onclick={() => edit(sponsor)} title={t('common.edit')}><Pencil size={13} /></button>
+										<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('sponsors.delete_named', { name: sponsor.name })} onclick={() => remove(sponsor)} title={t('common.delete')}><Trash2 size={13} /></button>
 									</div>
 								</td>
 							</tr>

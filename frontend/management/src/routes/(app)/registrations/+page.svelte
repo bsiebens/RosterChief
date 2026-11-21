@@ -72,7 +72,7 @@
 								<td class="text-right font-mono text-sm">{money(r.total)}</td>
 								<td class="hidden font-mono text-xs xl:table-cell">{r.invoice_number ?? '–'}</td>
 								<td class="hidden font-mono text-xs whitespace-nowrap text-muted md:table-cell">{formatDay(r.submitted_at)}</td>
-								<td class="text-right whitespace-nowrap"><a class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-rule hover:text-ink" href={registrationHref(r.id)} aria-label={t('reg.edit_named', { name: r.contact?.name ?? t('reg.no_contact') })} title={t('common.edit')}><ChevronRight size={18} /></a></td>
+								<td class="text-right whitespace-nowrap"><div class="flex items-center justify-end gap-1"><a class="btn btn-ghost btn-xs btn-square" href={registrationHref(r.id)} aria-label={t('reg.edit_named', { name: r.contact?.name ?? t('reg.no_contact') })} title={t('common.edit')}><ChevronRight size={16} /></a></div></td>
 							</tr>
 						{/each}
 					</tbody>

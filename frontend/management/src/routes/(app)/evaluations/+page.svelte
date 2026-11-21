@@ -57,7 +57,7 @@
 										<a class="btn btn-outline btn-xs gap-1" href={meetingHref(c.id)}><Presentation size={13} /> <span class="sr-only xl:not-sr-only">{t('eval.meeting')}</span></a>
 										<a class="btn btn-outline btn-xs gap-1" href={resultsHref(c.id)}><Table2 size={13} /> <span class="sr-only xl:not-sr-only">{t('eval.results')}</span></a>
 									{/if}
-									{#if canManage}<a class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-rule hover:text-ink" href={checklistHref(c.id)} aria-label={t('eval.edit_named', { name: c.name })} title={t('common.edit')}><ChevronRight size={18} /></a>{/if}
+									{#if canManage}<a class="btn btn-ghost btn-xs btn-square" href={checklistHref(c.id)} aria-label={t('eval.edit_named', { name: c.name })} title={t('common.edit')}><ChevronRight size={16} /></a>{/if}
 								</div>
 							</td>
 						</tr>

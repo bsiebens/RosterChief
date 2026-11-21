@@ -182,7 +182,7 @@
 									<td class="text-sm">{[b.supplier, b.reference].filter(Boolean).join(' · ') || '—'}</td>
 									<td class="text-right font-mono text-sm">{b.received_quantity}/{b.quantity}</td>
 									<td class="font-mono text-xs text-muted">{dateTime(b.received_at)}</td>
-									<td class="text-right"><a class="btn btn-outline btn-xs gap-1" href={batchCsvHref(b.id)} download><Download size={12} /> {t('shop.prod.csv')}</a></td>
+									<td class="text-right"><div class="flex items-center justify-end gap-1"><a class="btn btn-outline btn-xs gap-1" href={batchCsvHref(b.id)} download><Download size={12} /> {t('shop.prod.csv')}</a></div></td>
 								</tr>
 							{/each}
 						</tbody>

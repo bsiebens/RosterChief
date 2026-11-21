@@ -57,10 +57,10 @@
 							<td><button type="button" class="link text-left font-semibold" onclick={() => openForm(r)}>{r.name}</button></td>
 							<td class="text-right font-mono text-xs">{r.capacity ?? '—'}</td>
 							<td class="hidden text-sm text-muted md:table-cell">{r.notes || '—'}</td>
-							<td class="text-right whitespace-nowrap">
-								<button class="btn btn-ghost btn-xs btn-square text-muted" type="button" aria-label={t('tn.rooms.edit_named', { name: r.name })} onclick={() => openForm(r)}><Pencil size={14} /></button>
+							<td class="text-right whitespace-nowrap"><div class="flex items-center justify-end gap-1">
+								<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.rooms.edit_named', { name: r.name })} onclick={() => openForm(r)}><Pencil size={13} /></button>
 								<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.rooms.delete_named', { name: r.name })} onclick={() => { del = r; run.clear(); delOpen = true; }}><Trash2 size={13} /></button>
-							</td>
+							</div></td>
 						</tr>
 					{/each}
 				</tbody>

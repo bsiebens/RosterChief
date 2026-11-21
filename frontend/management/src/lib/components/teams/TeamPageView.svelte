@@ -252,10 +252,10 @@
 							<td>
 								{#if manage}
 								<div class="flex items-center justify-end gap-1.5">
-									<button class="btn btn-outline btn-xs gap-1" type="button" aria-label={t('teams.player.edit_named', { name: fullName(p) })} onclick={() => ((editPlayer = p), (editPlayerOpen = true))}><Pencil size={13} /> {t('common.edit')}</button>
+									<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('teams.player.edit_named', { name: fullName(p) })} onclick={() => ((editPlayer = p), (editPlayerOpen = true))} title={t('common.edit')}><Pencil size={13} /></button>
 									<form method="POST" action={act('removePlayer')} use:enhance={submit}>
 										<input type="hidden" name="membership_id" value={p.id} />
-										<button class="btn btn-outline btn-error btn-xs gap-1" type="submit" disabled={busy} aria-label={t('teams.player.remove_named', { name: fullName(p) })}><UserMinus size={13} /> {t('families.remove')}</button>
+										<button class="btn btn-outline btn-error btn-xs btn-square" type="submit" disabled={busy} aria-label={t('teams.player.remove_named', { name: fullName(p) })} title={t('families.remove')}><UserMinus size={13} /></button>
 									</form>
 								</div>
 								{/if}

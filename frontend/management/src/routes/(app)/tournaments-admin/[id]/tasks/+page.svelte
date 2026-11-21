@@ -97,7 +97,7 @@
 					{#if canOperate}
 						<div class="flex items-center gap-1">
 							<button class="btn btn-outline btn-xs gap-1" type="button" disabled={task.is_full} onclick={() => { assignTask = task; memberId = ''; run.clear(); assignOpen = true; }}><UserPlus size={13} /> {t('tn.tasks.assign')}</button>
-							<button class="btn btn-ghost btn-xs btn-square text-muted" type="button" aria-label={t('tn.tasks.edit_named', { name: task.title })} onclick={() => openForm(task)}><Pencil size={14} /></button>
+							<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.tasks.edit_named', { name: task.title })} onclick={() => openForm(task)}><Pencil size={13} /></button>
 							<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.tasks.delete_named', { name: task.title })} onclick={() => { delTask = task; run.clear(); delOpen = true; }}><Trash2 size={13} /></button>
 						</div>
 					{/if}

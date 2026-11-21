@@ -119,13 +119,13 @@
 								<tr class="hover:bg-paper">
 									<td class="px-4 pl-10"><a class="link font-semibold" href="/members/{m.id}">{m.name}</a></td>
 									<td class="truncate text-sm text-muted">{m.email}</td>
-									<td class="text-right">
+									<td class="text-right"><div class="flex items-center justify-end gap-1">
 										<form method="POST" action="?/removeMember" use:enhance>
 											<input type="hidden" name="role_id" value={r.id} />
 											<input type="hidden" name="member_id" value={m.id} />
-											<button class="btn btn-outline btn-error btn-xs gap-1" type="submit" aria-label={t('roles.remove_named', { name: m.name })}><UserMinus size={13} /> {t('roles.remove')}</button>
+											<button class="btn btn-outline btn-error btn-xs btn-square" type="submit" aria-label={t('roles.remove_named', { name: m.name })} title={t('roles.remove')}><UserMinus size={13} /></button>
 										</form>
-									</td>
+									</div></td>
 								</tr>
 							{:else}
 								<tr><td colspan="3" class="px-4 pl-10 text-sm text-muted">{t('roles.no_people')}</td></tr>

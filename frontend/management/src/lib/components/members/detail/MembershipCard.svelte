@@ -132,19 +132,19 @@
 									{cm.fee_status ? feeStatusLabel(cm.fee_status) : '—'}
 									{#if cm.next_installment?.late}<span class="badge badge-error badge-sm">{t('installments.late')}</span>{/if}
 								</td>
-							<td class="text-right">
+							<td class="text-right"><div class="flex items-center justify-end gap-1">
 								{#if deletable(cm)}
 									<button
-										class="btn btn-outline btn-error btn-xs gap-1"
+										class="btn btn-outline btn-error btn-xs btn-square"
 										type="button"
 										title={t('members.detail.season_delete_hint')}
 										aria-label="{t('members.detail.season_delete')} {seasonName(seasons, cm.season_id)}"
 										onclick={() => {
 											deleting = cm;
 											deleteOpen = true;
-										}}><Trash2 size={13} /> {t('members.detail.season_delete')}</button>
+										}}><Trash2 size={13} /></button>
 								{/if}
-							</td>
+							</div></td>
 						{/if}
 					</tr>
 				{/each}

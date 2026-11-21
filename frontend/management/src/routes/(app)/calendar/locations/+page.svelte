@@ -81,12 +81,12 @@
 								<td class="text-sm">{l.address}, {l.zip_code} {l.city}{#if l.latitude !== null}<span class="block font-mono text-xs text-muted">{l.latitude.toFixed(4)}, {l.longitude?.toFixed(4)}</span>{/if}</td>
 								<td class="text-sm text-muted">{l.country_name}</td>
 								<td class="text-right font-mono text-xs">{l.event_count}</td>
-								<td class="text-right whitespace-nowrap">
+								<td class="text-right whitespace-nowrap"><div class="flex items-center justify-end gap-1">
 									{#if manage}
-										<button class="btn btn-outline btn-xs gap-1" type="button" aria-label={t('locations.edit_named', { name: l.name })} onclick={() => ((editing = l), (formOpen = true))}><Pencil size={13} /> {t('common.edit')}</button>
-										{#if !l.is_home}<button class="btn btn-outline btn-error btn-xs gap-1" type="button" aria-label={t('locations.delete_named', { name: l.name })} onclick={() => ((deleting = l), (deleteOpen = true))}><Trash2 size={13} /> {t('common.delete')}</button>{/if}
+										<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('locations.edit_named', { name: l.name })} onclick={() => ((editing = l), (formOpen = true))} title={t('common.edit')}><Pencil size={13} /></button>
+										{#if !l.is_home}<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('locations.delete_named', { name: l.name })} onclick={() => ((deleting = l), (deleteOpen = true))} title={t('common.delete')}><Trash2 size={13} /></button>{/if}
 									{/if}
-								</td>
+								</div></td>
 							</tr>
 						{/each}
 					</tbody>

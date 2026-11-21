@@ -153,7 +153,7 @@
 								<td class="text-right font-mono text-xs">{r.player_count}</td>
 								<td class="text-right font-mono text-xs">{r.staff_count}</td>
 								<td class="hidden text-sm xl:table-cell">{r.feeds_into_name ?? '—'}</td>
-								<td class="text-right whitespace-nowrap">
+								<td class="text-right whitespace-nowrap"><div class="flex items-center justify-end gap-1">
 									{#if canManageTeam(data.me, r.id)}
 									<button
 										class="btn btn-ghost btn-xs btn-square text-muted"
@@ -164,7 +164,7 @@
 											editOpen = true;
 										}}><ChevronRight size={16} /></button>
 									{/if}
-								</td>
+								</div></td>
 							</tr>
 						{/each}
 					</tbody>

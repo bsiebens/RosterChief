@@ -119,7 +119,7 @@
 												<td class="w-40 font-mono text-xs whitespace-nowrap">{m.scheduled_start ? fmtDateTime(m.scheduled_start) : t('tn.sched.unscheduled')}</td>
 												<td class="w-32 text-xs">{m.field?.name ?? '—'}</td>
 												<td class="text-sm">{m.home_display} – {m.away_display}{#if m.group} <span class="badge badge-ghost badge-xs">{m.group.name}</span>{/if}</td>
-												<td class="w-10 text-right">{#if canOperate}<button class="btn btn-ghost btn-xs btn-square" type="button" aria-label={t('tn.sched.reschedule')} onclick={() => openMove(m)}><Pencil size={14} /></button>{/if}</td>
+												<td class="w-10 text-right"><div class="flex items-center justify-end gap-1">{#if canOperate}<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.sched.reschedule')} onclick={() => openMove(m)}><Pencil size={13} /></button>{/if}</div></td>
 											</tr>
 										{/each}
 									</tbody>
@@ -148,7 +148,7 @@
 						<p class="font-mono text-xs text-muted">{fmtDateTime(b.starts_at)} – {fmtTime(b.ends_at)} · {b.field?.name ?? t('tn.sched.all_fields')}{b.teams.length ? ` · ${b.teams.map((x) => x.name).join(', ')}` : ''}</p>
 					</div>
 					{#if canOperate}
-						<button class="btn btn-ghost btn-xs btn-square text-muted" type="button" aria-label={t('tn.sched.edit_block')} onclick={() => openBlock(b)}><Pencil size={14} /></button>
+						<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.sched.edit_block')} onclick={() => openBlock(b)}><Pencil size={13} /></button>
 						<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.sched.delete_block')} onclick={() => { delBlock = b; run.clear(); delOpen = true; }}><Trash2 size={13} /></button>
 					{/if}
 				</div>

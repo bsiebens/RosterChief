@@ -117,7 +117,7 @@
 								<td class="text-right font-mono text-sm">{money(r.amount_paid)}</td>
 								<td class="text-right font-mono text-sm font-semibold">{money(r.balance)}</td>
 								<td>{#if r.legacy_invoice_only}<span class="badge badge-sm badge-outline">{t('legacy_invoice.read_only')}</span>{:else if r.payment_status}<span class="badge badge-sm {paymentBadge(r.payment_status)}">{t(`fin.status.${r.payment_status}`)}</span>{/if}</td>
-								<td class="text-right whitespace-nowrap"><a class="btn btn-outline btn-xs gap-1" href={financeHref(r.id)} aria-label={t('fin.open_named', { name })}><Banknote size={13} /> {t('fin.pay_person')}</a></td>
+								<td class="text-right whitespace-nowrap"><div class="flex items-center justify-end gap-1"><a class="btn btn-outline btn-xs gap-1" href={financeHref(r.id)} aria-label={t('fin.open_named', { name })}><Banknote size={13} /> {t('fin.pay_person')}</a></div></td>
 							</tr>
 						{/each}
 					</tbody>
@@ -146,7 +146,7 @@
 									<td class="text-right font-mono text-sm">{money(m.fee_amount)}</td>
 									<td class="text-right font-mono text-sm">{money(m.amount_paid)}</td>
 									<td class="text-right font-mono text-sm font-semibold">{money(m.balance)}</td>
-									<td class="text-right whitespace-nowrap"><button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => ((payFor = m), (payOpen = true))} aria-label={t('fin.pay_for', { name: m.member.name })}><Banknote size={13} /> {t('fin.pay_person')}</button></td>
+									<td class="text-right whitespace-nowrap"><div class="flex items-center justify-end gap-1"><button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => ((payFor = m), (payOpen = true))} aria-label={t('fin.pay_for', { name: m.member.name })}><Banknote size={13} /> {t('fin.pay_person')}</button></div></td>
 								</tr>
 							{/each}
 						</tbody>

@@ -120,7 +120,7 @@
 								<td class="hidden text-right font-mono text-sm lg:table-cell">{money(r.total)}</td>
 								<td class="text-right font-mono text-sm {Number(r.amount_due) > 0 && r.status !== 'draft' && r.status !== 'cancelled' ? 'font-semibold text-warn-text' : 'text-muted'}">{r.status === 'cancelled' || r.status === 'draft' ? '' : money(r.amount_due)}</td>
 								<td class="hidden font-mono text-xs whitespace-nowrap text-muted xl:table-cell">{day(r.due_date)}</td>
-								<td class="text-right"><a class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-rule hover:text-ink" href={r.href} aria-label={r.number ?? t('inv.draft')}><ChevronRight size={16} /></a></td>
+								<td class="text-right"><div class="flex items-center justify-end gap-1"><a class="btn btn-ghost btn-xs btn-square" href={r.href} aria-label={r.number ?? t('inv.draft')}><ChevronRight size={16} /></a></div></td>
 							</tr>
 						{/each}
 					</tbody>

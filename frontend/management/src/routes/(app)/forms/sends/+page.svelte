@@ -69,7 +69,7 @@
 								</td>
 								<td><SendStatusBadge status={s.status} small /></td>
 								<td class="text-right font-mono text-sm whitespace-nowrap">{t('forms.sends.x_of_y', { x: s.response_count, y: s.audience_count })}</td>
-								<td class="text-right"><a class="btn btn-outline btn-xs gap-1" href={sendHref(s.id)} aria-label={t('forms.sends.open_named', { title: s.form_title })}><Eye size={13} /> <span class="sr-only xl:not-sr-only">{t('forms.sends.responses')}</span></a></td>
+								<td class="text-right"><div class="flex items-center justify-end gap-1"><a class="btn btn-outline btn-xs gap-1" href={sendHref(s.id)} aria-label={t('forms.sends.open_named', { title: s.form_title })}><Eye size={13} /> <span class="sr-only xl:not-sr-only">{t('forms.sends.responses')}</span></a></div></td>
 							</tr>
 						{/each}
 					</tbody>

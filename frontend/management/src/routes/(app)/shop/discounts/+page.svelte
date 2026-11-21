@@ -87,7 +87,7 @@
 								<td class="text-right whitespace-nowrap">
 									<div class="flex justify-end gap-1">
 										<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('shop.disc.delete_named', { name: d.name })} onclick={() => ((target = d), (delOpen = true))}><Trash2 size={13} /></button>
-										<a class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-rule hover:text-ink" href={discountHref(d.id)} aria-label={t('shop.disc.edit_named', { name: d.name })} title={t('common.edit')}><ChevronRight size={18} /></a>
+										<a class="btn btn-ghost btn-xs btn-square" href={discountHref(d.id)} aria-label={t('shop.disc.edit_named', { name: d.name })} title={t('common.edit')}><ChevronRight size={16} /></a>
 									</div>
 								</td>
 							</tr>

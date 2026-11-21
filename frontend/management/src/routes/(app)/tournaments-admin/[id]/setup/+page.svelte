@@ -153,7 +153,7 @@
 						</ul>
 					</div>
 					{#if canOperate}
-						<button class="btn btn-ghost btn-xs btn-square text-muted" type="button" aria-label={t('tn.setup.edit_named', { name: f.name })} onclick={() => openField(f)}><Pencil size={14} /></button>
+						<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.setup.edit_named', { name: f.name })} onclick={() => openField(f)}><Pencil size={13} /></button>
 						<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.setup.delete_named', { name: f.name })} onclick={() => { delField = f; run.clear(); delFieldOpen = true; }}><Trash2 size={13} /></button>
 					{/if}
 				</div>
@@ -188,7 +188,7 @@
 								<button class="btn btn-primary btn-sm" type="button" disabled={run.busy} onclick={() => generate(s)}>{s.match_count ? t('tn.setup.regenerate') : t('tn.setup.generate')}</button>
 							{/if}
 							{#if s.format === 'groups'}<a class="btn btn-outline btn-sm" href="{TBASE}/{tn.id}/stages/{s.id}/next-phase">{t('tn.setup.next_phase')}</a>{/if}
-							<button class="btn btn-ghost btn-xs btn-square text-muted" type="button" aria-label={t('tn.setup.edit_named', { name: s.name })} onclick={() => openStage(s)}><Pencil size={14} /></button>
+							<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.setup.edit_named', { name: s.name })} onclick={() => openStage(s)}><Pencil size={13} /></button>
 							<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.setup.delete_named', { name: s.name })} onclick={() => { delStage = s; run.clear(); delStageOpen = true; }}><Trash2 size={13} /></button>
 						</div>
 					{/if}
@@ -211,7 +211,7 @@
 						<p class="font-mono text-xs text-muted">{fieldName_(r.field_id)}</p>
 					</div>
 					{#if canOperate}
-						<button class="btn btn-ghost btn-xs btn-square text-muted" type="button" aria-label={t('tn.setup.edit_rule')} onclick={() => openRule(r)}><Pencil size={14} /></button>
+						<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.setup.edit_rule')} onclick={() => openRule(r)}><Pencil size={13} /></button>
 						<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.setup.delete_rule')} onclick={() => { delRule = r; run.clear(); delRuleOpen = true; }}><Trash2 size={13} /></button>
 					{/if}
 				</div>

@@ -108,9 +108,9 @@
 							<td class="font-mono text-xs whitespace-nowrap text-muted">{p.paid_at ? dateTime(p.paid_at) : '—'}</td>
 							<td class="text-right whitespace-nowrap">
 								<div class="flex justify-end gap-1">
-									{#if p.status === 'confirmed' || p.status === 'pending'}<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => openEdit(p)}><Pencil size={12} /> {t('common.edit')}</button>{/if}
+									{#if p.status === 'confirmed' || p.status === 'pending'}<button class="btn btn-outline btn-xs btn-square" type="button" onclick={() => openEdit(p)} aria-label={t('common.edit')} title={t('common.edit')}><Pencil size={13} /></button>{/if}
 									{#if p.status === 'confirmed'}<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('shop.pay.refund')} title={t('shop.pay.refund')} onclick={() => ((target = p), (refundOpen = true))}><Undo2 size={12} /></button>{/if}
-									{#if manual(p) || p.status === 'failed' || p.status === 'pending'}<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('common.delete')} onclick={() => ((target = p), (delOpen = true))}><Trash2 size={12} /></button>{/if}
+									{#if manual(p) || p.status === 'failed' || p.status === 'pending'}<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('common.delete')} onclick={() => ((target = p), (delOpen = true))}><Trash2 size={13} /></button>{/if}
 								</div>
 							</td>
 						</tr>

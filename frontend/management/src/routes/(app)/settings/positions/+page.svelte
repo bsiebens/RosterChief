@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { enhance } from '$app/forms';
-	import { ChevronRight, ArrowDown, ArrowUp, GripVertical, Pencil, Plus, Trash2, Users } from '@lucide/svelte';
+	import { ChevronRight, ArrowDown, ArrowUp, GripVertical, Plus, Trash2, Users } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import InfoTip from '#lib/components/InfoTip.svelte';
@@ -144,10 +144,10 @@
 									</div>
 								</td>
 								<td class="text-right font-mono text-xs">{p.in_use_count}</td>
-								<td class="text-right whitespace-nowrap">
+								<td class="text-right whitespace-nowrap"><div class="flex items-center justify-end gap-1">
+									<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('positions.delete_named', { name: p.name })} onclick={() => openDelete(p)}><Trash2 size={13} /></button>
 									<button class="btn btn-ghost btn-xs btn-square text-muted" type="button" aria-label={t('positions.edit_named', { name: p.name })} onclick={() => openForm(p)}><ChevronRight size={16} /></button>
-									<button class="btn btn-ghost btn-xs btn-square text-error" type="button" aria-label={t('positions.delete_named', { name: p.name })} onclick={() => openDelete(p)}><Trash2 size={14} /></button>
-								</td>
+								</div></td>
 							</tr>
 						{/each}
 					</tbody>

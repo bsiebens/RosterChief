@@ -66,9 +66,9 @@
 												{#if done(x)}{x.score_home} – {x.score_away}{#if x.went_to_overtime} <span class="text-xs font-normal text-muted">{t('tn.scores.ot')}</span>{/if}{#if x.penalty_home !== null} <span class="text-xs font-normal text-muted">({x.penalty_home}–{x.penalty_away})</span>{/if}{:else}<span class="text-muted">vs</span>{/if}
 											</td>
 											<td class="text-sm">{x.away_display}</td>
-											<td class="w-24 text-right">
+											<td class="w-24 text-right"><div class="flex items-center justify-end gap-1">
 												{#if canOperate}<button class="btn btn-outline btn-xs" type="button" disabled={!x.home_team || !x.away_team} onclick={() => openResult(x)}>{done(x) ? t('common.edit') : t('tn.scores.enter')}</button>{/if}
-											</td>
+											</div></td>
 										</tr>
 									{/each}
 								</tbody>

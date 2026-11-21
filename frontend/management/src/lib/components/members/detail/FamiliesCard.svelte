@@ -71,7 +71,7 @@
 							<td class="text-sm text-muted">{m.email || '—'}</td>
 							<td><span class="badge badge-sm badge-outline">{familyRoleLabel(m.role)}</span></td>
 							{#if isAdmin}
-								<td class="text-right">
+								<td class="text-right"><div class="flex items-center justify-end gap-1">
 									<form method="POST" action="?/leaveFamily" use:enhance={run()}>
 										<input type="hidden" name="family_id" value={link.id} />
 										<input type="hidden" name="member_id" value={m.member_id} />
@@ -80,9 +80,9 @@
 											type="submit"
 											disabled={busy}
 											title={t('families.card.remove_from', { name: m.first_name })}
-											aria-label={t('families.card.remove_from', { name: `${m.first_name} ${m.last_name}` })}><UserMinus size={14} /></button>
+											aria-label={t('families.card.remove_from', { name: `${m.first_name} ${m.last_name}` })}><UserMinus size={13} /></button>
 									</form>
-								</td>
+								</div></td>
 							{/if}
 						</tr>
 					{/each}

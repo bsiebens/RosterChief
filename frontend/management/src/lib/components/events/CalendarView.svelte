@@ -265,7 +265,7 @@
                                 {#if e.location}<span class="flex items-center gap-1"><MapPin size={12} class="shrink-0 text-dim" aria-hidden="true"/>{e.location.name}{e.location.city ? `, ${e.location.city}` : ''}</span>{:else}—{/if}
                             </td>
                             <td class="hidden font-mono text-xs whitespace-nowrap text-muted xl:table-cell">{attSummary(e.attendance) || '—'}</td>
-                            <td>{#if e.can_edit}<a class="btn btn-ghost btn-xs btn-square" href={eventEditHref(e.id)} aria-label={t('events.edit_named', {name: e.title})} title={t('common.edit')}><Pencil size={13}/></a>{/if}</td>
+                            <td class="text-right"><div class="flex items-center justify-end gap-1">{#if e.can_edit}<a class="btn btn-outline btn-xs btn-square" href={eventEditHref(e.id)} aria-label={t('events.edit_named', {name: e.title})} title={t('common.edit')}><Pencil size={13}/></a>{/if}</div></td>
                         </tr>
                     {/each}
                 {/each}
