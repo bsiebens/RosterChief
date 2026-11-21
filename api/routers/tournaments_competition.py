@@ -6,15 +6,17 @@ import datetime
 import itertools
 import uuid
 
-from django.db.models import Q
+from django.db import transaction
+from django.db.models import Max, Q
 from django.utils import timezone
 from ninja import Router
 
 from api.auth import AUTHENTICATORS
 from api.routers import tournaments_common as c
-from api.schemas_tournaments import BlockIn, BlockPatch, GenerateScheduleIn, RescheduleIn, ResultIn
+from api.schemas_tournaments import BlockIn, BlockPatch, GenerateScheduleIn, MatchCreateIn, MatchTeamsPatch, RescheduleIn, ResultIn
+from formbuilder.services.management import Conflict
 from members.services.errors import Invalid
-from tournaments.models import Match, ScheduleBlock, TournamentStage, TournamentTeam
+from tournaments.models import Match, ScheduleBlock, Tournament, TournamentGroup, TournamentStage, TournamentTeam
 from tournaments.services import scheduling as svc
 
 router = Router(auth=AUTHENTICATORS)
@@ -151,7 +153,7 @@ def swiss_next_round(request, tournament_id: uuid.UUID, stage_id: uuid.UUID):
 
 
 def _match(match_id) -> Match:
-    return c.get_or_404(Match.objects.select_related("stage__tournament", "field", "home_team__team", "away_team__team", "group"), pk=match_id)
+    return c.get_or_404(Match.objects.select_related("stage__tournament", "field", "home_team__team", "away_team__team", "group", "home_source_match", "away_source_match", "home_source_group", "away_source_group"), pk=match_id)
 
 
 @router.post("/matches/{match_id}/reschedule", summary="Move a match to a field and time", operation_id="tournaments_match_reschedule")
@@ -176,6 +178,99 @@ def result(request, match_id: uuid.UUID, payload: ResultIn):
         match, score_home=payload.score_home, score_away=payload.score_away, went_to_overtime=payload.went_to_overtime, penalty_home=payload.penalty_home, penalty_away=payload.penalty_away
     )  # fmt: skip
     return {"match": c.match_out(_match(match_id)), "updated_match_ids": [m.pk for m in updated]}
+
+
+# --- editing generated matches ---------------------------------------------------------------------------------------------
+
+
+def _slot_team(tournament, team_id, key):
+    team = TournamentTeam.objects.select_related("team").filter(pk=team_id, tournament=tournament).first()
+    if team is None:
+        raise Invalid("Unknown team.", {key: ["Unknown team."]})
+    if team.withdrawn_at is not None:
+        raise Invalid("That team has withdrawn.", {key: ["That team has withdrawn."]})
+    return team
+
+
+def _teams_differ(home_id, away_id):
+    if home_id is not None and home_id == away_id:
+        raise Invalid("Home and away must be different teams.", {"away_team_id": ["Home and away must be different teams."]})
+
+
+def _clear_source(match, side):
+    for suffix, empty in (("source_match", None), ("source_is_winner", True), ("source_group", None), ("source_rank", None)):
+        setattr(match, f"{side}_{suffix}", empty)
+
+
+@router.patch("/matches/{match_id}/teams", summary="Set, swap or clear the teams of a match that is not played yet", operation_id="tournaments_match_teams")
+def set_teams(request, match_id: uuid.UUID, payload: MatchTeamsPatch):
+    c.gate_operate(request)
+    match = _match(match_id)
+    if match.status == Match.Status.COMPLETE:
+        raise Conflict("A played match cannot be changed.", "match_complete")
+    tournament = match.stage.tournament
+    data = payload.dict(exclude_unset=True)
+    for side in ("home", "away"):
+        key = f"{side}_team_id"
+        if key not in data:
+            continue
+        team = _slot_team(tournament, data[key], key) if data[key] is not None else None
+        setattr(match, f"{side}_team", team)
+        _clear_source(match, side)  # a manual choice replaces whatever used to feed the slot
+    _teams_differ(match.home_team_id, match.away_team_id)
+    match.save()
+    return c.match_out(_match(match_id))
+
+
+@router.delete("/matches/{match_id}", summary="Delete a match that is not played and feeds no other match", operation_id="tournaments_match_delete", response={204: None})
+def delete_match(request, match_id: uuid.UUID):
+    c.gate_operate(request)
+    match = _match(match_id)
+    if match.status == Match.Status.COMPLETE:
+        raise Conflict("A played match cannot be deleted.", "match_complete")
+    dependents = list(Match.objects.filter(Q(home_source_match=match) | Q(away_source_match=match)).select_related("home_team__team", "away_team__team", "home_source_match", "away_source_match", "home_source_group", "away_source_group"))
+    if dependents:
+        names = ", ".join(f"{d.round_label or 'Round ' + str(d.round_number)} #{d.sequence + 1} ({d})" for d in dependents)
+        raise Conflict(f"Other matches take their team from this one: {names}.", "has_dependents")
+    tournament, was_scheduled = match.stage.tournament, match.scheduled_start is not None
+    match.delete()
+    if was_scheduled and Match.objects.filter(stage__tournament=tournament, scheduled_start__isnull=False).exists():
+        Tournament.objects.filter(pk=tournament.pk, schedule_needs_regeneration=False).update(schedule_needs_regeneration=True)
+    return 204, None
+
+
+@router.post("/{tournament_id}/stages/{stage_id}/matches", summary="Add a match to a stage by hand", operation_id="tournaments_match_create", response={201: dict})
+def create_match(request, tournament_id: uuid.UUID, stage_id: uuid.UUID, payload: MatchCreateIn):
+    c.gate_operate(request)
+    t = c.get_tournament(tournament_id)
+    stage = c.get_stage(t, stage_id)
+    if (payload.field_id is None) != (payload.scheduled_start is None):
+        key = "scheduled_start" if payload.scheduled_start is None else "field_id"
+        raise Invalid("Give both a field and a start time, or neither.", {key: ["Give both a field and a start time, or neither."]})
+    home = _slot_team(t, payload.home_team_id, "home_team_id") if payload.home_team_id else None
+    away = _slot_team(t, payload.away_team_id, "away_team_id") if payload.away_team_id else None
+    _teams_differ(payload.home_team_id, payload.away_team_id)
+    group = None
+    if payload.group_id is not None:
+        group = TournamentGroup.objects.filter(pk=payload.group_id, stage=stage).first()
+        if group is None:
+            raise Invalid("Unknown group.", {"group_id": ["Unknown group."]})
+    field = c.field_or_invalid(t, payload.field_id) if payload.field_id else None
+    round_number = payload.round_number or stage.matches.aggregate(n=Max("round_number"))["n"] or 1
+    siblings = stage.matches.filter(round_number=round_number)
+    if group is not None:
+        siblings = siblings.filter(group=group)
+    last = siblings.aggregate(n=Max("sequence"))["n"]
+    with transaction.atomic():
+        match = Match(stage=stage, group=group, round_number=round_number, round_label=payload.round_label, sequence=0 if last is None else last + 1, home_team=home, away_team=away)
+        c.validate(match)
+        match.save()
+        if field is not None:
+            start = payload.scheduled_start
+            if timezone.is_naive(start):
+                start = timezone.make_aware(start)
+            _scheduling(svc.reschedule_match, match, field=field, scheduled_start=start)
+    return 201, c.match_out(_match(match.pk))
 
 
 # --- schedule blocks -------------------------------------------------------------------------------------------------------

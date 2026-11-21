@@ -136,6 +136,23 @@ class RescheduleIn(Schema):
     scheduled_start: datetime.datetime
 
 
+class MatchTeamsPatch(Schema):
+    """Only the keys that are sent change; ``null`` clears the slot back to TBD."""
+
+    home_team_id: uuid.UUID | None = None
+    away_team_id: uuid.UUID | None = None
+
+
+class MatchCreateIn(Schema):
+    home_team_id: uuid.UUID | None = None
+    away_team_id: uuid.UUID | None = None
+    group_id: uuid.UUID | None = None
+    round_number: int | None = Field(None, ge=1, le=32767)
+    round_label: str = Field("", max_length=100)
+    field_id: uuid.UUID | None = None
+    scheduled_start: datetime.datetime | None = None
+
+
 class ResultIn(Schema):
     score_home: int = Field(ge=0, le=999)
     score_away: int = Field(ge=0, le=999)

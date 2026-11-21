@@ -126,6 +126,9 @@ class TournamentApiTests(TestCase):
             ("patch", f"/teams/{i}/payment", {"payment_status": "unpaid"}, {"manage"}),
             ("post", f"/{t.pk}/fields", {"name": "F1"}, {"manage", "operate"}),
             ("post", f"/{t.pk}/schedule/clear", None, {"manage", "operate"}),
+            ("patch", f"/matches/{i}/teams", {"home_team_id": None}, {"manage", "operate"}),
+            ("delete", f"/matches/{i}", None, {"manage", "operate"}),
+            ("post", f"/{t.pk}/stages/{i}/matches", {}, {"manage", "operate"}),
             ("post", f"/{t.pk}/tasks", {"title": "Gate", "starts_at": "2026-09-19T09:00:00Z", "ends_at": "2026-09-19T10:00:00Z"}, {"manage", "operate"}),
         ]
         for method, path, body, allowed in endpoints:
@@ -435,6 +438,142 @@ class TournamentApiTests(TestCase):
         self.assertEqual(self.as_("operate", "post", f"/matches/{m.pk}/result", {"score_home": 1, "score_away": 0}).status_code, 422)
         r = self.as_("operate", "post", f"/matches/{m.pk}/reschedule", {"field_id": str(uuid.uuid4()), "scheduled_start": "2026-09-19T10:00:00Z"})
         self.assertEqual(r.status_code, 422)
+
+    def _edit_setup(self):
+        t = self.make(status="in_progress")
+        stage = t.stages.create(name="Cup", format="single_elim")
+        a, b, c = (self.foreign(t, n) for n in ("Alpha", "Bravo", "Charlie"))
+        field = TournamentField.objects.create(tournament=t, name="F1")
+        return t, stage, a, b, c, field
+
+    def test_match_teams_set_swap_clear_and_validate(self):
+        _t, stage, a, b, c, _field = self._edit_setup()
+        m = Match.objects.create(stage=stage)
+        url = f"/matches/{m.pk}/teams"
+        r = self.as_("operate", "patch", url, {"home_team_id": str(a.pk), "away_team_id": str(b.pk)})
+        self.assertEqual(r.status_code, 200, r.content)
+        doc = r.json()
+        self.assertEqual((doc["home_team_id"], doc["away_team_id"], doc["home_is_tbd"]), (str(a.pk), str(b.pk), False))
+        r = self.as_("operate", "patch", url, {"home_team_id": str(b.pk), "away_team_id": str(a.pk)})  # swap
+        self.assertEqual((r.json()["home_team"]["id"], r.json()["away_team"]["id"]), (str(b.pk), str(a.pk)))
+        r = self.as_("operate", "patch", url, {"away_team_id": str(c.pk)})  # only the sent key changes
+        self.assertEqual((r.json()["home_team_id"], r.json()["away_team_id"]), (str(b.pk), str(c.pk)))
+        r = self.as_("operate", "patch", url, {"home_team_id": None})
+        self.assertEqual((r.json()["home_team_id"], r.json()["home_is_tbd"], r.json()["away_team_id"]), (None, True, str(c.pk)))
+        r = self.as_("operate", "patch", url, {"home_team_id": str(c.pk)})  # same on both sides
+        self.assertEqual(r.status_code, 422, r.content)
+        other = self.foreign(self.make(name="Other"), "Elsewhere")
+        r = self.as_("operate", "patch", url, {"home_team_id": str(other.pk)})
+        self.assertEqual((r.status_code, "home_team_id" in r.json()["errors"]), (422, True), r.content)
+        self.assertEqual(self.as_("operate", "patch", url, {"home_team_id": str(uuid.uuid4())}).status_code, 422)
+        a.withdrawn_at = timezone.now()
+        a.save()
+        self.assertEqual(self.as_("operate", "patch", url, {"home_team_id": str(a.pk)}).status_code, 422)
+        self.assertEqual(self.as_("operate", "patch", f"/matches/{uuid.uuid4()}/teams", {}).status_code, 404)
+
+    def test_match_teams_replace_the_source_that_fed_the_slot(self):
+        _t, stage, a, b, c, _field = self._edit_setup()
+        semi = Match.objects.create(stage=stage, home_team=a, away_team=b)
+        group = stage.groups.create(name="A")
+        final = Match.objects.create(stage=stage, round_number=2, home_source_match=semi, home_source_is_winner=False, away_source_group=group, away_source_rank=2)
+        doc = self.as_("operate", "patch", f"/matches/{final.pk}/teams", {"home_team_id": str(c.pk)}).json()
+        self.assertEqual((doc["home_source"], doc["away_source"]["type"]), (None, "group"))
+        final.refresh_from_db()
+        self.assertEqual((final.home_team_id, final.home_source_match_id, final.home_source_is_winner), (c.pk, None, True))
+        self.assertEqual(final.away_source_group_id, group.pk)
+        self.as_("operate", "post", f"/matches/{semi.pk}/result", {"score_home": 2, "score_away": 0})
+        final.refresh_from_db()
+        self.assertEqual(final.home_team_id, c.pk)  # resolve_match_slots no longer touches it
+        doc = self.as_("operate", "patch", f"/matches/{final.pk}/teams", {"away_team_id": None}).json()
+        self.assertEqual(doc["away_source"], None)
+
+    def test_a_played_match_cannot_be_edited_or_deleted(self):
+        _t, stage, a, b, c, _field = self._edit_setup()
+        m = Match.objects.create(stage=stage, home_team=a, away_team=b)
+        self.assertEqual(self.as_("operate", "post", f"/matches/{m.pk}/result", {"score_home": 1, "score_away": 0}).status_code, 200)
+        r = self.as_("operate", "patch", f"/matches/{m.pk}/teams", {"home_team_id": str(c.pk)})
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "match_complete"), r.content)
+        r = self.as_("operate", "delete", f"/matches/{m.pk}")
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "match_complete"), r.content)
+        self.assertTrue(Match.objects.filter(pk=m.pk).exists())
+
+    def test_delete_match_refuses_dependents_and_flags_regeneration(self):
+        t, stage, a, b, c, field = self._edit_setup()
+        semi = Match.objects.create(stage=stage, home_team=a, away_team=b)
+        Match.objects.create(stage=stage, round_number=2, round_label="Final", home_source_match=semi)
+        r = self.as_("operate", "delete", f"/matches/{semi.pk}")
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "has_dependents"), r.content)
+        self.assertIn("Final", r.json()["detail"])
+        # scheduled match deleted while another stays scheduled -> flag; an unscheduled one -> no flag
+        start = timezone.make_aware(datetime.datetime(2026, 9, 19, 10, 0))
+        scheduled = [Match.objects.create(stage=stage, home_team=a, away_team=c, field=field, scheduled_start=start + datetime.timedelta(hours=h)) for h in (0, 3)]
+        loose = Match.objects.create(stage=stage)
+        self.assertEqual(self.as_("operate", "delete", f"/matches/{loose.pk}").status_code, 204)
+        t.refresh_from_db()
+        self.assertFalse(t.schedule_needs_regeneration)
+        self.assertEqual(self.as_("operate", "delete", f"/matches/{scheduled[0].pk}").status_code, 204)
+        t.refresh_from_db()
+        self.assertTrue(t.schedule_needs_regeneration)
+        self.assertFalse(Match.objects.filter(pk=scheduled[0].pk).exists())
+
+    def test_delete_last_scheduled_match_does_not_flag(self):
+        t, stage, a, b, _c, field = self._edit_setup()
+        only = Match.objects.create(stage=stage, home_team=a, away_team=b, field=field, scheduled_start=timezone.make_aware(datetime.datetime(2026, 9, 19, 10, 0)))
+        self.assertEqual(self.as_("operate", "delete", f"/matches/{only.pk}").status_code, 204)
+        t.refresh_from_db()
+        self.assertFalse(t.schedule_needs_regeneration)
+
+    def test_create_match_in_a_stage(self):
+        t, stage, a, b, _c, _field = self._edit_setup()
+        url = f"/{t.pk}/stages/{stage.pk}/matches"
+        r = self.as_("operate", "post", url, {})
+        self.assertEqual(r.status_code, 201, r.content)
+        doc = r.json()
+        self.assertEqual((doc["round_number"], doc["sequence"], doc["status"], doc["home_is_tbd"], doc["away_is_tbd"], doc["field"]), (1, 0, "scheduled", True, True, None))
+        r = self.as_("operate", "post", url, {"home_team_id": str(a.pk), "away_team_id": str(b.pk), "round_label": "Friendly"})
+        self.assertEqual((r.json()["round_number"], r.json()["sequence"], r.json()["home_team_id"], r.json()["round_label"]), (1, 1, str(a.pk), "Friendly"))
+        r = self.as_("operate", "post", url, {"home_team_id": str(a.pk), "away_team_id": str(b.pk), "round_number": 3})  # teams may repeat
+        self.assertEqual((r.status_code, r.json()["round_number"], r.json()["sequence"]), (201, 3, 0))
+        r = self.as_("operate", "post", url, {})  # default: the stage's last round
+        self.assertEqual((r.json()["round_number"], r.json()["sequence"]), (3, 1))
+        self.assertFalse(Tournament.objects.get(pk=t.pk).schedule_needs_regeneration)
+        group = stage.groups.create(name="A")
+        r = self.as_("operate", "post", url, {"group_id": str(group.pk), "round_number": 1})
+        self.assertEqual((r.status_code, r.json()["group"]["id"], r.json()["sequence"]), (201, str(group.pk), 0), r.content)
+
+    def test_create_match_validation_and_placement(self):
+        t, stage, a, b, c, field = self._edit_setup()
+        url = f"/{t.pk}/stages/{stage.pk}/matches"
+        for body in (
+            {"home_team_id": str(a.pk), "away_team_id": str(a.pk)}, {"home_team_id": str(uuid.uuid4())}, {"round_number": 0}, {"group_id": str(uuid.uuid4())},
+            {"field_id": str(field.pk)}, {"scheduled_start": "2026-09-19T10:00:00Z"}, {"field_id": str(uuid.uuid4()), "scheduled_start": "2026-09-19T10:00:00Z"},
+        ):  # fmt: skip
+            self.assertEqual(self.as_("operate", "post", url, body).status_code, 422, body)
+        a.withdrawn_at = timezone.now()
+        a.save()
+        self.assertEqual(self.as_("operate", "post", url, {"away_team_id": str(a.pk)}).status_code, 422)
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/stages/{uuid.uuid4()}/matches", {}).status_code, 404)
+        self.assertEqual(Match.objects.count(), 0)
+        body = {"home_team_id": str(b.pk), "away_team_id": str(c.pk), "field_id": str(field.pk), "scheduled_start": "2026-09-19T10:00:00Z"}
+        r = self.as_("operate", "post", url, body)
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual((r.json()["field"]["id"], r.json()["auto_scheduled"]), (str(field.pk), False))
+        self.assertTrue(Tournament.objects.get(pk=t.pk).schedule_needs_regeneration)
+        r = self.as_("operate", "post", url, body)  # same field, same time, same teams: placement refused and nothing is left behind
+        self.assertEqual(r.status_code, 422, r.content)
+        self.assertEqual(Match.objects.count(), 1)
+
+    def test_schedule_doc_exposes_what_the_editor_needs(self):
+        t, stage, a, _b, _c, _field = self._edit_setup()
+        semi = Match.objects.create(stage=stage, home_team=a)
+        group = stage.groups.create(name="A")
+        Match.objects.create(stage=stage, round_number=2, group=group, home_source_match=semi, away_source_group=group, away_source_rank=1)
+        matches = [m for rnd in self.as_("manage", "get", f"/{t.pk}/schedule").json()["stages"][0]["rounds"] for m in rnd["matches"]]
+        first, second = matches
+        self.assertEqual((first["home_team_id"], first["away_team_id"], first["home_is_tbd"], first["away_is_tbd"], first["home_source"]), (str(a.pk), None, False, True, None))
+        self.assertEqual(second["home_source"], {"type": "match", "match_id": str(semi.pk), "is_winner": True})
+        self.assertEqual(second["away_source"], {"type": "group", "group_id": str(group.pk), "rank": 1})
+        self.assertEqual((second["group_id"], second["group"]["id"], second["round_number"], second["status"]), (str(group.pk), str(group.pk), 2, "scheduled"))
 
     def test_schedule_blocks_and_break_rules(self):
         t = self.make()

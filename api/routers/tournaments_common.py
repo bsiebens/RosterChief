@@ -156,8 +156,19 @@ def person_out(row, tournament: Tournament) -> dict:
     }
 
 
+def side_source(match: Match, side: str) -> dict | None:
+    """What feeds a side that has no team yet: ``{type:"match", match_id, is_winner}``, ``{type:"group", group_id, rank}`` or null."""
+    if getattr(match, f"{side}_source_match_id"):
+        return {"type": "match", "match_id": getattr(match, f"{side}_source_match_id"), "is_winner": getattr(match, f"{side}_source_is_winner")}
+    if getattr(match, f"{side}_source_group_id"):
+        return {"type": "group", "group_id": getattr(match, f"{side}_source_group_id"), "rank": getattr(match, f"{side}_source_rank")}
+    return None
+
+
 def match_out(match: Match, *, with_field=True) -> dict:
     return {
+        "home_team_id": match.home_team_id, "away_team_id": match.away_team_id, "home_is_tbd": match.home_team_id is None, "away_is_tbd": match.away_team_id is None,
+        "home_source": side_source(match, "home"), "away_source": side_source(match, "away"), "group_id": match.group_id,
         "id": match.pk, "stage_id": match.stage_id, "group": ref(match.group), "round_number": match.round_number, "round_label": match.round_label, "sequence": match.sequence,
         "field": ref(match.field) if with_field else None, "scheduled_start": match.scheduled_start, "auto_scheduled": match.auto_scheduled, "status": match.status,
         "score_home": match.score_home, "score_away": match.score_away, "went_to_overtime": match.went_to_overtime, "penalty_home": match.penalty_home, "penalty_away": match.penalty_away,
