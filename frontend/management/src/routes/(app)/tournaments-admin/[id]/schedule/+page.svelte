@@ -149,7 +149,7 @@
 					</div>
 					{#if canOperate}
 						<button class="btn btn-ghost btn-xs btn-square text-muted" type="button" aria-label={t('tn.sched.edit_block')} onclick={() => openBlock(b)}><Pencil size={14} /></button>
-						<button class="btn btn-ghost btn-xs btn-square text-error" type="button" aria-label={t('tn.sched.delete_block')} onclick={() => { delBlock = b; run.clear(); delOpen = true; }}><Trash2 size={14} /></button>
+						<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.sched.delete_block')} onclick={() => { delBlock = b; run.clear(); delOpen = true; }}><Trash2 size={13} /></button>
 					{/if}
 				</div>
 			{:else}

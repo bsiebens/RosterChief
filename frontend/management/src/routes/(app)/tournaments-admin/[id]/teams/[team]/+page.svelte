@@ -146,7 +146,7 @@
 								<td class="text-right whitespace-nowrap">
 									{#if canOperate}
 										<button class="btn btn-ghost btn-xs btn-square text-muted" type="button" aria-label={t('tn.roster.edit_named', { name: p.name })} onclick={() => openForm(p)}><Pencil size={14} /></button>
-										<button class="btn btn-ghost btn-xs btn-square text-error" type="button" aria-label={t('tn.roster.delete_named', { name: p.name })} onclick={() => { deleting = p; run.clear(); deleteOpen = true; }}><Trash2 size={14} /></button>
+										<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.roster.delete_named', { name: p.name })} onclick={() => { deleting = p; run.clear(); deleteOpen = true; }}><Trash2 size={13} /></button>
 									{/if}
 								</td>
 							</tr>

@@ -102,7 +102,7 @@
 							<td class="hidden text-xs md:table-cell">{team.contact_name}{team.contact_email ? ` · ${team.contact_email}` : ''}</td>
 							<td class="text-right font-mono text-xs">{team.player_count} + {team.staff_count}</td>
 							<td>
-								{#if canManage && !team.withdrawn_at}
+								{#if canManage && !team.withdrawn_at && !team.is_home_team}
 									<select class="select select-sm w-40" aria-label={t('tn.teams.payment_for', { name: team.name })} value={team.payment_status} disabled={run.busy} onchange={(e) => setPayment(team, e.currentTarget.value)}>
 										{#each data.paymentStatuses as s (s)}<option value={s}>{t(`tn.pay.${s}`)}</option>{/each}
 									</select>
@@ -122,8 +122,8 @@
 									{#if canManage && !team.withdrawn_at}
 										<button class="btn btn-outline btn-warning btn-xs" type="button" onclick={() => { withdrawing = team; withdrawReason = ''; run.clear(); withdrawOpen = true; }}>{t('tn.teams.withdraw')}</button>
 									{/if}
-									{#if canManage && !team.registration_id}
-										<button class="btn btn-outline btn-error btn-xs btn-square w-6" type="button" aria-label={t('tn.teams.delete_named', { name: team.name })} onclick={() => { deleting = team; run.clear(); deleteOpen = true; }}><Trash2 size={14} /></button>
+									{#if canManage && !team.registration_id && !team.is_home_team}
+										<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.teams.delete_named', { name: team.name })} onclick={() => { deleting = team; run.clear(); deleteOpen = true; }}><Trash2 size={13} /></button>
 									{/if}
 								</div>
 							</td>
