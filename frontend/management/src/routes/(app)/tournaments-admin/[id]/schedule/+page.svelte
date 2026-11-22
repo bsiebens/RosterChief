@@ -129,11 +129,11 @@
 			<section class="card card-body card-hl h-full gap-3">
 				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Wand2 size={16} class="shrink-0" aria-hidden="true" /> {t('tn.sched.generate_title')}</h2>
 				{#if canOperate}
-							<div class="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
-								<div class="w-52">
+							<div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+								<div class="w-full max-w-sm flex-1">
 									<Field label={t('tn.sched.duration')} type="number" min="1" bind:value={duration} placeholder={String(sched.tournament.default_match_duration_minutes ?? '')} help={t('tn.sched.duration_help')} />
 								</div>
-								<div class="flex flex-wrap items-center justify-end gap-2 pb-6">
+								<div class="flex flex-wrap items-center justify-end gap-2 sm:mt-[1.625rem]">
 									<button class="btn btn-primary gap-2" type="button" disabled={run.busy} onclick={generate}><Wand2 size={16} /> {t('tn.sched.generate')}</button>
 									<button class="btn btn-outline btn-error gap-2" type="button" disabled={run.busy} onclick={() => { run.clear(); clearOpen = true; }}><Eraser size={16} /> {t('tn.sched.clear')}</button>
 								</div>
