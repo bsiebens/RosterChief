@@ -294,7 +294,14 @@ class EventIn(Schema):
     type: EventType
     side: Side | None = None
     minute: int | None = Field(None, ge=0, le=999)
+    second: int | None = Field(None, ge=0, le=59)
     player: str = Field("", max_length=100)
+    player_id: uuid.UUID | None = None  # a roster player of the team of this event
+    assist_ids: list[uuid.UUID] = Field([], max_length=2)  # ice hockey goals
+    penalty_code: str = Field("", max_length=10)  # ice hockey penalties
+    penalty_length: str = Field("", max_length=5)
+    goalie_in_id: uuid.UUID | None = None  # goalie changes
+    goalie_out_id: uuid.UUID | None = None
     note: str = Field("", max_length=255)
     value: int | None = Field(None, ge=0, le=100000)
 
@@ -303,7 +310,14 @@ class EventPatch(Schema):
     type: EventType | None = None
     side: Side | None = None
     minute: int | None = Field(None, ge=0, le=999)
+    second: int | None = Field(None, ge=0, le=59)
     player: str | None = Field(None, max_length=100)
+    player_id: uuid.UUID | None = None
+    assist_ids: list[uuid.UUID] | None = Field(None, max_length=2)
+    penalty_code: str | None = Field(None, max_length=10)
+    penalty_length: str | None = Field(None, max_length=5)
+    goalie_in_id: uuid.UUID | None = None
+    goalie_out_id: uuid.UUID | None = None
     note: str | None = Field(None, max_length=255)
     value: int | None = Field(None, ge=0, le=100000)
 

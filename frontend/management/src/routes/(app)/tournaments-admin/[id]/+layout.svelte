@@ -28,7 +28,7 @@
 		}
 	});
 	onDestroy(() => (tournamentHeader.status = ''));
-	const isActive = (key: string) => (key === '' ? page.url.pathname === base : page.url.pathname.startsWith(base + key));
+	const isActive = (key: string) => (key === '' ? page.url.pathname === base : page.url.pathname.startsWith(base + key) || (key === '/scores' && page.url.pathname.startsWith(`${base}/matches/`)));
 </script>
 
 <nav class="card mb-5 overflow-x-auto px-3" aria-label={t('tn.tabs_label')}>

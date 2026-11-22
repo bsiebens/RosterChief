@@ -4,7 +4,7 @@ tie-breakers) and the game timeline of a match (goals, penalties ...). Reading n
 
 import uuid
 
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import Max
 from django.utils.text import slugify
 from ninja import Router
@@ -15,9 +15,10 @@ from api.routers.tournaments_competition import _match
 from api.schemas_tournaments import AttributeIn, AttributePatch, EventIn, EventPatch
 from formbuilder.services.management import Conflict
 from members.services.errors import Invalid
-from tournaments.models import MatchAttribute, MatchEvent, MatchEventType
+from tournaments.models import MatchAttribute, MatchEvent, MatchEventType, TournamentRosterEntry
 from tournaments.services import timeline
 from tournaments.services.scheduling import ATTR_PREFIX, stage_tiebreakers
+from tournaments.sports import ICE_HOCKEY_PENALTIES, PENALTY_LENGTHS, is_ice_hockey, penalty_minutes
 
 router = Router(auth=AUTHENTICATORS)
 
@@ -116,7 +117,87 @@ NEUTRAL_TYPES = (MatchEvent.Type.OTHER,)
 
 
 def event_out(event: MatchEvent) -> dict:
-    return {"id": event.pk, "type": event.type, "side": event.side or None, "minute": event.minute, "player": event.player, "note": event.note, "value": event.value}
+    d = event.details or {}
+    return {
+        "id": event.pk, "type": event.type, "side": event.side or None, "minute": event.minute, "second": event.second, "player": event.player, "player_id": event.player_entry_id,
+        "player_number": d.get("number"), "assists": d.get("assists", []), "penalty_code": d.get("penalty_code", ""), "penalty_name": d.get("penalty_name", ""),
+        "penalty_length": d.get("penalty_length", ""), "goalie_in": d.get("goalie_in"), "goalie_out": d.get("goalie_out"), "note": event.note, "value": event.value,
+    }  # fmt: skip
+
+
+def _person(entry: TournamentRosterEntry) -> dict:
+    return {"id": str(entry.pk), "name": entry.display_name, "number": entry.jersey_number}
+
+
+def _roster(team) -> list[dict]:
+    """The players of a tournament team for the game screen (goalies first is up to the user: the position label is shown)."""
+    if team is None:
+        return []
+    entries = team.roster_entries.select_related("member").filter(role="player").order_by("jersey_number", "pk")
+    return [{**_person(e), "position": e.position_label} for e in entries]
+
+
+def _entry(match, side, entry_id, key):
+    """A roster player of the team playing on ``side``; anything else is a 422."""
+    team = match.home_team if side == "home" else match.away_team
+    entry = TournamentRosterEntry.objects.select_related("member").filter(pk=entry_id, tournament_team=team).first() if team is not None else None
+    if entry is None:
+        message = "Choose a player of the team of this event."
+        raise Invalid(message, {key: [message]})
+    return entry
+
+
+def _apply_details(match, event: MatchEvent, data: dict) -> None:
+    """Resolves the players and the hockey specifics of an event into ``player``/``player_entry``/``details``. ``data`` holds the extra
+    request values; a missing key keeps what the event already has (an edit that only changes the minute)."""
+    hockey = is_ice_hockey(getattr(connection.tenant, "sport", None))
+    details = dict(event.details or {})
+    side = event.side
+
+    def has(key):
+        return key in data
+
+    if event.type in (MatchEvent.Type.GOAL, MatchEvent.Type.PENALTY, MatchEvent.Type.OTHER) and has("player_id"):
+        if data["player_id"] is None:
+            event.player_entry = None
+            details.pop("number", None)
+        else:
+            entry = _entry(match, side, data["player_id"], "player_id")
+            event.player_entry, event.player = entry, entry.display_name
+            details["number"] = entry.jersey_number
+    if event.type == MatchEvent.Type.GOAL and has("assist_ids"):
+        ids = list(dict.fromkeys(data["assist_ids"] or []))
+        if ids and not hockey:
+            raise Invalid("Assists are only kept for ice hockey.", {"assist_ids": ["Assists are only kept for ice hockey."]})
+        if event.player_entry_id and event.player_entry_id in ids:
+            raise Invalid("The scorer cannot assist their own goal.", {"assist_ids": ["The scorer cannot assist their own goal."]})
+        details["assists"] = [_person(_entry(match, side, i, "assist_ids")) for i in ids]
+    if event.type == MatchEvent.Type.PENALTY and (has("penalty_code") or has("penalty_length")):
+        code = data.get("penalty_code", details.get("penalty_code", ""))
+        length = data.get("penalty_length", details.get("penalty_length", ""))
+        if hockey:
+            names = dict(ICE_HOCKEY_PENALTIES)
+            if code not in names:
+                raise Invalid("Choose a penalty code.", {"penalty_code": ["Choose a penalty code."]})
+            if length not in PENALTY_LENGTHS:
+                raise Invalid("Choose how long the penalty is.", {"penalty_length": ["Choose how long the penalty is."]})
+            details.update(penalty_code=code, penalty_name=names[code], penalty_length=length)
+            event.value = penalty_minutes(length)  # feeds the penalty minutes attribute of the timeline
+        elif code or length:
+            details.update(penalty_code=code, penalty_name=code, penalty_length=length)
+    if event.type == MatchEvent.Type.GOALIE_CHANGE and (has("goalie_in_id") or has("goalie_out_id")):
+        for key, field in (("goalie_in", "goalie_in_id"), ("goalie_out", "goalie_out_id")):
+            if has(field):
+                details[key] = None if data[field] is None else _person(_entry(match, side, data[field], field))
+        if details.get("goalie_in") and details.get("goalie_in") == details.get("goalie_out"):
+            raise Invalid("The goalie going in and out must differ.", {"goalie_in_id": ["The goalie going in and out must differ."]})
+    if event.type == MatchEvent.Type.TIMEOUT:
+        event.player, event.player_entry = "", None
+        details = {}
+    event.details = details
+
+
+EXTRA = ("player_id", "assist_ids", "penalty_code", "penalty_length", "goalie_in_id", "goalie_out_id")
 
 
 def _event(event_id) -> MatchEvent:
@@ -145,15 +226,25 @@ def _changing(match, change):
 def events(request, match_id: uuid.UUID):
     c.gate_view(request)
     match = _match(match_id)
-    return {"match": c.match_out(match), "events": [event_out(e) for e in match.events.all()]}
+    sport = getattr(connection.tenant, "sport", None)
+    hockey = is_ice_hockey(sport)
+    return {
+        "match": c.match_out(match), "events": [event_out(e) for e in match.events.select_related("player_entry").all()],
+        "sport": {"slug": sport.slug, "name": sport.name} if sport else None, "ice_hockey": hockey,
+        "penalty_codes": [{"code": code, "name": name} for code, name in ICE_HOCKEY_PENALTIES] if hockey else [], "penalty_lengths": PENALTY_LENGTHS if hockey else [],
+        "rosters": {"home": _roster(match.home_team), "away": _roster(match.away_team)},
+    }
 
 
 @router.post("/matches/{match_id}/events", summary="Add an event to the timeline of a match", operation_id="tournaments_match_event_create", response={201: dict})
 def create_event(request, match_id: uuid.UUID, payload: EventIn):
     c.gate_operate(request)
     match = _match(match_id)
-    event = MatchEvent(match=match, **payload.dict())
+    data = payload.dict()
+    extra = {k: data.pop(k) for k in EXTRA}
+    event = MatchEvent(match=match, **data)
     _check_side(event)
+    _apply_details(match, event, extra)
     c.validate(event)
     _changing(match, event.save)
     return 201, {**event_out(event), "match": c.match_out(_match(match_id))}
@@ -164,8 +255,11 @@ def update_event(request, event_id: uuid.UUID, payload: EventPatch):
     c.gate_operate(request)
     event = _event(event_id)
     match = _match(event.match_id)
-    c.apply(event, {k: v for k, v in payload.dict(exclude_unset=True).items() if not (v is None and k in ("type", "player", "note"))})
+    data = {k: v for k, v in payload.dict(exclude_unset=True).items() if not (v is None and k in ("type", "player", "note"))}
+    extra = {k: data.pop(k) for k in EXTRA if k in data}
+    c.apply(event, data)
     _check_side(event)
+    _apply_details(match, event, extra)
     c.validate(event)
     _changing(match, event.save)
     return {**event_out(event), "match": c.match_out(_match(match.pk))}

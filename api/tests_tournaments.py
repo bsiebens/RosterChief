@@ -1079,7 +1079,9 @@ class TournamentApiTests(TestCase):
         t, _stage, _teams, (m1, _m2) = self._league()
         mins = self._attr(t, name="Penalty minutes", source="timeline", event_type="penalty", aggregate="sum").json()
         url = f"/matches/{m1.pk}/events"
-        self.assertEqual(self.as_("operate", "get", url).json(), {"match": mock.ANY, "events": []})
+        empty = self.as_("operate", "get", url).json()
+        self.assertEqual((empty["events"], empty["ice_hockey"], empty["penalty_codes"]), ([], False, []))
+        self.assertEqual(set(empty["rosters"]), {"home", "away"})
         r = self.as_("operate", "post", url, {"type": "goal", "side": "home", "minute": 12, "player": "Ann"})
         self.assertEqual(r.status_code, 201, r.content)
         goal = r.json()
@@ -1111,6 +1113,47 @@ class TournamentApiTests(TestCase):
         # a timeline attribute added later is backfilled from the existing events
         late = self._attr(t, name="Penalties", source="timeline", event_type="penalty", aggregate="count").json()
         self.assertEqual(self.as_("operate", "get", url).json()["match"]["attributes"][late["key"]], {"home": 0, "away": 2})
+
+    def test_hockey_timeline_players_assists_penalty_codes_and_goalies(self):
+        from club.models import Sport
+
+        self.club.sport = Sport.objects.create(name="Ice hockey")
+        self.club.save()
+        _t, _stage, _teams, (m1, _m2) = self._league()
+        home, away = m1.home_team, m1.away_team
+        mk = lambda team, n, first: TournamentRosterEntry.objects.create(tournament_team=team, foreign_first_name=first, foreign_last_name="X", jersey_number=n)  # noqa: E731
+        h1, h2, h3 = mk(home, 9, "Ann"), mk(home, 10, "Bo"), mk(home, 30, "Gil")
+        a1 = mk(away, 7, "Cy")
+        url = f"/matches/{m1.pk}/events"
+        doc = self.as_("operate", "get", url).json()
+        self.assertTrue(doc["ice_hockey"])
+        self.assertIn("BOA", [p["code"] for p in doc["penalty_codes"]])
+        self.assertEqual(doc["penalty_lengths"], ["2", "2+2", "5", "10", "20"])
+        self.assertEqual([p["number"] for p in doc["rosters"]["home"]], [9, 10, 30])
+        # a goal with scorer and two assists, at minute and second
+        r = self.as_("operate", "post", url, {"type": "goal", "side": "home", "minute": 3, "second": 41, "player_id": str(h1.pk), "assist_ids": [str(h2.pk), str(h3.pk)]})
+        self.assertEqual(r.status_code, 201, r.content)
+        goal = r.json()
+        self.assertEqual((goal["second"], goal["player"], goal["player_number"], [x["number"] for x in goal["assists"]]), (41, "Ann X", 9, [10, 30]))
+        self.assertEqual(r.json()["match"]["score_home"], 1)
+        # players of the other team, the scorer assisting themselves, and a third assist are refused
+        self.assertEqual(self.as_("operate", "post", url, {"type": "goal", "side": "home", "minute": 4, "player_id": str(a1.pk)}).status_code, 422)
+        self.assertEqual(self.as_("operate", "post", url, {"type": "goal", "side": "home", "minute": 4, "player_id": str(h1.pk), "assist_ids": [str(h1.pk)]}).status_code, 422)
+        self.assertEqual(self.as_("operate", "post", url, {"type": "goal", "side": "home", "minute": 4, "assist_ids": [str(h1.pk), str(h2.pk), str(h3.pk)]}).status_code, 422)
+        # a penalty needs a code and a length; the player is optional (a team penalty); the length gives the minutes
+        self.assertEqual(self.as_("operate", "post", url, {"type": "penalty", "side": "away", "minute": 5, "penalty_code": "NOPE", "penalty_length": "2"}).status_code, 422)
+        self.assertEqual(self.as_("operate", "post", url, {"type": "penalty", "side": "away", "minute": 5, "penalty_code": "HOK"}).status_code, 422)
+        r = self.as_("operate", "post", url, {"type": "penalty", "side": "away", "minute": 5, "second": 0, "penalty_code": "HOK", "penalty_length": "2+2"})
+        self.assertEqual((r.status_code, r.json()["penalty_name"], r.json()["value"], r.json()["player"]), (201, "Hooking", 4, ""))
+        r = self.as_("operate", "post", url, {"type": "penalty", "side": "away", "minute": 6, "player_id": str(a1.pk), "penalty_code": "BOA", "penalty_length": "5"})
+        self.assertEqual((r.json()["player_number"], r.json()["value"]), (7, 5))
+        # goalie change and timeout
+        r = self.as_("operate", "post", url, {"type": "goalie_change", "side": "home", "minute": 9, "goalie_out_id": str(h3.pk), "goalie_in_id": str(h2.pk)})
+        self.assertEqual((r.status_code, r.json()["goalie_out"]["number"], r.json()["goalie_in"]["number"]), (201, 30, 10))
+        self.assertEqual(self.as_("operate", "post", url, {"type": "goalie_change", "side": "home", "minute": 9, "goalie_out_id": str(h3.pk), "goalie_in_id": str(h3.pk)}).status_code, 422)
+        self.assertEqual(self.as_("operate", "post", url, {"type": "timeout", "side": "away", "minute": 12, "second": 30}).status_code, 201)
+        listed = self.as_("operate", "get", url).json()["events"]
+        self.assertEqual([(e["type"], e["minute"], e["second"]) for e in listed][:2], [("goal", 3, 41), ("penalty", 5, 0)])
 
     def test_event_validation(self):
         t, _stage, _teams, (m1, _m2) = self._league()

@@ -137,7 +137,35 @@ export type MatchDoc = {
 };
 export type ResultAttribute = { id: string; name: string; key: string; source: 'manual' | 'timeline'; event_type: string | null; aggregate: string | null; position: number };
 export type MatchEventType = 'goal' | 'penalty' | 'goalie_change' | 'timeout' | 'other';
-export type MatchEvent = { id: string; type: MatchEventType; side: 'home' | 'away' | null; minute: number | null; player: string; note: string; value: number | null };
+export type RosterPerson = { id: string; name: string; number: number | null; position?: string };
+export type MatchEvent = {
+	id: string;
+	type: MatchEventType;
+	side: 'home' | 'away' | null;
+	minute: number | null;
+	second: number | null;
+	player: string;
+	player_id: string | null;
+	player_number: number | null;
+	assists: RosterPerson[];
+	penalty_code: string;
+	penalty_name: string;
+	penalty_length: string;
+	goalie_in: RosterPerson | null;
+	goalie_out: RosterPerson | null;
+	note: string;
+	value: number | null;
+};
+/** The data of the game timeline screen: the match, its events, the players of both teams and the ice hockey lists (empty for other sports). */
+export type GameTimeline = {
+	match: MatchDoc;
+	events: MatchEvent[];
+	sport: { slug: string; name: string } | null;
+	ice_hockey: boolean;
+	penalty_codes: { code: string; name: string }[];
+	penalty_lengths: string[];
+	rosters: { home: RosterPerson[]; away: RosterPerson[] };
+};
 /** One step of a stage's ranking chain: `criterion` is a built-in name or `attr:<key>` for a match statistic. */
 export type Tiebreaker = { criterion: string; direction: 'most' | 'least' };
 export type AttributeDoc = { id: string; name: string; key: string; source: 'manual' | 'timeline'; event_type: string | null; aggregate: 'count' | 'sum' | null; position: number };

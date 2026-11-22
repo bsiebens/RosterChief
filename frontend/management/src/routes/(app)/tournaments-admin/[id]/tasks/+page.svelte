@@ -5,6 +5,7 @@
 	import EntityPicker from '#lib/components/EntityPicker.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
+	import DayHoursPicker from '#lib/components/tournaments/DayHoursPicker.svelte';
 	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -21,16 +22,19 @@
 	// --- create / edit
 	let open = $state(false);
 	let editing = $state<TaskDoc | null>(null);
-	let f = $state({ title: '', description: '', location_label: '', starts_at: '', ends_at: '', needed_quantity: '1' });
+	let f = $state({ title: '', description: '', location_label: '', dates: [] as string[], from: '', to: '', needed_quantity: '1' });
+	const localDate = (iso: string) => toLocalInput(iso).slice(0, 10);
+	const localTime = (iso: string) => toLocalInput(iso).slice(11, 16);
 	function openForm(task: TaskDoc | null) {
 		editing = task;
-		f = task ? { title: task.title, description: task.description, location_label: task.location_label, starts_at: toLocalInput(task.starts_at), ends_at: toLocalInput(task.ends_at), needed_quantity: String(task.needed_quantity) } : { title: '', description: '', location_label: '', starts_at: '', ends_at: '', needed_quantity: '1' };
+		f = task ? { title: task.title, description: task.description, location_label: task.location_label, dates: [localDate(task.starts_at)], from: localTime(task.starts_at), to: localTime(task.ends_at), needed_quantity: String(task.needed_quantity) } : { title: '', description: '', location_label: '', dates: tn.days.length === 1 ? [tn.days[0].date] : [], from: '', to: '', needed_quantity: '1' };
 		run.clear();
 		open = true;
 	}
 	async function save(e: SubmitEvent) {
 		e.preventDefault();
-		const body = { title: f.title.trim(), description: f.description, location_label: f.location_label.trim(), starts_at: fromLocalInput(f.starts_at), ends_at: fromLocalInput(f.ends_at), needed_quantity: numOrNull(f.needed_quantity) ?? 1 };
+		if (!f.dates.length) return void (run.error = t('tn.tasks.pick_day'));
+		const body = { title: f.title.trim(), description: f.description, location_label: f.location_label.trim(), starts_at: fromLocalInput(`${f.dates[0]}T${f.from}`), ends_at: fromLocalInput(`${f.dates[0]}T${f.to}`), needed_quantity: numOrNull(f.needed_quantity) ?? 1 };
 		if (await (editing ? run.patch(`${base}/${editing.id}`, body) : run.post(base, body))) open = false;
 	}
 	let delTask = $state<TaskDoc | null>(null);
@@ -41,11 +45,18 @@
 
 	// --- generate shifts
 	let genOpen = $state(false);
-	let g = $state({ title: '', location_label: '', starts_at: '', ends_at: '', shift_minutes: '60', needed_quantity: '2' });
+	let g = $state({ title: '', location_label: '', dates: [] as string[], from: '', to: '', shift_minutes: '60', needed_quantity: '2' });
+	/** One run per chosen day, with the same hours on each. */
 	async function generate(e: SubmitEvent) {
 		e.preventDefault();
-		const body = { title: g.title.trim(), location_label: g.location_label.trim(), starts_at: fromLocalInput(g.starts_at), ends_at: fromLocalInput(g.ends_at), shift_minutes: Number(g.shift_minutes), needed_quantity: Number(g.needed_quantity) };
-		if (await run.post<{ created_count: number }>(`${base}/generate`, body, (d) => void (run.notice = t('tn.tasks.generated', { n: d?.created_count ?? 0 })), { notice: '' })) genOpen = false;
+		if (!g.dates.length) return void (run.error = t('tn.tasks.pick_day'));
+		let created = 0;
+		for (const date of g.dates) {
+			const body = { title: g.title.trim(), location_label: g.location_label.trim(), starts_at: fromLocalInput(`${date}T${g.from}`), ends_at: fromLocalInput(`${date}T${g.to}`), shift_minutes: Number(g.shift_minutes), needed_quantity: Number(g.needed_quantity) };
+			if (!(await run.post<{ created_count: number }>(`${base}/generate`, body, (d) => void (created += d?.created_count ?? 0), { notice: '' }))) return;
+		}
+		run.notice = t('tn.tasks.generated', { n: created });
+		genOpen = false;
 	}
 
 	// --- assign
@@ -123,10 +134,7 @@
 		{#if run.error && !Object.keys(run.fields).length}<Alert kind="error">{run.error}</Alert>{/if}
 		<Field label={t('tn.tasks.f.title')} bind:value={f.title} error={run.fields.title} required />
 		<Field label={t('tn.tasks.f.location')} bind:value={f.location_label} error={run.fields.location_label} />
-		<div class="grid grid-cols-2 gap-3">
-			<Field label={t('tn.tasks.f.starts')} type="datetime-local" bind:value={f.starts_at} error={run.fields.starts_at} required />
-			<Field label={t('tn.tasks.f.ends')} type="datetime-local" bind:value={f.ends_at} error={run.fields.ends_at} required />
-		</div>
+		<DayHoursPicker days={tn.days} bind:dates={f.dates} bind:from={f.from} bind:to={f.to} error={run.fields.starts_at ?? run.fields.ends_at} />
 		<Field label={t('tn.tasks.f.needed')} type="number" min="1" bind:value={f.needed_quantity} error={run.fields.needed_quantity} />
 		<div class="form-control w-full">
 			<label class="label" for="task-desc"><span class="label-text">{t('tn.tasks.f.description')}</span></label>
@@ -145,10 +153,7 @@
 		<p class="text-sm text-muted">{t('tn.tasks.generate_help')}</p>
 		<Field label={t('tn.tasks.f.title')} bind:value={g.title} error={run.fields.title} required />
 		<Field label={t('tn.tasks.f.location')} bind:value={g.location_label} error={run.fields.location_label} />
-		<div class="grid grid-cols-2 gap-3">
-			<Field label={t('tn.tasks.f.starts')} type="datetime-local" bind:value={g.starts_at} error={run.fields.starts_at} required />
-			<Field label={t('tn.tasks.f.ends')} type="datetime-local" bind:value={g.ends_at} error={run.fields.ends_at} required />
-		</div>
+		<DayHoursPicker multi days={tn.days} bind:dates={g.dates} bind:from={g.from} bind:to={g.to} error={run.fields.starts_at ?? run.fields.ends_at} />
 		<div class="grid grid-cols-2 gap-3">
 			<Field label={t('tn.tasks.f.shift')} type="number" min="5" bind:value={g.shift_minutes} error={run.fields.shift_minutes} required />
 			<Field label={t('tn.tasks.f.needed')} type="number" min="1" bind:value={g.needed_quantity} error={run.fields.needed_quantity} required />

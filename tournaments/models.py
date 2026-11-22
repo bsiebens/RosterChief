@@ -1270,14 +1270,17 @@ class MatchEvent(UUIDModel):
     type = models.CharField(_("type"), max_length=20, choices=MatchEventType.choices)
     side = models.CharField(_("side"), max_length=4, choices=Side.choices, blank=True, help_text=_("Empty for a neutral event, e.g. the end of a period."))
     minute = models.PositiveSmallIntegerField(_("minute"), null=True, blank=True)
+    second = models.PositiveSmallIntegerField(_("second"), null=True, blank=True, help_text=_("0-59, within the minute."))
     player = models.CharField(_("player"), max_length=100, blank=True)
+    player_entry = models.ForeignKey("TournamentRosterEntry", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("player entry"), help_text=_("The roster player of the team, when picked from the roster."))
+    details = models.JSONField(_("details"), default=dict, blank=True, help_text=_("Assists, penalty code and length, goalie in/out ... as picked on the game screen (names are copied, so history survives a roster change)."))
     note = models.CharField(_("note"), max_length=255, blank=True)
     value = models.IntegerField(_("value"), null=True, blank=True, help_text=_("A number that belongs to the event, e.g. penalty minutes."))
 
     class Meta:
         verbose_name = _("match event")
         verbose_name_plural = _("match events")
-        ordering = [models.F("minute").asc(nulls_last=True), "created"]
+        ordering = [models.F("minute").asc(nulls_last=True), models.F("second").asc(nulls_last=True), "created"]
 
     def __str__(self):
         return f"{self.type} ({self.side or '-'}) {self.match_id}"
