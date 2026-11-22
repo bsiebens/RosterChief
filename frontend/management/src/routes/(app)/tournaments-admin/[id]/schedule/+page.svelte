@@ -245,6 +245,7 @@
 			{/if}
 		</section>
 
+		<section class="card card-body gap-4">
 		<div class="flex flex-wrap items-center justify-between gap-2">
 			<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('tn.sched.games_title')}</h2>
 				<div class="flex w-fit items-center gap-1" role="group" aria-label={t('tn.sched.view')}>
@@ -259,7 +260,7 @@
 			{#if canOperate}<p class="text-xs text-muted">{t('tn.sched.drag_help')}</p>{/if}
 		{:else}
 			{#each sched.stages as st (st.stage.id)}
-				<section class="card card-body gap-3">
+				<section class="grid gap-3 border-t border-line pt-4">
 					<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{st.stage.name}</h2>
 					{#each st.rounds as r (r.round_number)}
 						<div class="grid gap-1">
@@ -288,6 +289,7 @@
 				<p class="text-sm text-muted">{t('tn.sched.no_matches')}</p>
 			{/each}
 		{/if}
+		</section>
 
 	{/if}
 </div>

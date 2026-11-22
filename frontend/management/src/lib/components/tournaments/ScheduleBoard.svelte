@@ -1,5 +1,7 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { t } from '#lib/i18n.svelte.ts';
+	import TeamLogo from '#lib/components/tournaments/TeamLogo.svelte';
 	import { fmtDay, fromLocalInput, fmtTime, type MatchDoc } from '#lib/tournaments.svelte.ts';
 	import type { BoardData } from '../../../routes/(app)/tournaments-admin/[id]/schedule/+page.server.ts';
 
@@ -11,6 +13,9 @@
 
 	/** The board gives each day's window as a timestamp; the wall-clock part is what the board needs ("2026-11-28T09:00:00+01:00" -> "09:00"). */
 	const clock = (v: string) => (/^\d{2}:\d{2}/.test(v) ? v.slice(0, 5) : v.slice(11, 16));
+
+	/** The club's crest sits faintly at centre ice of every rink. */
+	const crest = $derived((page.data as { branding?: { logo_url?: string | null } }).branding?.logo_url ?? null);
 
 	let dragging = $state<MatchDoc | null>(null);
 	let hover = $state<string>('');
@@ -38,9 +43,9 @@
 	}
 </script>
 
-<div class="grid gap-5">
+<div class="grid gap-8">
 	{#each board.fields as f (f.field.id)}
-		<section class="card card-body gap-3">
+		<section class="grid gap-3">
 			<h3 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{f.field.name}</h3>
 			{#if f.rules.length}<p class="text-xs text-muted">{f.rules.map((r) => r.summary).join(' · ')}</p>{/if}
 			<div class="grid gap-x-4 gap-y-5 overflow-x-auto pb-2 [grid-template-columns:repeat(auto-fit,minmax(15rem,1fr))]">
@@ -50,7 +55,7 @@
 						<div
 							role="application"
 							aria-label={t('tn.sched.column', { field: f.field.name, day: fmtDay(day.date) })}
-							class="relative ml-9 rounded border {hover === f.field.id + day.date ? 'border-primary bg-paper' : 'border-line'}"
+							class="relative ml-9 overflow-hidden rounded-[2.5rem] border-[3px] bg-white {hover === f.field.id + day.date ? 'border-primary bg-paper' : 'border-ink/30'}"
 							style:height="{day.height_px}px"
 							ondragover={(e) => {
 								if (!canOperate) return;
@@ -59,6 +64,10 @@
 							}}
 							ondragleave={() => (hover = '')}
 							ondrop={(e) => canOperate && drop(e, f.field.id, day.date, clock(day.start))}>
+							<span class="pointer-events-none absolute inset-y-0 left-1/2 w-0 border-l-2 border-club/25" aria-hidden="true"></span>
+							<span class="pointer-events-none absolute top-1/2 left-1/2 flex size-32 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-club/25" aria-hidden="true">
+								{#if crest}<img src={crest} alt="" class="size-20 object-contain opacity-15" onerror={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')} />{/if}
+							</span>
 							{#each marks(clock(day.start), clock(day.end)) as m (m.label)}
 								<span class="pointer-events-none absolute -left-9 font-mono text-[10px] text-muted" style:top="{m.min * board.px_per_minute - 6}px">{m.label}</span>
 								<span class="pointer-events-none absolute inset-x-0 border-t border-dashed border-line" style:top="{m.min * board.px_per_minute}px"></span>
@@ -75,15 +84,19 @@
 										ondragstart={() => (dragging = m)}
 										ondragend={() => (dragging = null)}
 										onclick={() => canOperate && onedit(m)}
-										class="absolute inset-x-0.5 overflow-hidden rounded border border-line bg-white px-1.5 py-0.5 text-left text-[11px] leading-tight shadow-sm {canOperate ? 'cursor-grab hover:border-ink' : ''} {m.status === 'completed' ? 'opacity-70' : ''}"
+										class="absolute inset-x-3 overflow-hidden rounded border border-line bg-white px-1.5 py-0.5 text-left text-[11px] leading-tight shadow-sm {canOperate ? 'cursor-grab hover:border-ink' : ''} {m.status === 'completed' ? 'opacity-70' : ''}"
 										style:top="{s.top_px}px"
 										style:height="{s.height_px}px"
 										title="{m.home_display} – {m.away_display}">
-										<span class="block truncate font-semibold text-ink">{m.home_display} – {m.away_display}</span>
+										<span class="flex items-center gap-1 truncate leading-[14px] font-semibold text-ink">
+											{#if m.home_team}<TeamLogo name={m.home_team.name} logoUrl={m.home_team.logo_url} color={m.home_team.primary_color} size="size-3.5" text="text-[5px]" />{/if}
+											<span class="truncate">{m.home_display} – {m.away_display}</span>
+											{#if m.away_team}<TeamLogo name={m.away_team.name} logoUrl={m.away_team.logo_url} color={m.away_team.primary_color} size="size-3.5" text="text-[5px]" />{/if}
+										</span>
 										<span class="block truncate font-mono text-muted">{fmtTime(m.scheduled_start)} · {m.round_label}</span>
 									</button>
 								{:else if day.slots.some((x) => x.type === 'match')}
-									<div class="pointer-events-none absolute inset-x-0.5 overflow-hidden rounded bg-ink/5 px-1.5 text-[10px] text-muted italic" style:top="{s.top_px}px" style:height="{s.height_px}px">
+									<div class="pointer-events-none absolute inset-x-3 overflow-hidden rounded bg-ink/5 px-1.5 text-[10px] text-muted italic" style:top="{s.top_px}px" style:height="{s.height_px}px">
 										{s.rule?.summary ?? t('tn.sched.gap', { n: s.minutes })}
 									</div>
 								{/if}
