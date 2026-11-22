@@ -229,6 +229,19 @@ def generate_matches(request, tournament_id: uuid.UUID, stage_id: uuid.UUID, pay
     return {"generated_count": len(matches)}
 
 
+@router.post("/{tournament_id}/stages/{stage_id}/clear-matches", summary="Remove all of a stage's generated matches (and groups)", operation_id="tournaments_stage_clear_matches")
+def clear_matches(request, tournament_id: uuid.UUID, stage_id: uuid.UUID):
+    c.gate_operate(request)
+    t = c.get_tournament(tournament_id)
+    stage = c.get_stage(t, stage_id)
+    with transaction.atomic():
+        removed = stage.matches.count()
+        _clear_stage(stage)
+        stage.status = TournamentStage.Status.PENDING  # nothing is left to play
+        stage.save(update_fields=["status"])
+    return {"cleared_count": removed}
+
+
 def _seedable_stage(t, stage_id):
     stage = c.get_stage(t, stage_id)
     if stage.format not in SEEDABLE:

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUp, CalendarClock, Coffee, GripVertical, Layers, LayoutGrid, MapPin, Network, Pencil, Plus, BarChart3, Repeat, Shuffle, Trash2, Users, Wrench, X, GitFork } from '@lucide/svelte';
+	import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUp, CalendarClock, Coffee, Eraser, GripVertical, Layers, LayoutGrid, MapPin, Network, Pencil, Plus, BarChart3, Repeat, Shuffle, Trash2, Users, Wrench, X, GitFork } from '@lucide/svelte';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import Alert from '#lib/components/Alert.svelte';
@@ -314,6 +314,13 @@
 		if (regenStage && (await doGenerate(regenStage, true))) regenOpen = false;
 	}
 
+	// Clearing removes every match (and group) of a stage so it can be set up again; refused once games were played.
+	let clearStage = $state<StageDoc | null>(null);
+	let clearOpen = $state(false);
+	async function confirmClear() {
+		if (clearStage && (await run.post<{ cleared_count: number }>(`${base}/stages/${clearStage.id}/clear-matches`, {}, (d) => void (run.notice = t('tn.setup.cleared', { n: d?.cleared_count ?? 0 })), { notice: '' }))) clearOpen = false;
+	}
+
 	// --- break rules
 	type RuleForm = { field_id: string; trigger_type: string; every_games: string; every_minutes: string; after_round: string; win_start: string; win_end: string; gap_minutes: string; replaces_default_gap: boolean };
 	const blankRule = (): RuleForm => ({ field_id: '', trigger_type: 'game_count', every_games: '', every_minutes: '', after_round: '', win_start: '', win_end: '', gap_minutes: '', replaces_default_gap: false });
@@ -367,7 +374,7 @@
 	{#if data.error || !setup}
 		<Alert kind="error">{t('common.error.generic')}</Alert>
 	{:else}
-		{#if run.error && !fieldOpen && !stageOpen && !ruleOpen && !delFieldOpen && !delStageOpen && !regenOpen && !delRuleOpen && !attrOpen && !delAttrOpen && !replaceOpen && !moveOpen && !delMatchOpen && !addOpen}<Alert kind="error">{run.error}</Alert>{/if}
+		{#if run.error && !fieldOpen && !stageOpen && !ruleOpen && !delFieldOpen && !delStageOpen && !regenOpen && !clearOpen && !delRuleOpen && !attrOpen && !delAttrOpen && !replaceOpen && !moveOpen && !delMatchOpen && !addOpen}<Alert kind="error">{run.error}</Alert>{/if}
 
 		<section class="card card-body card-hl gap-3">
 			<div class="flex flex-wrap items-center justify-between gap-2">
@@ -498,6 +505,7 @@
 												<button class="btn btn-ghost btn-xs btn-square" type="button" disabled={i === stageList.length - 1 || run.busy} aria-label={t('tn.setup.stage_right')} title={t('tn.setup.stage_right')} onclick={() => moveStage(i, i + 1)}><ArrowRight size={14} /></button>
 											</span>
 											<span class="flex items-center gap-1">
+												{#if s.match_count}<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.setup.clear_named', { name: s.name })} title={t('tn.setup.clear_named', { name: s.name })} onclick={() => { clearStage = s; run.clear(); clearOpen = true; }}><Eraser size={13} /></button>{/if}
 												<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.setup.edit_named', { name: s.name })} title={t('tn.setup.edit_named', { name: s.name })} onclick={() => openStage(s)}><Pencil size={13} /></button>
 												<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.setup.delete_named', { name: s.name })} title={t('tn.setup.delete_named', { name: s.name })} onclick={() => { delStage = s; run.clear(); delStageOpen = true; }}><Trash2 size={13} /></button>
 											</span>
@@ -911,6 +919,16 @@
 		<div class="modal-action mt-2 flex justify-end gap-2">
 			<button class="btn btn-outline" type="button" onclick={() => (delFieldOpen = false)}>{t('common.cancel')}</button>
 			<button class="btn btn-error gap-2" type="button" disabled={run.busy} onclick={removeField}><Trash2 size={16} /> {t('common.delete')}</button>
+		</div>
+	</div>
+</Modal>
+<Modal bind:open={clearOpen} title={t('tn.setup.clear_title')}>
+	<div class="grid gap-3">
+		{#if run.error}<Alert kind="error">{run.error}</Alert>{/if}
+		<p>{t('tn.setup.clear_body', { name: clearStage?.name ?? '', n: clearStage?.match_count ?? 0 })}</p>
+		<div class="modal-action mt-2 flex justify-end gap-2">
+			<button class="btn btn-outline" type="button" onclick={() => (clearOpen = false)}>{t('common.cancel')}</button>
+			<button class="btn btn-error gap-2" type="button" disabled={run.busy} onclick={confirmClear}>{t('tn.setup.clear')}</button>
 		</div>
 	</div>
 </Modal>

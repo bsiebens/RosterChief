@@ -463,6 +463,20 @@ class TournamentApiTests(TestCase):
             self.assertEqual((m.scheduled_start, m.field_id), before[position])
         self.assertEqual(self.as_("operate", "post", f"/{t.pk}/schedule/reorder", {"match_ids": [str(new_order[0])]}).status_code, 422)  # needs two or more
 
+    def test_clear_a_stages_matches(self):
+        t = self.make(status="in_progress")
+        [self.foreign(t, n) for n in ("A", "B", "C", "D")]
+        stage = self.as_("operate", "post", f"/{t.pk}/stages", {"name": "RR", "format": "round_robin"}).json()
+        self.as_("operate", "post", f"/{t.pk}/stages/{stage['id']}/generate-matches", {})
+        self.assertEqual(Match.objects.filter(stage_id=stage["id"]).count(), 6)
+        r = self.as_("operate", "post", f"/{t.pk}/stages/{stage['id']}/clear-matches", {})
+        self.assertEqual((r.status_code, r.json()["cleared_count"]), (200, 6), r.content)
+        self.assertEqual(Match.objects.filter(stage_id=stage["id"]).count(), 0)
+        self.assertEqual(TournamentStage.objects.get(pk=stage["id"]).status, "pending")
+        self.as_("operate", "post", f"/{t.pk}/stages/{stage['id']}/generate-matches", {})
+        Match.objects.filter(stage_id=stage["id"]).update(status=Match.Status.COMPLETE)
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/stages/{stage['id']}/clear-matches", {}).status_code, 409)  # played matches stay
+
     def test_delete_only_a_draft_tournament(self):
         body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}
         tid = self.as_("manage", "post", "", body).json()["id"]
