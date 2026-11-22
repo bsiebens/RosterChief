@@ -4,6 +4,7 @@
 	import NoticeAlert from '#lib/components/NoticeAlert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
+	import LiveBadge from '#lib/components/tournaments/LiveBadge.svelte';
 	import ScheduleBoard from '#lib/components/tournaments/ScheduleBoard.svelte';
 	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
@@ -380,7 +381,7 @@
 												<td class="font-mono text-xs whitespace-nowrap">{m.scheduled_start ? fmtTime(m.scheduled_start) : t('tn.sched.unscheduled')}</td>
 												<td class="text-xs">{m.field?.name ?? '—'}</td>
 												<td>{#if m.group}<span class="badge badge-sm badge-ghost">{m.group.name}</span>{/if}</td>
-												<td class="text-sm font-medium text-ink">{m.home_display} – {m.away_display}{#if m.leg} <span class="badge badge-sm badge-ghost ml-1">{t('tn.leg', { n: m.leg })}</span>{/if}</td>
+												<td class="text-sm font-medium text-ink">{m.home_display} – {m.away_display}{#if m.status === 'in_progress'} <span class="ml-1 align-middle"><LiveBadge /></span>{/if}{#if m.leg} <span class="badge badge-sm badge-ghost ml-1">{t('tn.leg', { n: m.leg })}</span>{/if}</td>
 												<td>
 													<div class="flex items-center justify-end gap-1">
 														{#if movable}

@@ -3,6 +3,7 @@
 	import { ArrowLeft, Check, Flag, Goal, Play, RotateCcw, ListOrdered, Pencil, Repeat, Shield, Timer, Trash2, Zap } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Modal from '#lib/components/Modal.svelte';
+	import LiveBadge from '#lib/components/tournaments/LiveBadge.svelte';
 	import NoticeAlert from '#lib/components/NoticeAlert.svelte';
 	import SearchSelect from '#lib/components/SearchSelect.svelte';
 	import TeamLogo from '#lib/components/tournaments/TeamLogo.svelte';
@@ -194,8 +195,8 @@
 		<Alert kind="error">{t('common.error.generic')}</Alert>
 	{:else}
 		<section class="card card-body card-hl gap-2">
-			{#if live}<p class="flex items-center justify-center gap-2 text-xs font-bold tracking-[.12em] text-error uppercase"><span class="relative flex size-2.5"><span class="absolute inline-flex size-full animate-ping rounded-full bg-error opacity-60"></span><span class="relative inline-flex size-2.5 rounded-full bg-error"></span></span> {t('tn.game.live')}</p>{/if}
 			<p class="text-xs text-muted">{[m.round_label || t('tn.standings.round', { n: m.round_number }), m.scheduled_start ? fmtDateTime(m.scheduled_start) : '', m.field?.name, m.leg ? t('tn.leg', { n: m.leg }) : ''].filter(Boolean).join(' · ')}</p>
+			{#if live}<div class="flex justify-center"><LiveBadge size="lg" /></div>{/if}
 			<div class="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
 				<div class="flex items-center justify-end gap-2 text-right font-display text-lg font-extrabold text-ink">
 					{m.home_display}

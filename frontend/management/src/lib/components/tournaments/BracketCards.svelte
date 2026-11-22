@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
+	import LiveBadge from '#lib/components/tournaments/LiveBadge.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { dateTimeLabel, type Bracket, type PublicMatch, type TeamRef } from '#lib/tournaments-public.ts';
 
@@ -45,12 +46,12 @@
 								{@const w = winner(m)}
 								<article class="overflow-hidden rounded-xl border border-line bg-white shadow-sm">
 									<div class="flex items-center justify-between gap-2 border-b border-line bg-subhead px-3 py-1 font-mono text-[10px] text-muted">
-										<span class="truncate">{m.scheduled_start ? dateTimeLabel(m.scheduled_start) : t('tp.tbd')}</span>
+										{#if m.status === 'in_progress'}<LiveBadge />{:else}<span class="truncate">{m.scheduled_start ? dateTimeLabel(m.scheduled_start) : t('tp.tbd')}</span>{/if}
 										<span class="truncate">{m.field?.name ?? ''}</span>
 									</div>
-									{@render row(m.home_team, m.home_display, played(m) ? m.score_home : null, played(m) && m.score_home === m.score_away ? m.penalty_home : null, w === 'home', w === 'away')}
+									{@render row(m.home_team, m.home_display, played(m) || m.status === 'in_progress' ? (m.score_home ?? 0) : null, played(m) && m.score_home === m.score_away ? m.penalty_home : null, w === 'home', w === 'away')}
 									<div class="border-t border-line"></div>
-									{@render row(m.away_team, m.away_display, played(m) ? m.score_away : null, played(m) && m.score_home === m.score_away ? m.penalty_away : null, w === 'away', w === 'home')}
+									{@render row(m.away_team, m.away_display, played(m) || m.status === 'in_progress' ? (m.score_away ?? 0) : null, played(m) && m.score_home === m.score_away ? m.penalty_away : null, w === 'away', w === 'home')}
 								</article>
 							{/each}
 						</div>

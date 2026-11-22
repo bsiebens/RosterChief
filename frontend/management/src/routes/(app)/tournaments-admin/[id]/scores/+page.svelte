@@ -2,6 +2,7 @@
 	import { Check, ChevronDown, ChevronRight, ClipboardPen, ListOrdered, Pencil, Plus, Trash2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import NoticeAlert from '#lib/components/NoticeAlert.svelte';
+	import LiveBadge from '#lib/components/tournaments/LiveBadge.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
@@ -91,7 +92,7 @@
 											<td class="hidden text-xs whitespace-nowrap sm:table-cell">{x.field?.name ?? ''}</td>
 											<td class="text-right text-sm">{x.home_display}</td>
 											<td class="w-28 text-center font-mono text-sm font-bold whitespace-nowrap">
-												{#if done(x)}{x.score_home} – {x.score_away}{#if x.went_to_overtime} <span class="text-xs font-normal text-muted">{t('tn.scores.ot')}</span>{/if}{#if x.penalty_home !== null} <span class="text-xs font-normal text-muted">({x.penalty_home}–{x.penalty_away})</span>{/if}{:else}<span class="text-muted">vs</span>{/if}{#if x.leg}<div class="text-[10px] font-normal text-muted">{t('tn.leg', { n: x.leg })}{#if x.aggregate} · {t('tn.aggregate', { h: x.aggregate[0], a: x.aggregate[1] })}{/if}</div>{/if}{#each attrs as a (a.key)}{#if x.attributes?.[a.key] && (x.attributes[a.key].home || x.attributes[a.key].away)}<div class="text-xs font-normal text-muted" title={a.name}>{a.name} {x.attributes[a.key].home}–{x.attributes[a.key].away}</div>{/if}{/each}
+												{#if x.status === 'in_progress'}<div class="mb-0.5"><LiveBadge /></div>{/if}{#if done(x) || x.status === 'in_progress'}{x.score_home ?? 0} – {x.score_away ?? 0}{#if x.went_to_overtime} <span class="text-xs font-normal text-muted">{t('tn.scores.ot')}</span>{/if}{#if x.penalty_home !== null} <span class="text-xs font-normal text-muted">({x.penalty_home}–{x.penalty_away})</span>{/if}{:else}<span class="text-muted">vs</span>{/if}{#if x.leg}<div class="text-[10px] font-normal text-muted">{t('tn.leg', { n: x.leg })}{#if x.aggregate} · {t('tn.aggregate', { h: x.aggregate[0], a: x.aggregate[1] })}{/if}</div>{/if}{#each attrs as a (a.key)}{#if x.attributes?.[a.key] && (x.attributes[a.key].home || x.attributes[a.key].away)}<div class="text-xs font-normal text-muted" title={a.name}>{a.name} {x.attributes[a.key].home}–{x.attributes[a.key].away}</div>{/if}{/each}
 											</td>
 											<td class="text-sm">{x.away_display}</td>
 											<td class="text-right"><div class="flex items-center justify-end gap-1">

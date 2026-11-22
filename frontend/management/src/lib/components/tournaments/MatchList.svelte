@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
+	import LiveBadge from '#lib/components/tournaments/LiveBadge.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { dateTimeLabel, type PublicMatch, type TeamRef } from '#lib/tournaments-public.ts';
 
@@ -32,7 +33,9 @@
 			<div class="flex items-center gap-3">
 				{@render side(m.home_team, m.home_display, false)}
 				<span class="shrink-0 text-center font-display text-lg font-extrabold text-ink tabular-nums">
-					{#if played(m)}
+					{#if m.status === 'in_progress'}
+						<span class="mb-0.5 block"><LiveBadge /></span>{m.score_home ?? 0} – {m.score_away ?? 0}
+					{:else if played(m)}
 						{m.score_home} – {m.score_away}
 						{#if m.went_to_overtime}<span class="block font-mono text-[10px] font-normal text-muted">{t('tp.overtime')}{#if m.penalty_home !== null && m.penalty_away !== null} · {m.penalty_home}–{m.penalty_away} {t('tp.penalties')}{/if}</span>{/if}
 					{:else}
