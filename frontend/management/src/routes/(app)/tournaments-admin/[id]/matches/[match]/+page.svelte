@@ -147,13 +147,29 @@
 		run.clear();
 		doneOpen = true;
 	}
-	const level = $derived(rf.home !== '' && rf.away !== '' && Number(rf.home) === Number(rf.away));
+	// A game in several periods: closing a period only saves that period; the last one completes the whole game.
+	const periods = $derived(game?.legs ?? []);
+	const isTie = $derived(periods.length > 1);
+	const periodNo = $derived(isTie ? (periods.find((p) => p.id === m?.id)?.leg ?? 1) : 1);
+	const nextPeriod = $derived(isTie ? (periods.find((p) => p.leg === periodNo + 1) ?? null) : null);
+	const otherPeriods = $derived(periods.filter((p) => p.id !== m?.id));
+	/** The score of the whole game as typed in the dialog: the other periods as saved plus this one. */
+	const gameHome = $derived(otherPeriods.reduce((n, p) => n + (p.score_home ?? 0), 0) + Number(rf.home || 0));
+	const gameAway = $derived(otherPeriods.reduce((n, p) => n + (p.score_away ?? 0), 0) + Number(rf.away || 0));
+	const level = $derived(rf.home !== '' && rf.away !== '' && !nextPeriod && gameHome === gameAway);
 	async function confirmComplete(e: SubmitEvent) {
 		e.preventDefault();
 		const body = { score_home: Number(rf.home), score_away: Number(rf.away), went_to_overtime: rf.ot, penalty_home: level ? numOrNull(rf.ph) : null, penalty_away: level ? numOrNull(rf.pa) : null };
-		if (await run.post(`/tournaments/matches/${data.matchId}/result`, body, undefined, { notice: t('tn.game.completed_done') })) {
+		const nextId = nextPeriod?.id;
+		const goalies = { home_goalie_id: currentGoalie('home') || null, away_goalie_id: currentGoalie('away') || null };
+		if (await run.post(`/tournaments/matches/${data.matchId}/result`, body, undefined, { notice: nextId ? t('tn.game.period_closed', { n: periodNo }) : t('tn.game.completed_done') })) {
 			doneOpen = false;
-			await goto(`${TBASE}/${tn.id}/scores`);
+			if (nextId) {
+				await api('POST', `/tournaments/matches/${nextId}/start`, { body: goalies }); // the next period starts by itself, with the goalies that were in goal
+				await goto(`${TBASE}/${tn.id}/matches/${nextId}`);
+			} else {
+				await goto(`${TBASE}/${tn.id}/scores`);
+			}
 		}
 	}
 
@@ -228,7 +244,7 @@
 					{#if canOperate}<button class="btn btn-outline btn-sm gap-1 bg-white" type="button" disabled={run.busy} onclick={reopen}><RotateCcw size={14} aria-hidden="true" /> {t('tn.game.reopen')}</button>{/if}
 				</div>
 			{:else if canOperate && live}
-				<div class="flex justify-center"><button class="btn btn-primary gap-2" type="button" onclick={openComplete}><Flag size={16} aria-hidden="true" /> {t('tn.game.complete')}</button></div>
+				<div class="flex justify-center"><button class="btn btn-primary gap-2" type="button" onclick={openComplete}><Flag size={16} aria-hidden="true" /> {nextPeriod ? t('tn.game.close_period', { n: periodNo }) : t('tn.game.complete')}</button></div>
 			{/if}
 		</section>
 
@@ -396,10 +412,17 @@
 	{/if}
 </div>
 
-<Modal bind:open={doneOpen} title={t('tn.game.complete_title')}>
+<Modal bind:open={doneOpen} title={nextPeriod ? t('tn.game.close_period', { n: periodNo }) : t('tn.game.complete_title')}>
 	<form class="grid gap-4" onsubmit={confirmComplete}>
 		{#if run.error}<Alert kind="error">{run.error}</Alert>{/if}
-		<p class="text-sm text-muted">{t('tn.game.complete_help')}</p>
+		<p class="text-sm text-muted">{nextPeriod ? t('tn.game.close_period_help', { n: periodNo, next: periodNo + 1 }) : isTie ? t('tn.game.complete_game_help') : t('tn.game.complete_help')}</p>
+		{#if isTie && !nextPeriod}
+			<div class="grid gap-1 rounded-lg border border-line bg-paper p-3 text-sm">
+				{#each otherPeriods as p (p.id)}<div class="flex justify-between"><span class="text-muted">{t('tn.leg', { n: p.leg })}</span><span class="font-mono font-semibold">{p.score_home ?? 0}:{p.score_away ?? 0}</span></div>{/each}
+				<div class="flex justify-between"><span class="text-muted">{t('tn.leg', { n: periodNo })}</span><span class="font-mono font-semibold">{rf.home || 0}:{rf.away || 0}</span></div>
+				<div class="flex justify-between border-t border-line pt-1"><span class="font-semibold text-ink">{t('tn.game.whole_game')}</span><span class="font-mono text-base font-extrabold text-ink">{gameHome}:{gameAway}</span></div>
+			</div>
+		{/if}
 		<div class="grid grid-cols-[1fr_auto_1fr] items-end gap-3">
 			<label class="form-control"><span class="label-text mb-1 truncate text-sm font-medium">{m?.home_display}</span><input class="input input-bordered w-full text-center font-mono text-2xl font-bold" type="number" min="0" required bind:value={rf.home} /></label>
 			<span class="pb-2 font-mono text-2xl font-bold text-muted">:</span>
@@ -420,7 +443,7 @@
 		{/if}
 		<div class="modal-action mt-2 flex justify-end gap-2">
 			<button class="btn btn-outline" type="button" onclick={() => (doneOpen = false)}>{t('common.cancel')}</button>
-			<button class="btn btn-primary gap-2" type="submit" disabled={run.busy}><Check size={16} aria-hidden="true" /> {t('tn.game.complete_confirm')}</button>
+			<button class="btn btn-primary gap-2" type="submit" disabled={run.busy}><Check size={16} aria-hidden="true" /> {nextPeriod ? t('tn.game.close_period_confirm', { n: periodNo }) : t('tn.game.complete_confirm')}</button>
 		</div>
 	</form>
 </Modal>
