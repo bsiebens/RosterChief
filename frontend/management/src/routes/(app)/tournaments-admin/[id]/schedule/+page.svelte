@@ -125,28 +125,23 @@
 	{#if data.error || !sched}
 		<Alert kind="error">{t('common.error.generic')}</Alert>
 	{:else}
-		<div class="grid items-start gap-4 lg:grid-cols-2">
-			<section class="card card-body card-hl gap-3">
-				<div class="flex flex-wrap items-center justify-between gap-2">
-					<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Wand2 size={16} class="shrink-0" aria-hidden="true" /> {t('tn.sched.generate_title')}</h2>
-				<div class="flex w-fit items-center gap-1" role="group" aria-label={t('tn.sched.view')}>
-					{#each ['board', 'list'] as v (v)}
-						<button type="button" aria-pressed={view === v} onclick={() => (view = v as 'board' | 'list')} class="rounded-md px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {view === v ? 'border border-ink bg-ink text-white' : 'border border-line text-muted hover:text-ink'}">{t(`tn.sched.view_${v}`)}</button>
-					{/each}
-				</div>
-				</div>
-{#if canOperate}
-							<div class="flex flex-wrap items-end gap-3">
-								<div class="w-48">
+		<div class="grid items-stretch gap-4 lg:grid-cols-2">
+			<section class="card card-body card-hl h-full gap-3">
+				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Wand2 size={16} class="shrink-0" aria-hidden="true" /> {t('tn.sched.generate_title')}</h2>
+				{#if canOperate}
+							<div class="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+								<div class="w-52">
 									<Field label={t('tn.sched.duration')} type="number" min="1" bind:value={duration} placeholder={String(sched.tournament.default_match_duration_minutes ?? '')} help={t('tn.sched.duration_help')} />
 								</div>
-								<button class="btn btn-primary gap-2" type="button" disabled={run.busy} onclick={generate}><Wand2 size={16} /> {t('tn.sched.generate')}</button>
-								<button class="btn btn-outline btn-error gap-2" type="button" disabled={run.busy} onclick={() => { run.clear(); clearOpen = true; }}><Eraser size={16} /> {t('tn.sched.clear')}</button>
+								<div class="flex flex-wrap items-center justify-end gap-2 pb-6">
+									<button class="btn btn-primary gap-2" type="button" disabled={run.busy} onclick={generate}><Wand2 size={16} /> {t('tn.sched.generate')}</button>
+									<button class="btn btn-outline btn-error gap-2" type="button" disabled={run.busy} onclick={() => { run.clear(); clearOpen = true; }}><Eraser size={16} /> {t('tn.sched.clear')}</button>
+								</div>
 							</div>
 			{/if}
 			
 			</section>
-			<section class="card card-body card-hl gap-3">
+			<section class="card card-body card-hl h-full content-start gap-3">
 				<div class="flex flex-wrap items-center justify-between gap-2">
 					<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><CalendarClock size={16} class="shrink-0" aria-hidden="true" /> {t('tn.sched.blocks')}</h2>
 					{#if canOperate}<button class="btn btn-outline btn-sm gap-1" type="button" onclick={() => openBlock(null)}><Plus size={14} /> {t('tn.sched.add_block')}</button>{/if}
@@ -221,11 +216,11 @@
 				</div>
 				<p class="text-xs text-muted">{t('tn.lunch.days_help')}</p>
 				{#if canOperate}
-					<div class="flex flex-wrap items-center gap-3">
+					<div class="flex flex-wrap items-center justify-end gap-3">
+						{#if lunchDirty}<span class="mr-auto text-xs text-muted">{t('tn.lunch.unsaved')}</span>{/if}
 						<button class="btn btn-primary gap-2" type="button" disabled={lrun.busy || !lunchDirty} onclick={saveLunch}><Save size={16} /> {t('tn.lunch.save')}</button>
 						<button class="btn btn-outline gap-2" type="button" disabled={lrun.busy || lunchDirty} onclick={() => { lrun.clear(); lgenOpen = true; }}><Wand2 size={16} /> {t('tn.lunch.generate')}</button>
 						<button class="btn btn-outline btn-error gap-2" type="button" disabled={lrun.busy} onclick={() => { lrun.clear(); lclearOpen = true; }}><Eraser size={16} /> {t('tn.lunch.clear')}</button>
-						{#if lunchDirty}<span class="text-xs text-muted">{t('tn.lunch.unsaved')}</span>{/if}
 					</div>
 				{/if}
 				{#if lresult}
@@ -247,6 +242,15 @@
 				{/if}
 			{/if}
 		</section>
+
+		<div class="flex flex-wrap items-center justify-between gap-2">
+			<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('tn.sched.games_title')}</h2>
+				<div class="flex w-fit items-center gap-1" role="group" aria-label={t('tn.sched.view')}>
+					{#each ['board', 'list'] as v (v)}
+						<button type="button" aria-pressed={view === v} onclick={() => (view = v as 'board' | 'list')} class="rounded-md px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {view === v ? 'border border-ink bg-ink text-white' : 'border border-line text-muted hover:text-ink'}">{t(`tn.sched.view_${v}`)}</button>
+					{/each}
+				</div>
+		</div>
 
 		{#if view === 'board'}
 			{#if data.board}<ScheduleBoard board={data.board} {canOperate} busy={run.busy} onmove={drop} onedit={openMove} />{/if}

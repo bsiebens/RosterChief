@@ -397,6 +397,7 @@ const rows: [string, string, string, string][] = [
 	['tn.match_status.complete', 'Played', 'Gespeeld', 'Joué'],
 	['tn.match_status.cancelled', 'Cancelled', 'Geannuleerd', 'Annulé'],
 	['tn.match_status.walkover', 'Walkover', 'Forfait', 'Forfait'],
+	['tn.sched.games_title', 'Games', 'Wedstrijden', 'Matchs'],
 	['tn.sched.unscheduled', 'Not scheduled', 'Niet ingepland', 'Non planifié'],
 	['tn.sched.reschedule', 'Reschedule match', 'Wedstrijd verplaatsen', 'Déplacer le match'],
 	['tn.sched.field', 'Field', 'Veld', 'Terrain'],
