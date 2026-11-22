@@ -56,6 +56,28 @@ def _table_rows(stage, group=None) -> list[dict]:
     return [standing_row(r) for r in [*rows, *zero]]
 
 
+def final_standings(tournament) -> list[dict]:
+    """The final ranking, once every game is played: in the last knockout stage the trailing rounds with a single tie decide ranks in
+    pairs (Final: 1st and 2nd, then 3rd place: 3rd and 4th, 5th place ...), best first. Empty until everything is complete."""
+    matches = Match.objects.filter(stage__tournament=tournament).select_related("home_team__team", "away_team__team")
+    if not matches.exists() or matches.exclude(status=Match.Status.COMPLETE).exists():
+        return []
+    stage = tournament.stages.filter(format__in=[TournamentStage.Format.SINGLE_ELIM, TournamentStage.Format.DOUBLE_ELIM]).order_by("-sequence").first()
+    if stage is None:
+        return []
+    rounds: dict[int, list] = {}
+    for m in matches.filter(stage=stage, leg_of__isnull=True):
+        rounds.setdefault(m.round_number, []).append(m)
+    out, rank = [], 1
+    for number in sorted(rounds, reverse=True):
+        ties = rounds[number]
+        if len(ties) != 1 or ties[0].winner is None:
+            break
+        out += [{"rank": rank, "team": c.team_ref(ties[0].winner)}, {"rank": rank + 1, "team": c.team_ref(ties[0].loser)}]
+        rank += 2
+    return out
+
+
 def standings_doc(tournament) -> dict:
     """``standings``: one entry per table-like stage (groups, round robin, Swiss ...) with its tables; ``brackets``: knockout stages as rounds of matches."""
     standings, brackets = [], []
@@ -68,7 +90,7 @@ def standings_doc(tournament) -> dict:
             brackets.append({"stage": c.stage_summary(stage), "rounds": c.round_groups(matches)})
         else:
             standings.append({"stage": c.stage_summary(stage), "tables": [{"group": None, "rows": _table_rows(stage)}], "attribute_columns": c.stage_attribute_columns(stage)})
-    return {"standings": standings, "brackets": brackets}
+    return {"standings": standings, "brackets": brackets, "final_standings": final_standings(tournament)}
 
 
 def stages_doc(tournament, *, with_flags=False) -> list[dict]:

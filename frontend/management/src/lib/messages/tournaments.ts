@@ -42,6 +42,7 @@ const rows: [string, string, string, string][] = [
 	['tn.tab.setup', 'Fields & stages', 'Velden & fases', 'Terrains et phases'],
 	['tn.tab.schedule', 'Schedule', 'Schema', 'Calendrier'],
 	['tn.tab.scores', 'Scores', 'Scores', 'Scores'],
+	['tn.standings.final', 'Final standings', 'Eindklassement', 'Classement final'],
 	['tn.tab.standings', 'Standings', 'Klassement', 'Classement'],
 	['tn.tab.tasks', 'Volunteer tasks', 'Vrijwilligerstaken', 'Tâches bénévoles'],
 	['tn.tab.rooms', 'Dressing rooms', 'Kleedkamers', 'Vestiaires'],

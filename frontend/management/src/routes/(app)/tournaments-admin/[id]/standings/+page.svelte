@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { Medal, Swords } from '@lucide/svelte';
+	import { Medal, Swords, Trophy } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import BracketView from '#lib/components/tournaments/BracketView.svelte';
 	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
@@ -20,6 +21,35 @@
 	{#if data.error || !s}
 		<Alert kind="error">{t('common.error.generic')}</Alert>
 	{:else}
+		{#if s.final_standings?.length}
+			{@const ranked = s.final_standings}
+			{@const podium = [ranked[1], ranked[0], ranked[2]].filter(Boolean)}
+			{@const rest = ranked.slice(3)}
+			<section class="card card-body card-hl gap-5">
+				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Trophy size={16} class="shrink-0" aria-hidden="true" /> {t('tn.standings.final')}</h2>
+				<!-- podium: 2nd on the left, 1st in the middle (the tallest), 3rd on the right -->
+				<div class="mx-auto flex w-full max-w-3xl items-end justify-center gap-3">
+					{#each podium as r (r.rank)}
+						<div class="flex min-w-0 flex-1 flex-col items-center gap-2">
+							<ClubCrest name={r.team?.name ?? ''} logoUrl={r.team?.logo_url} bg={r.team?.primary_color || undefined} size={r.rank === 1 ? 64 : 48} />
+							<div class="w-full truncate text-center font-display font-extrabold text-ink {r.rank === 1 ? 'text-lg' : 'text-base'}">{r.team?.name}</div>
+							<div class="flex w-full items-start justify-center rounded-t-lg border border-b-0 border-line pt-2 font-display text-3xl font-extrabold {r.rank === 1 ? 'h-28 bg-club text-club-content' : r.rank === 2 ? 'h-20 bg-subhead text-ink' : 'h-14 bg-paper text-ink'}">{r.rank}</div>
+						</div>
+					{/each}
+				</div>
+				{#if rest.length}
+					<ol class="grid gap-x-6 gap-y-1 sm:grid-cols-2 xl:grid-cols-3">
+						{#each rest as r (r.rank)}
+							<li class="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-paper">
+								<span class="w-6 text-right font-mono text-sm font-bold text-muted">{r.rank}</span>
+								<ClubCrest name={r.team?.name ?? ''} logoUrl={r.team?.logo_url} bg={r.team?.primary_color || undefined} size={28} />
+								<span class="min-w-0 truncate font-semibold">{r.team?.name}</span>
+							</li>
+						{/each}
+					</ol>
+				{/if}
+			</section>
+		{/if}
 		{#each s.standings as st (st.stage.id)}
 			{#each st.tables as tbl, i (i)}
 				<section class="card card-body gap-3">

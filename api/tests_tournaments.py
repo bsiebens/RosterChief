@@ -444,6 +444,18 @@ class TournamentApiTests(TestCase):
         rows = {r["team"]["name"]: r for r in self.as_("operate", "get", f"/{t.pk}/standings").json()["standings"][0]["tables"][0]["rows"]}
         self.assertEqual((rows["B"]["won"], rows["B"]["points"], rows["A"]["lost"], rows["A"]["drawn"]), (1, 3, 1, 0))
 
+    def test_final_standings_appear_once_every_game_is_played(self):
+        t = self.make()
+        a, b, c, d = (TournamentTeam.objects.create(tournament=t, foreign_name=n, foreign_contact_name="C", foreign_contact_email="c@x.test", seed=i) for i, n in enumerate("ABCD", 1))
+        stage = TournamentStage.objects.create(tournament=t, name="KO", format="single_elim")
+        third = Match.objects.create(stage=stage, round_number=2, sequence=0, home_team=c, away_team=d, status=Match.Status.SCHEDULED)
+        Match.objects.create(stage=stage, round_number=3, sequence=0, home_team=a, away_team=b, status=Match.Status.COMPLETE, score_home=1, score_away=2)
+        self.assertEqual(self.as_("operate", "get", f"/{t.pk}/standings").json()["final_standings"], [])  # the 3rd place game is still to play
+        third.status, third.score_home, third.score_away = Match.Status.COMPLETE, 4, 0
+        third.save()
+        rows = self.as_("operate", "get", f"/{t.pk}/standings").json()["final_standings"]
+        self.assertEqual([(r["rank"], r["team"]["name"]) for r in rows], [(1, "B"), (2, "A"), (3, "C"), (4, "D")])
+
     def test_reorder_hands_the_times_to_the_new_order(self):
         t = self.make(status="in_progress")
         [self.foreign(t, n) for n in ("A", "B", "C", "D")]
