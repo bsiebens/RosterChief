@@ -37,14 +37,14 @@ def _club():
 
 
 def _status_url(registration, *, request=None) -> str:
-    """The public status page of a registration: ``<club base url>/tournaments/<slug>/registration/<token>``."""
+    """The public status page of a registration: ``<club base url>/tournaments/<year>/<slug>/registration/<token>``."""
     from registration.services.notifications import base_url
 
     club = _club()
     base = base_url(club) if club is not None else ""
     if not base and request is not None:
         base = f"{request.scheme}://{request.get_host()}"
-    return f"{base}/tournaments/{registration.tournament.slug}/registration/{registration.status_token}"
+    return f"{base}{registration.tournament.public_path}/registration/{registration.status_token}"
 
 
 def _send(registration, subject: str, lines: list[str]) -> bool:

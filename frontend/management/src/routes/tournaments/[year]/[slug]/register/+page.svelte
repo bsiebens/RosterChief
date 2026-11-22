@@ -90,7 +90,7 @@
 				form.set('logo', logo);
 				await api('POST', `/public/tournaments/${encodeURIComponent(tn.slug)}/registrations/${encodeURIComponent(token)}/logo`, { form });
 			}
-			await goto(`/tournaments/${tn.slug}/registration/${token}?submitted=1`);
+			await goto(`/tournaments/${tn.path}/registration/${token}?submitted=1`);
 			return;
 		}
 		busy = false;

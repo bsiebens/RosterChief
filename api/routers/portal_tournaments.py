@@ -51,7 +51,7 @@ def _task(task_id) -> TournamentTask:
 def tournaments(request):
     _member(request)
     rows = Tournament.objects.filter(status__in=VISIBLE).annotate(shift_count=Count("tasks")).filter(shift_count__gt=0)
-    return {"results": [{"slug": t.slug, "name": t.name, "start_date": t.start_date, "end_date": t.end_date, "shift_count": t.shift_count} for t in rows]}
+    return {"results": [{"slug": t.slug, "public_path": t.public_path, "name": t.name, "start_date": t.start_date, "end_date": t.end_date, "shift_count": t.shift_count} for t in rows]}
 
 
 @router.post("/tasks/{task_id}/claim", summary="Take a slot of a shift", operation_id="portal_tournament_task_claim")

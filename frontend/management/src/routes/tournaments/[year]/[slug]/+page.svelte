@@ -40,7 +40,7 @@
 	{#if tn.description_html}<div class="prose max-w-none text-sm">{@html tn.description_html}</div>{/if}
 
 	{#if tn.accepts_registrations}
-		<a class="btn btn-primary w-full sm:w-auto sm:self-start" href="/tournaments/{tn.slug}/register">{t('tp.register_cta')}</a>
+		<a class="btn btn-primary w-full sm:w-auto sm:self-start" href="/tournaments/{tn.path}/register">{t('tp.register_cta')}</a>
 	{:else if open}
 		<p class="flex items-center gap-2 rounded-md bg-subhead px-4 py-3 text-sm text-muted" role="status"><Lock size={16} aria-hidden="true" /> {t('tp.closed.inline')}</p>
 	{/if}
@@ -49,11 +49,11 @@
 {#if tn.upcoming_matches.length}
 	<section class="card overflow-hidden" aria-labelledby="tp-next">
 		<h2 id="tp-next" class="px-4 pt-4 pb-1 font-display text-base font-bold text-ink">{t('tp.next_matches')}</h2>
-		<MatchList matches={tn.upcoming_matches} slug={tn.slug} />
-		<div class="px-4 pb-3"><a class="link text-sm" href="/tournaments/{tn.slug}/schedule">{t('tp.full_schedule')} →</a></div>
+		<MatchList matches={tn.upcoming_matches} slug={tn.path} />
+		<div class="px-4 pb-3"><a class="link text-sm" href="/tournaments/{tn.path}/schedule">{t('tp.full_schedule')} →</a></div>
 	</section>
 {/if}
 
 {#if hasTables}
-	<Standings standings={tn.standings} brackets={tn.brackets} slug={tn.slug} />
+	<Standings standings={tn.standings} brackets={tn.brackets} slug={tn.path} />
 {/if}

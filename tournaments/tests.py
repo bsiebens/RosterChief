@@ -3195,7 +3195,7 @@ class RegistrationEmailTests(TournamentsTestCase):
 
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].to, ["casey@example.com"])
-        self.assertIn(f"/tournaments/{self.tournament.slug}/registration/{self.registration.status_token}", mail.outbox[0].body)
+        self.assertIn(f"{self.tournament.public_path}/registration/{self.registration.status_token}", mail.outbox[0].body)
 
     def test_decision_wording_follows_the_status(self):
         from .services.notifications import send_registration_decision_email

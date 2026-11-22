@@ -51,7 +51,7 @@
 		<section class="grid gap-3" aria-labelledby="tv-{tn.slug}">
 			<div>
 				<h2 id="tv-{tn.slug}" class="font-display text-xl font-extrabold text-ink uppercase">{tn.name}</h2>
-				<p class="text-sm text-muted">{range(tn.start_date, tn.end_date)} · <a class="link" href="/tournaments/{tn.slug}">{t('tv.public_page')}</a></p>
+				<p class="text-sm text-muted">{range(tn.start_date, tn.end_date)} · <a class="link" href="{tn.public_path}">{t('tv.public_page')}</a></p>
 			</div>
 			{#each byDay(tn.shifts) as [day, shifts] (day)}
 				<div class="grid gap-2">

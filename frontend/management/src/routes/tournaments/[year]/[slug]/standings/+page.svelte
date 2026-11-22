@@ -9,4 +9,4 @@
 
 <svelte:head><title>{pageTitle(`${s.tournament.name} · ${t('tp.nav.standings')}`)}</title></svelte:head>
 
-<Standings standings={s.standings} brackets={s.brackets} slug={s.tournament.slug} />
+<Standings standings={s.standings} brackets={s.brackets} slug={s.tournament.path} />

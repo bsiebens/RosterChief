@@ -41,6 +41,7 @@ export type TournamentDetail = TournamentItem & {
 	default_gap_minutes: number;
 	clock_direction: 'up' | 'down';
 	ice_hockey: boolean;
+	public_path: string;
 	schedule_needs_regeneration: boolean;
 	dates: string[];
 	location: string | null;

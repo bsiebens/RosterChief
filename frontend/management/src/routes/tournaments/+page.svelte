@@ -12,7 +12,7 @@
 <svelte:head><title>{pageTitle(t('tp.list.title'))}</title></svelte:head>
 
 {#snippet row(item: TournamentItem)}
-	<a class="card card-body flex-row items-center gap-3 hover:border-ink" href="/tournaments/{item.slug}">
+	<a class="card card-body flex-row items-center gap-3 hover:border-ink" href="/tournaments/{item.path}">
 		<span class="grid size-11 shrink-0 place-items-center rounded-box bg-subhead text-ink"><Trophy size={20} aria-hidden="true" /></span>
 		<span class="min-w-0 flex-1">
 			<b class="block truncate font-display text-lg text-ink">{item.name}</b>

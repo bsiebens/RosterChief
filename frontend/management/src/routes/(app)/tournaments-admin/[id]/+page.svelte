@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { CalendarClock, CalendarDays, ClipboardList, Save, Trash2, Trophy, Wallet } from '@lucide/svelte';
+	import { CalendarClock, CalendarDays, Check, ClipboardList, Copy, ExternalLink, Globe, Save, Trash2, Trophy, Wallet } from '@lucide/svelte';
+	import { page } from '$app/state';
 	import ActionList from '#lib/components/actions/ActionList.svelte';
 	import ActionRow from '#lib/components/actions/ActionRow.svelte';
 	import Alert from '#lib/components/Alert.svelte';
@@ -18,6 +19,18 @@
 
 	let { data } = $props();
 	const tn = $derived(data.tournament);
+	/** The address of the public pages on this club's site (the management app runs on the same host). */
+	const publicUrl = $derived(`${page.url.origin}${tn.public_path}`);
+	let copied = $state(false);
+	async function copyLink() {
+		try {
+			await navigator.clipboard.writeText(publicUrl);
+			copied = true;
+			setTimeout(() => (copied = false), 2000);
+		} catch {
+			// Clipboard not available: the link is shown and can be selected by hand.
+		}
+	}
 	const run = new Runner();
 	// svelte-ignore state_referenced_locally
 	let v = $state(formOf(data.tournament));
@@ -74,6 +87,15 @@
 				{#if tn.status === 'draft'}
 					<ActionList><ActionRow icon={Trash2} danger onclick={() => { run.clear(); deleteOpen = true; }}>{t('tn.delete')}</ActionRow></ActionList>
 				{/if}
+			</div>
+		</section>
+		<section class="card card-body card-hl gap-2">
+			<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Globe size={16} aria-hidden="true" />{t('tn.card.public')}</h2>
+			<p class="text-xs text-muted">{t('tn.public.help')}</p>
+			<a class="link block font-mono text-xs break-all" href={publicUrl} target="_blank" rel="noopener">{publicUrl}</a>
+			<div class="flex flex-wrap gap-2">
+				<a class="btn btn-outline btn-sm gap-1" href={publicUrl} target="_blank" rel="noopener"><ExternalLink size={14} /> {t('tn.public.open')}</a>
+				<button class="btn btn-outline btn-sm gap-1" type="button" onclick={copyLink}>{#if copied}<Check size={14} /> {t('tn.public.copied')}{:else}<Copy size={14} /> {t('tn.public.copy')}{/if}</button>
 			</div>
 		</section>
 	</aside>

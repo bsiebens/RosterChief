@@ -8,5 +8,6 @@ export const load: LayoutServerLoad = async ({ params, fetch }) => {
 	const res = await api<TournamentDetail>('GET', `/public/tournaments/${encodeURIComponent(params.slug)}`, { f: fetch });
 	if (res.status === 429) error(429, 'rate_limited');
 	if (!res.ok || !res.data) error(res.status === 404 ? 404 : 500);
+	if (String(res.data.year) !== params.year) error(404); // /tournaments/<year>/<slug>: the year has to be the tournament's
 	return { tournament: res.data };
 };

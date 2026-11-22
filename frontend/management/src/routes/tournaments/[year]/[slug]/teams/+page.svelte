@@ -16,7 +16,7 @@
 	<ul class="card divide-y divide-rule overflow-hidden">
 		{#each data.teams.teams as team (team.id)}
 			<li>
-				<a class="flex min-h-14 items-center gap-3 px-4 py-2 hover:bg-subhead" href="/tournaments/{tn.slug}/teams/{team.slug}">
+				<a class="flex min-h-14 items-center gap-3 px-4 py-2 hover:bg-subhead" href="/tournaments/{tn.path}/teams/{team.slug}">
 					<ClubCrest name={team.name} logoUrl={team.logo_url} size={36} bg={team.primary_color || undefined} />
 					<span class="min-w-0 flex-1">
 						<b class="block truncate text-ink">{team.name}</b>

@@ -18,7 +18,7 @@
 		<h2 class="px-4 pt-4 pb-1 font-display text-base font-bold text-ink">{s.stage.name}</h2>
 		{#each s.rounds as round (round.round_number)}
 			<h3 class="px-4 pt-3 font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{round.label}</h3>
-			<MatchList matches={round.matches} slug={tn.slug} />
+			<MatchList matches={round.matches} slug={tn.path} />
 		{/each}
 	</section>
 {/each}

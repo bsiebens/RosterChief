@@ -226,6 +226,16 @@ class Tournament(UUIDModel):
             return self.event.location
         return Location.objects.filter(is_home=True).first()
 
+    @property
+    def public_key(self) -> str:
+        """``<year>/<slug>``: the tail of the public address, e.g. ``2026/summer-cup``."""
+        return f"{self.start_date.year}/{self.slug}"
+
+    @property
+    def public_path(self) -> str:
+        """The public address of the tournament's pages on the club site: ``/tournaments/<year>/<slug>``."""
+        return f"/tournaments/{self.public_key}"
+
     def date_range(self) -> list:
         """Every calendar day this tournament is played on -- e.g. the
         roster's per-day lunch picker only ever offers days the tournament

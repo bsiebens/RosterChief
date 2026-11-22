@@ -14,7 +14,7 @@
 
 <svelte:head><title>{pageTitle(`${d.team.name} · ${d.tournament.name}`)}</title></svelte:head>
 
-<a class="link inline-flex items-center gap-1 text-sm" href="/tournaments/{d.tournament.slug}/teams"><ChevronLeft size={14} aria-hidden="true" /> {t('tp.nav.teams')}</a>
+<a class="link inline-flex items-center gap-1 text-sm" href="/tournaments/{d.tournament.path}/teams"><ChevronLeft size={14} aria-hidden="true" /> {t('tp.nav.teams')}</a>
 
 <section class="card card-body flex-row items-center gap-4">
 	<ClubCrest name={d.team.name} logoUrl={d.team.logo_url} size={64} bg={d.team.primary_color || undefined} />
@@ -38,7 +38,7 @@
 <section class="card overflow-hidden" aria-labelledby="tp-matches">
 	<h2 id="tp-matches" class="px-4 pt-4 pb-1 font-display text-base font-bold text-ink">{t('tp.team.matches')}</h2>
 	{#if d.matches.length}
-		<MatchList matches={d.matches} slug={d.tournament.slug} highlight={d.team.slug} />
+		<MatchList matches={d.matches} slug={d.tournament.path} highlight={d.team.slug} />
 	{:else}
 		<p class="px-4 pb-4 text-sm text-muted">{t('tp.team.no_matches')}</p>
 	{/if}

@@ -7,7 +7,7 @@
 	let { data, children } = $props();
 	const tn = $derived(data.tournament);
 	const club = $derived(data.mode === 'club' ? data.branding : null);
-	const base = $derived(`/tournaments/${tn.slug}`);
+	const base = $derived(`/tournaments/${tn.path}`);
 	const tabs = $derived([
 		{ href: base, label: t('tp.nav.overview'), exact: true },
 		{ href: `${base}/schedule`, label: t('tp.nav.schedule') },

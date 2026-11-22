@@ -121,7 +121,7 @@
 		<p class="text-sm text-muted">{t('tp.status.pending_body')}</p>
 	{:else if r.status === 'approved'}
 		<Alert kind="success" title={t('tp.status.approved_title')}>{t('tp.status.approved_body')}</Alert>
-		{#if reg.team}<a class="link text-sm" href="/tournaments/{tn.slug}/teams/{reg.team.slug}">{t('tp.status.team_page')} →</a>{/if}
+		{#if reg.team}<a class="link text-sm" href="/tournaments/{tn.path}/teams/{reg.team.slug}">{t('tp.status.team_page')} →</a>{/if}
 	{:else}
 		<Alert kind="error" title={t('tp.status.rejected_title')}>{r.rejection_reason || t('tp.status.rejected_body')}</Alert>
 	{/if}

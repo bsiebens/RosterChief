@@ -35,7 +35,7 @@ def _money(value):
 
 def tournament_item(t: Tournament) -> dict:
     return {
-        "id": t.pk, "slug": t.slug, "name": t.name, "season": c.ref(t.season), "start_date": t.start_date, "end_date": t.end_date, "status": t.status,
+        "id": t.pk, "slug": t.slug, "public_path": t.public_path, "name": t.name, "season": c.ref(t.season), "start_date": t.start_date, "end_date": t.end_date, "status": t.status,
         "registration_open": t.registration_open, "max_teams": t.max_teams, "accepts_registrations": t.accepts_registrations,
         "pending_registration_count": getattr(t, "pending_registration_count", None), "teams_in_count": getattr(t, "teams_in_count", None),
     }  # fmt: skip

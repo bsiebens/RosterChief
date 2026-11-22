@@ -579,6 +579,11 @@ class TournamentApiTests(TestCase):
         self.assertEqual((r.status_code, r.json()["clock_direction"]), (200, "down"), r.content)
         self.assertEqual(self.as_("manage", "patch", f"/{t.pk}", {"clock_direction": "sideways"}).status_code, 422)
 
+    def test_public_path_has_the_year_and_slug(self):
+        t = self.make(name="Summer Cup")
+        self.assertEqual(t.public_path, f"/tournaments/2026/{t.slug}")
+        self.assertEqual(self.as_("manage", "get", f"/{t.pk}").json()["public_path"], f"/tournaments/2026/{t.slug}")
+
     def test_delete_only_a_draft_tournament(self):
         body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}
         tid = self.as_("manage", "post", "", body).json()["id"]

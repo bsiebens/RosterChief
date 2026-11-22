@@ -3,7 +3,7 @@ import { getLang } from '#lib/i18n.svelte.ts';
 
 export type TournamentStatus = 'draft' | 'published' | 'in_progress' | 'completed' | 'cancelled';
 export type LunchMode = 'none' | 'optional' | 'mandatory';
-export type TournamentItem = { slug: string; name: string; start_date: string; end_date: string; status: TournamentStatus; location: string | null; accepts_registrations: boolean };
+export type TournamentItem = { slug: string; year: number; path: string; name: string; start_date: string; end_date: string; status: TournamentStatus; location: string | null; accepts_registrations: boolean };
 export type TournamentList = { upcoming: TournamentItem[]; past: TournamentItem[] };
 
 export type TeamRef = { id: string; name: string; slug: string; logo_url: string | null; primary_color: string; secondary_color: string };
@@ -86,7 +86,7 @@ export type RegistrationStatus = {
 	amount_owed: string | null;
 };
 
-export type PortalShiftTournament = { slug: string; name: string; start_date: string; end_date: string; shift_count: number };
+export type PortalShiftTournament = { slug: string; public_path: string; name: string; start_date: string; end_date: string; shift_count: number };
 export type PortalShift = { id: string; title: string; description: string; starts_at: string; ends_at: string; location_label: string; needed: number; claimed: number; open_slots: number; is_full: boolean; claimed_by_me: boolean; claimed_by: string[] };
 
 /** One editable person row of the registration form. Numbers and dates are kept as the input strings. */
