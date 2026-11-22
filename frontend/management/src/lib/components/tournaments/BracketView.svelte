@@ -140,9 +140,9 @@
 				const y1 = from.y + H / 2;
 				const y2 = n.y + CAP + ROW / 2 + (side === 'home_source' ? 0 : ROW);
 				// the vertical part runs in the gap right after the source column; the rest is straight, so nothing is hidden behind a box
-				// every game gets its own vertical track in the gap, so lines of different games never run on top of each other
-				const track = (Math.round(from.y / STEP) % 5) * 8;
-				const bend = x1 + 10 + track + (s.is_winner ? 0 : 4);
+				// Winner lines all bend in the middle of the gap, so they look exactly alike; the (hover-only) loser lines get their own tracks beside them
+				const track = s.is_winner ? 0 : 8 + (Math.round(from.y / STEP) % 4) * 6;
+				const bend = x1 + GAP / 2 + track;
 				out.push({ d: `M${x1} ${y1} H${bend} V${y2} H${x2 - 1}`, loser: !s.is_winner, from: s.match_id, to: n.m.id, sameLane: from.lane === n.lane });
 			}
 		}
