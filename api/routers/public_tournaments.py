@@ -70,7 +70,8 @@ def maps_url(location) -> str | None:
 def item(t: Tournament) -> dict:
     location = t.location
     return {
-        "slug": t.slug, "year": t.start_date.year, "path": t.public_key, "name": t.name, "start_date": t.start_date, "end_date": t.end_date, "days": c.days_out(t), "status": t.status, "location": location.name if location else None, "location_address": _address_line(location), "maps_url": maps_url(location),
+        "slug": t.slug, "year": t.start_date.year, "path": t.public_key, "name": t.name, "start_date": t.start_date, "end_date": t.end_date, "days": c.days_out(t), "status": t.status, "location": location.name if location else None,
+        "location_address": _address_line(location), "maps_url": maps_url(location),
         "accepts_registrations": t.accepts_registrations and t.status in OPEN_FOR_REGISTRATION,
     }  # fmt: skip
 
