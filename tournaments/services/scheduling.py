@@ -21,7 +21,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from ..models import BreakRule, Match, ScheduleBlock, Tournament, TournamentGroup, TournamentStage, TournamentTeam
+from ..models import BreakRule, Match, MatchAttribute, MatchAttributeValue, ScheduleBlock, Tournament, TournamentGroup, TournamentStage, TournamentTeam
 from .brackets import BracketError, double_elimination_bracket, double_elimination_placement_bracket, single_elimination_bracket, single_elimination_placement_bracket
 
 #: The one thing every tournament falls back to when no BreakRule fires --
@@ -814,18 +814,57 @@ def validate_placement(match, field, start: datetime.datetime, end: datetime.dat
 # --------------------------------------------------------------------------
 
 
-DEFAULT_STANDINGS_CONFIG = {"points": {"win": 3, "draw": 1, "loss": 0}, "tiebreakers": ["goal_diff", "goals_for"]}
+#: The built-in tie-break criteria with the direction that normally applies: "most" ranks the highest value first, "least" the lowest.
+#: Custom match attributes are ``attr:<key>`` (default "most").
+BUILTIN_TIEBREAKERS = {"goal_diff": "most", "goals_for": "most", "goals_against": "least", "wins": "most", "head_to_head": "most"}
+DIRECTIONS = ("most", "least")
+ATTR_PREFIX = "attr:"
+#: Spellings an older stage may still hold (the first API versions called "wins" "won").
+_LEGACY_CRITERIA = {"won": "wins"}
+
+DEFAULT_STANDINGS_CONFIG = {"points": {"win": 3, "draw": 1, "loss": 0}, "tiebreakers": [{"criterion": "goal_diff", "direction": "most"}, {"criterion": "goals_for", "direction": "most"}]}
+
+
+def default_direction(criterion: str) -> str:
+    return BUILTIN_TIEBREAKERS.get(criterion, "most")
+
+
+def normalise_tiebreakers(raw) -> list[dict]:
+    """A stored/submitted tie-break chain as ``[{"criterion", "direction"}]``. Reads the old shape too (a list of plain strings, each with
+    its criterion's default direction); duplicates and entries without a criterion are dropped, an invalid direction falls back to the default."""
+    out, seen = [], set()
+    for item in raw or []:
+        criterion, direction = (item, None) if isinstance(item, str) else ((item or {}).get("criterion"), (item or {}).get("direction"))
+        criterion = _LEGACY_CRITERIA.get(criterion, criterion)
+        if not criterion or criterion in seen:
+            continue
+        seen.add(criterion)
+        out.append({"criterion": criterion, "direction": direction if direction in DIRECTIONS else default_direction(criterion)})
+    return out
+
+
+def stage_tiebreakers(stage: TournamentStage) -> list[dict]:
+    """The stage's normalised tie-break chain; a stage that never stored one gets the default (goal difference, then goals for)."""
+    config = stage.standings_config or {}
+    if "tiebreakers" not in config:
+        return normalise_tiebreakers(DEFAULT_STANDINGS_CONFIG["tiebreakers"])
+    return normalise_tiebreakers(config["tiebreakers"])
 
 
 def compute_standings(stage: TournamentStage, *, group: TournamentGroup | None = None) -> list[dict]:
     """Points-then-tie-break standings for a stage (or one of its groups),
     computed fresh from completed matches every time rather than stored --
     ``stage.standings_config`` supplies the points-per-result and the
-    tie-break chain (goal_diff/goals_for first, then a mini-table among
-    just the tied teams for head_to_head, the standard way to resolve a
-    3-plus-way tie without it depending on match order)."""
+    tie-break chain (an ordered list of ``{criterion, direction}``: goal_diff,
+    goals_for, goals_against, wins, head_to_head -- a mini-table among just
+    the tied teams, the standard way to resolve a 3-plus-way tie without it
+    depending on match order -- or ``attr:<key>`` for a match attribute's
+    total). Every row also carries ``attributes``: the team's total of each
+    tournament match attribute over its completed matches."""
     config = {**DEFAULT_STANDINGS_CONFIG, **(stage.standings_config or {})}
     points_config = config["points"]
+    tiebreakers = stage_tiebreakers(stage)
+    attribute_keys = list(MatchAttribute.objects.filter(tournament_id=stage.tournament_id).values_list("key", flat=True))
 
     matches = stage.matches.filter(status=Match.Status.COMPLETE, score_home__isnull=False, score_away__isnull=False)
     if group is not None:
@@ -834,7 +873,12 @@ def compute_standings(stage: TournamentStage, *, group: TournamentGroup | None =
     rows: dict = {}
 
     def row_for(team):
-        return rows.setdefault(team.id, {"team": team, "played": 0, "won": 0, "drawn": 0, "lost": 0, "points": 0, "goals_for": 0, "goals_against": 0})
+        return rows.setdefault(team.id, {"team": team, "played": 0, "won": 0, "drawn": 0, "lost": 0, "points": 0, "goals_for": 0, "goals_against": 0, "attributes": dict.fromkeys(attribute_keys, 0)})
+
+    values: dict = {}
+    if attribute_keys:
+        for value in MatchAttributeValue.objects.filter(match__in=matches).select_related("attribute"):
+            values.setdefault(value.match_id, []).append(value)
 
     for match in matches.select_related("home_team", "away_team"):
         if match.home_team is None or match.away_team is None:
@@ -846,6 +890,9 @@ def compute_standings(stage: TournamentStage, *, group: TournamentGroup | None =
         home["goals_against"] += match.score_away
         away["goals_for"] += match.score_away
         away["goals_against"] += match.score_home
+        for value in values.get(match.pk, []):
+            home["attributes"][value.attribute.key] += value.home_value
+            away["attributes"][value.attribute.key] += value.away_value
 
         if match.score_home > match.score_away:
             home["won"] += 1
@@ -866,10 +913,11 @@ def compute_standings(stage: TournamentStage, *, group: TournamentGroup | None =
     for row in rows.values():
         row["goal_diff"] = row["goals_for"] - row["goals_against"]
 
-    return _ranked(list(rows.values()), config["tiebreakers"])
+    return _ranked(list(rows.values()), tiebreakers)
 
 
-def _ranked(rows: list[dict], tiebreakers: list[str]) -> list[dict]:
+def _ranked(rows: list[dict], tiebreakers: list) -> list[dict]:
+    tiebreakers = normalise_tiebreakers(tiebreakers)
     rows.sort(key=lambda row: row["points"], reverse=True)
     ranked: list[dict] = []
     for _points, group in _group_by(rows, key=lambda row: row["points"]):
@@ -890,11 +938,21 @@ def _group_by(rows, *, key):
     return groups
 
 
-def _break_ties(tied_rows: list[dict], tiebreakers: list[str]) -> list[dict]:
+def _criterion_value(row: dict, criterion: str):
+    if criterion == "wins":
+        return row["won"]
+    if criterion.startswith(ATTR_PREFIX):
+        return row.get("attributes", {}).get(criterion[len(ATTR_PREFIX) :], 0)
+    return row.get(criterion, 0)
+
+
+def _break_ties(tied_rows: list[dict], tiebreakers: list[dict]) -> list[dict]:
+    """Orders ``tied_rows`` by the first criterion, then breaks only the teams still level with the rest of the chain."""
     if len(tied_rows) <= 1 or not tiebreakers:
         return tied_rows
 
-    criterion, *rest = tiebreakers
+    (current, *rest) = tiebreakers
+    criterion, most = current["criterion"], current["direction"] != "least"
     if criterion == "head_to_head":
         team_ids = {row["team"].id for row in tied_rows}
         mini_table = {row["team"].id: 0 for row in tied_rows}
@@ -907,11 +965,10 @@ def _break_ties(tied_rows: list[dict], tiebreakers: list[str]) -> list[dict]:
             else:
                 mini_table[match.home_team_id] += 1
                 mini_table[match.away_team_id] += 1
-        tied_rows = sorted(tied_rows, key=lambda row: mini_table[row["team"].id], reverse=True)
         sort_key = lambda row: mini_table[row["team"].id]  # noqa: E731
     else:
-        sort_key = lambda row: row.get(criterion, 0)  # noqa: E731
-        tied_rows = sorted(tied_rows, key=sort_key, reverse=True)
+        sort_key = lambda row: _criterion_value(row, criterion)  # noqa: E731
+    tied_rows = sorted(tied_rows, key=sort_key, reverse=most)
 
     result: list[dict] = []
     for _value, group in _group_by(tied_rows, key=sort_key):

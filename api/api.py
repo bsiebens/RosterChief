@@ -65,6 +65,7 @@ from .routers import tournaments_logistics as tournaments_logistics_router
 from .routers import tournaments_lunch as tournaments_lunch_router
 from .routers import tournaments_roster as tournaments_roster_router
 from .routers import tournaments_setup as tournaments_setup_router
+from .routers import tournaments_timeline as tournaments_timeline_router
 from .routers import web_push as web_push_router
 from .schemas import BrandingOut, MeOut, MyClubOut
 
@@ -114,6 +115,7 @@ api.add_router("/tournaments", tournaments_router.router, tags=["tournaments"])
 api.add_router("/tournaments", tournaments_roster_router.router, tags=["tournaments"])
 api.add_router("/tournaments", tournaments_competition_router.router, tags=["tournaments"])
 api.add_router("/tournaments", tournaments_setup_router.router, tags=["tournaments"])
+api.add_router("/tournaments", tournaments_timeline_router.router, tags=["tournaments"])
 api.add_router("/tournaments", tournaments_logistics_router.router, tags=["tournaments"])
 api.add_router("/tournaments", tournaments_lunch_router.router, tags=["tournaments"])
 api.add_router("/dressing-rooms", tournaments_logistics_router.rooms_router, tags=["tournaments"])

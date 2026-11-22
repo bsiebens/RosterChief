@@ -16,7 +16,7 @@ from api.routers import tournaments_common as c
 from api.schemas_tournaments import BlockIn, BlockPatch, GenerateScheduleIn, MatchCreateIn, MatchTeamsPatch, RescheduleIn, ResultIn
 from formbuilder.services.management import Conflict
 from members.services.errors import Invalid
-from tournaments.models import Match, ScheduleBlock, Tournament, TournamentGroup, TournamentStage, TournamentTeam
+from tournaments.models import Match, MatchAttribute, MatchAttributeValue, ScheduleBlock, Tournament, TournamentGroup, TournamentStage, TournamentTeam
 from tournaments.services import scheduling as svc
 
 router = Router(auth=AUTHENTICATORS)
@@ -33,6 +33,7 @@ def standing_row(row: dict) -> dict:
     return {
         "rank": row.get("rank"), "team": c.team_ref(row["team"]), "played": row["played"], "won": row["won"], "drawn": row["drawn"], "lost": row["lost"], "points": row["points"],
         "goals_for": row["goals_for"], "goals_against": row["goals_against"], "goal_diff": row.get("goal_diff", row["goals_for"] - row["goals_against"]),
+        "attributes": row.get("attributes", {}),
     }  # fmt: skip
 
 
@@ -47,8 +48,9 @@ def _table_rows(stage, group=None) -> list[dict]:
         for team in (match.home_team, match.away_team):
             if team is not None and team.id not in seen:
                 idle[team.id] = team
+    keys = list(MatchAttribute.objects.filter(tournament_id=stage.tournament_id).values_list("key", flat=True))
     zero = [
-        {"team": team, "played": 0, "won": 0, "drawn": 0, "lost": 0, "points": 0, "goals_for": 0, "goals_against": 0, "goal_diff": 0, "rank": len(rows) + i}
+        {"team": team, "played": 0, "won": 0, "drawn": 0, "lost": 0, "points": 0, "goals_for": 0, "goals_against": 0, "goal_diff": 0, "attributes": dict.fromkeys(keys, 0), "rank": len(rows) + i}
         for i, team in enumerate(sorted(idle.values(), key=lambda t: t.display_name.lower()), start=1)
     ]
     return [standing_row(r) for r in [*rows, *zero]]
@@ -60,12 +62,12 @@ def standings_doc(tournament) -> dict:
     for stage in tournament.stages.order_by("sequence").prefetch_related("groups"):
         if stage.format == TournamentStage.Format.GROUPS:
             tables = [{"group": c.group_ref(g), "rows": _table_rows(stage, g)} for g in stage.groups.filter(matches__isnull=False).distinct().order_by("sequence")]
-            standings.append({"stage": c.stage_summary(stage), "tables": tables})
+            standings.append({"stage": c.stage_summary(stage), "tables": tables, "attribute_columns": c.stage_attribute_columns(stage)})
         elif stage.format in (TournamentStage.Format.SINGLE_ELIM, TournamentStage.Format.DOUBLE_ELIM):
             matches = list(stage.matches.select_related("home_team__team", "away_team__team", "home_source_match", "away_source_match", "home_source_group", "away_source_group").order_by("round_number", "sequence"))
             brackets.append({"stage": c.stage_summary(stage), "rounds": c.round_groups(matches)})
         else:
-            standings.append({"stage": c.stage_summary(stage), "tables": [{"group": None, "rows": _table_rows(stage)}]})
+            standings.append({"stage": c.stage_summary(stage), "tables": [{"group": None, "rows": _table_rows(stage)}], "attribute_columns": c.stage_attribute_columns(stage)})
     return {"standings": standings, "brackets": brackets}
 
 
@@ -127,6 +129,7 @@ def board(request, tournament_id: uuid.UUID):
         days = []
         for day in entry["days"]:
             slots = []
+            c.prime_matches([slot["match"] for slot in day["slots"] if slot["type"] == "match"])
             for slot in day["slots"]:
                 doc = {k: slot[k] for k in ("type", "start", "end", "minutes", "height_px", "top_px")}
                 if slot["type"] == "match":
@@ -191,15 +194,32 @@ def reschedule(request, match_id: uuid.UUID, payload: RescheduleIn):
     return c.match_out(_match(match_id))
 
 
+def _manual_values(tournament, submitted) -> list:
+    """``[(attribute, value)]`` for the submitted manual attribute values; an unknown key or a timeline attribute is a 422."""
+    out = []
+    by_key = {a.key: a for a in tournament.match_attributes.all()}
+    for key, value in (submitted or {}).items():
+        attribute = by_key.get(key)
+        if attribute is None or attribute.source != MatchAttribute.Source.MANUAL:
+            message = "Unknown attribute." if attribute is None else "This attribute comes from the timeline and cannot be entered by hand."
+            raise Invalid(message, {f"attributes.{key}": [message]})
+        out.append((attribute, value))
+    return out
+
+
 @router.post("/matches/{match_id}/result", summary="Enter the final score; later bracket slots fill in from it", operation_id="tournaments_match_result")
 def result(request, match_id: uuid.UUID, payload: ResultIn):
     c.gate_operate(request)
     match = _match(match_id)
     if match.home_team_id is None or match.away_team_id is None:
         raise Invalid("Both teams must be known before a score can be recorded.", {"detail": ["Both teams must be known before a score can be recorded."]}, code="teams_unknown")
-    updated = svc.record_result(
-        match, score_home=payload.score_home, score_away=payload.score_away, went_to_overtime=payload.went_to_overtime, penalty_home=payload.penalty_home, penalty_away=payload.penalty_away
-    )  # fmt: skip
+    values = _manual_values(match.stage.tournament, payload.attributes)
+    with transaction.atomic():
+        updated = svc.record_result(
+            match, score_home=payload.score_home, score_away=payload.score_away, went_to_overtime=payload.went_to_overtime, penalty_home=payload.penalty_home, penalty_away=payload.penalty_away
+        )  # fmt: skip
+        for attribute, value in values:
+            MatchAttributeValue.objects.update_or_create(match=match, attribute=attribute, defaults={"home_value": value.home, "away_value": value.away})
     return {"match": c.match_out(_match(match_id)), "updated_match_ids": [m.pk for m in updated]}
 
 

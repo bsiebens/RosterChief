@@ -14,7 +14,7 @@ from api.routers.tournaments_competition import _scheduling
 from api.schemas_tournaments import BreakRuleIn, BreakRulePatch, FieldIn, FieldPatch, GenerateMatchesIn, NextPhaseIn, SeedIn, StageIn, StagePatch
 from formbuilder.services.management import Conflict
 from members.services.errors import Invalid
-from tournaments.models import BreakRule, Match, TournamentField, TournamentGroup, TournamentStage, TournamentTeam
+from tournaments.models import BreakRule, Match, MatchAttribute, TournamentField, TournamentGroup, TournamentStage, TournamentTeam
 from tournaments.services import scheduling as svc
 
 router = Router(auth=AUTHENTICATORS)
@@ -76,8 +76,36 @@ def _stage_values(stage: TournamentStage, payload: dict):
         stage.config["placement"] = True  # a full ranking: the losers play on until every place is decided
     stage.standings_config = {
         "points": {"win": merged.get("points_win", 3), "draw": merged.get("points_draw", 1), "loss": merged.get("points_loss", 0)},
-        "tiebreakers": [v for v in (merged.get("tiebreaker_1"), merged.get("tiebreaker_2")) if v] or ["goal_diff", "goals_for"],
+        "tiebreakers": _tiebreakers(stage, payload),
     }  # fmt: skip
+
+
+def _tiebreakers(stage: TournamentStage, payload: dict) -> list[dict]:
+    """The stage's tie-break chain from the payload: ``tiebreakers`` (a list of ``{criterion, direction}``), else the old
+    ``tiebreaker_1``/``tiebreaker_2`` fields (a missing one keeps what the stage has), else what the stage already has (the default for a
+    new one). Validated: a built-in criterion or ``attr:<key>`` of an existing attribute of this tournament, no duplicates."""
+    current = svc.stage_tiebreakers(stage)
+    if payload.get("tiebreakers") is not None:
+        raw = [{"criterion": t["criterion"], "direction": t.get("direction")} for t in payload["tiebreakers"]]
+    elif "tiebreaker_1" in payload or "tiebreaker_2" in payload:
+        old = [t["criterion"] for t in current]
+        first = payload["tiebreaker_1"] if "tiebreaker_1" in payload else (old[0] if old else None)
+        second = payload["tiebreaker_2"] if "tiebreaker_2" in payload else (old[1] if len(old) > 1 else None)
+        raw = [v for v in (first, second) if v]
+    else:
+        return current
+    keys = set(MatchAttribute.objects.filter(tournament_id=stage.tournament_id).values_list("key", flat=True))
+    seen = set()
+    for index, item in enumerate(raw):
+        criterion = item["criterion"] if isinstance(item, dict) else item
+        criterion = svc._LEGACY_CRITERIA.get(criterion, criterion)
+        known = criterion in svc.BUILTIN_TIEBREAKERS or (criterion.startswith(svc.ATTR_PREFIX) and criterion[len(svc.ATTR_PREFIX) :] in keys)
+        if not known:
+            raise Invalid(f"Unknown tie-breaker: {criterion}.", {f"tiebreakers.{index}.criterion": [f"Unknown tie-breaker: {criterion}."]})
+        if criterion in seen:
+            raise Invalid(f"Tie-breaker used twice: {criterion}.", {f"tiebreakers.{index}.criterion": [f"Tie-breaker used twice: {criterion}."]})
+        seen.add(criterion)
+    return svc.normalise_tiebreakers(raw)
 
 
 @router.get("/{tournament_id}/setup", summary="Fields, stages and break rules of a tournament", operation_id="tournaments_setup")
@@ -133,7 +161,7 @@ def create_stage(request, tournament_id: uuid.UUID, payload: StageIn):
     c.gate_operate(request)
     t = c.get_tournament(tournament_id)
     stage = TournamentStage(tournament=t)
-    data = payload.dict()
+    data = payload.dict(exclude={k for k in ("tiebreakers", "tiebreaker_1", "tiebreaker_2") if k not in payload.model_fields_set})  # an unsent tie-break setting keeps the default
     if data.get("sequence") is None:
         last = t.stages.aggregate(Max("sequence"))["sequence__max"]
         data["sequence"] = 0 if last is None else last + 1
