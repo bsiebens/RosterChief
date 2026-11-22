@@ -185,14 +185,12 @@
 		{#if gap}
 			<Alert kind="warning" title={t('tn.tasks.gap_title')}>{t('tn.tasks.gap_body', { shift: duration(gap.shift), full: gap.full, left: duration(gap.left) })}</Alert>
 			<div class="grid gap-2 sm:grid-cols-2">
-				<button class="btn btn-outline h-auto flex-col items-start gap-0.5 py-2 text-left normal-case" type="button" disabled={run.busy} onclick={() => generate(null, 'shorter')}>
-					<span class="font-semibold">{t('tn.tasks.gap_shorter')}</span>
-					<span class="text-xs font-normal text-muted">{t('tn.tasks.gap_shorter_help', { left: duration(gap.left) })}</span>
-				</button>
-				<button class="btn btn-outline h-auto flex-col items-start gap-0.5 py-2 text-left normal-case" type="button" disabled={run.busy} onclick={() => generate(null, 'extend')}>
-					<span class="font-semibold">{t('tn.tasks.gap_extend')}</span>
-					<span class="text-xs font-normal text-muted">{t('tn.tasks.gap_extend_help', { total: duration(gap.shift + gap.left) })}</span>
-				</button>
+				{#each [{ key: 'shorter', title: 'tn.tasks.gap_shorter', help: t('tn.tasks.gap_shorter_help', { left: duration(gap.left) }) }, { key: 'extend', title: 'tn.tasks.gap_extend', help: t('tn.tasks.gap_extend_help', { total: duration(gap.shift + gap.left) }) }] as opt (opt.key)}
+					<button class="flex cursor-pointer flex-col gap-1 rounded-lg border-2 border-line bg-white p-3 text-left font-sans text-sm tracking-normal whitespace-normal normal-case hover:border-ink disabled:opacity-60" type="button" disabled={run.busy} onclick={() => generate(null, opt.key as 'shorter' | 'extend')}>
+						<span class="font-semibold text-ink">{t(opt.title)}</span>
+						<span class="text-xs leading-snug font-normal text-muted">{opt.help}</span>
+					</button>
+				{/each}
 			</div>
 		{/if}
 		<div class="modal-action mt-2 flex justify-end gap-2">
