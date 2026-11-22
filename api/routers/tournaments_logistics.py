@@ -70,17 +70,21 @@ def print_tasks(request, tournament_id: uuid.UUID):
     return {"timeline_start": start, "timeline_end": end, "locations": locations}
 
 
-@router.post("/{tournament_id}/tasks/generate", summary="Create a run of same-length shifts between two times", operation_id="tournaments_tasks_generate", response={201: dict})
+@router.post("/{tournament_id}/tasks/generate", summary="Create a run of same-length shifts between two times", operation_id="tournaments_tasks_generate", response={200: dict, 201: dict})
 def generate_tasks(request, tournament_id: uuid.UUID, payload: TaskGenerateIn):
     c.gate_operate(request)
     t = c.get_tournament(tournament_id)
     if payload.ends_at <= payload.starts_at:
         raise Invalid("Must be after the start time.", {"ends_at": ["Must be after the start time."]})
+    full, left = tasks_svc.shift_remainder(payload.starts_at, payload.ends_at, payload.shift_minutes)
+    if left and full and payload.remainder is None:
+        # The period does not divide into whole shifts: nothing is created until staff chose between a shorter last shift and a longer one.
+        return 200, {"needs_decision": True, "created_count": 0, "full_shifts": full, "remainder_minutes": left, "shift_minutes": payload.shift_minutes, "results": []}
     tasks, extended = tasks_svc.generate_task_shifts(
         t, title=payload.title, location_label=payload.location_label, starts_at=payload.starts_at, ends_at=payload.ends_at, shift_minutes=payload.shift_minutes,
-        needed_quantity=payload.needed_quantity, created_by=_creator(request),
+        needed_quantity=payload.needed_quantity, created_by=_creator(request), remainder=payload.remainder or "extend",
     )  # fmt: skip
-    return 201, {"created_count": len(tasks), "last_shift_extended": extended, "results": [task_out(_task(t, task.pk)) for task in tasks]}
+    return 201, {"needs_decision": False, "created_count": len(tasks), "last_shift_extended": extended, "results": [task_out(_task(t, task.pk)) for task in tasks]}
 
 
 @router.post("/{tournament_id}/tasks/clear", summary="Remove every shift of the tournament, with the volunteers signed up for them", operation_id="tournaments_tasks_clear")

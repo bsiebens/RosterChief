@@ -531,6 +531,25 @@ class TournamentApiTests(TestCase):
         self.assertEqual(self.as_("operate", "post", f"/{t.pk}/tasks/clear", {}).json(), {"cleared_count": 3})
         self.assertEqual(self.as_("operate", "get", f"/{t.pk}/tasks").json()["results"], [])
 
+    def test_generate_shifts_asks_what_to_do_with_a_gap(self):
+        t = self.make()
+        gen = {"title": "Clock", "starts_at": "2026-09-19T09:00:00Z", "ends_at": "2026-09-19T18:00:00Z", "shift_minutes": 120, "needed_quantity": 1}
+        r = self.as_("operate", "post", f"/{t.pk}/tasks/generate", gen)
+        self.assertEqual((r.status_code, r.json()["needs_decision"], r.json()["full_shifts"], r.json()["remainder_minutes"]), (200, True, 4, 60), r.content)
+        self.assertEqual(t.tasks.count(), 0)  # nothing is created until the choice is made
+        r = self.as_("operate", "post", f"/{t.pk}/tasks/generate", {**gen, "remainder": "shorter"})
+        self.assertEqual((r.status_code, r.json()["created_count"]), (201, 5))
+        self.assertEqual(sorted((x.ends_at - x.starts_at).seconds // 60 for x in t.tasks.all()), [60, 120, 120, 120, 120])
+        t.tasks.all().delete()
+        r = self.as_("operate", "post", f"/{t.pk}/tasks/generate", {**gen, "remainder": "extend"})
+        self.assertEqual((r.json()["created_count"], r.json()["last_shift_extended"]), (4, True))
+        self.assertEqual(max((x.ends_at - x.starts_at).seconds // 60 for x in t.tasks.all()), 180)
+        # an exact fit never asks, and a window shorter than one shift is one shift
+        t.tasks.all().delete()
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/tasks/generate", {**gen, "ends_at": "2026-09-19T17:00:00Z"}).json()["created_count"], 4)
+        t.tasks.all().delete()
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/tasks/generate", {**gen, "ends_at": "2026-09-19T10:00:00Z"}).json()["created_count"], 1)
+
     def test_delete_only_a_draft_tournament(self):
         body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}
         tid = self.as_("manage", "post", "", body).json()["id"]

@@ -52,14 +52,30 @@
 	// --- generate shifts
 	let genOpen = $state(false);
 	let g = $state({ title: '', location_label: '', dates: [] as string[], from: '', to: '', shift_minutes: '60', needed_quantity: '2' });
+	/** The period does not divide into whole shifts: staff choose between a shorter last shift and a longer one before anything is created. */
+	let gap = $state<{ full: number; left: number; shift: number } | null>(null);
+	const duration = (minutes: number) => (minutes % 60 === 0 ? `${minutes / 60} h` : minutes > 60 ? `${Math.floor(minutes / 60)} h ${minutes % 60} min` : `${minutes} min`);
 	/** One run per chosen day, with the same hours on each. */
-	async function generate(e: SubmitEvent) {
-		e.preventDefault();
+	async function generate(e: SubmitEvent | null, remainder?: 'extend' | 'shorter') {
+		e?.preventDefault();
 		if (!g.dates.length) return void (run.error = t('tn.tasks.pick_day'));
+		gap = null;
 		let created = 0;
 		for (const date of g.dates) {
-			const body = { title: g.title.trim(), location_label: g.location_label.trim(), starts_at: fromLocalInput(`${date}T${g.from}`), ends_at: fromLocalInput(`${date}T${g.to}`), shift_minutes: Number(g.shift_minutes), needed_quantity: Number(g.needed_quantity) };
-			if (!(await run.post<{ created_count: number }>(`${base}/generate`, body, (d) => void (created += d?.created_count ?? 0), { notice: '' }))) return;
+			const body = { title: g.title.trim(), location_label: g.location_label.trim(), starts_at: fromLocalInput(`${date}T${g.from}`), ends_at: fromLocalInput(`${date}T${g.to}`), shift_minutes: Number(g.shift_minutes), needed_quantity: Number(g.needed_quantity), ...(remainder ? { remainder } : {}) };
+			let undecided = false;
+			const ok = await run.post<{ created_count: number; needs_decision?: boolean; full_shifts?: number; remainder_minutes?: number }>(
+				`${base}/generate`,
+				body,
+				(d) => {
+					if (d?.needs_decision) {
+						undecided = true;
+						gap = { full: d.full_shifts ?? 0, left: d.remainder_minutes ?? 0, shift: Number(g.shift_minutes) };
+					} else created += d?.created_count ?? 0;
+				},
+				{ notice: '' }
+			);
+			if (!ok || undecided) return; // every chosen day has the same hours, so the question comes up on the first day, before anything exists
 		}
 		run.notice = t('tn.tasks.generated', { n: created });
 		genOpen = false;
@@ -85,7 +101,7 @@
 {#snippet actions()}
 	<a class="btn btn-outline gap-2" href="{TBASE}/{hdr.id}/tasks/print"><Printer size={16} /> {t('tn.tasks.print')}</a>
 	{#if hdr.canOperate}
-		<button class="btn btn-outline gap-2" type="button" onclick={() => { run.clear(); genOpen = true; }}><Wand2 size={16} /> {t('tn.tasks.generate')}</button>
+		<button class="btn btn-outline gap-2" type="button" onclick={() => { run.clear(); gap = null; genOpen = true; }}><Wand2 size={16} /> {t('tn.tasks.generate')}</button>
 		{#if hdr.taskCount > 0}<button class="btn btn-outline btn-error gap-2" type="button" onclick={() => { run.clear(); clearOpen = true; }}><Eraser size={16} /> {t('tn.tasks.clear')}</button>{/if}
 		<button class="btn btn-primary gap-2" type="button" onclick={() => openForm(null)}><Plus size={16} /> {t('tn.tasks.add')}</button>
 	{/if}
@@ -160,14 +176,28 @@
 		<p class="text-sm text-muted">{t('tn.tasks.generate_help')}</p>
 		<Field label={t('tn.tasks.f.title')} bind:value={g.title} error={run.fields.title} required />
 		<Field label={t('tn.tasks.f.location')} bind:value={g.location_label} error={run.fields.location_label} />
+		<!-- a changed period or shift length asks the question again -->
 		<DayHoursPicker multi days={tn.days} bind:dates={g.dates} bind:from={g.from} bind:to={g.to} error={run.fields.starts_at ?? run.fields.ends_at} />
 		<div class="grid grid-cols-2 gap-3">
 			<Field label={t('tn.tasks.f.shift')} type="number" min="5" bind:value={g.shift_minutes} error={run.fields.shift_minutes} required />
 			<Field label={t('tn.tasks.f.needed')} type="number" min="1" bind:value={g.needed_quantity} error={run.fields.needed_quantity} required />
 		</div>
+		{#if gap}
+			<Alert kind="warning" title={t('tn.tasks.gap_title')}>{t('tn.tasks.gap_body', { shift: duration(gap.shift), full: gap.full, left: duration(gap.left) })}</Alert>
+			<div class="grid gap-2 sm:grid-cols-2">
+				<button class="btn btn-outline h-auto flex-col items-start gap-0.5 py-2 text-left normal-case" type="button" disabled={run.busy} onclick={() => generate(null, 'shorter')}>
+					<span class="font-semibold">{t('tn.tasks.gap_shorter')}</span>
+					<span class="text-xs font-normal text-muted">{t('tn.tasks.gap_shorter_help', { left: duration(gap.left) })}</span>
+				</button>
+				<button class="btn btn-outline h-auto flex-col items-start gap-0.5 py-2 text-left normal-case" type="button" disabled={run.busy} onclick={() => generate(null, 'extend')}>
+					<span class="font-semibold">{t('tn.tasks.gap_extend')}</span>
+					<span class="text-xs font-normal text-muted">{t('tn.tasks.gap_extend_help', { total: duration(gap.shift + gap.left) })}</span>
+				</button>
+			</div>
+		{/if}
 		<div class="modal-action mt-2 flex justify-end gap-2">
 			<button class="btn btn-outline" type="button" onclick={() => (genOpen = false)}>{t('common.cancel')}</button>
-			<button class="btn btn-primary" type="submit" disabled={run.busy}>{t('tn.tasks.generate')}</button>
+			{#if !gap}<button class="btn btn-primary" type="submit" disabled={run.busy}>{t('tn.tasks.generate')}</button>{/if}
 		</div>
 	</form>
 </Modal>

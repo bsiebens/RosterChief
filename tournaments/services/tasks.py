@@ -35,7 +35,13 @@ def unclaim_task(claim: TournamentTaskClaim):
     claim.delete()
 
 
-def generate_task_shifts(tournament, *, title: str, location_label: str, starts_at, ends_at, shift_minutes: int, needed_quantity: int, created_by=None) -> tuple[list[TournamentTask], bool]:
+def shift_remainder(starts_at, ends_at, shift_minutes: int) -> tuple[int, int]:
+    """``(full_shifts, minutes_left)``: how many whole shifts fit between the two times, and the minutes that remain after them."""
+    total = int((ends_at - starts_at).total_seconds() // 60)
+    return total // shift_minutes, total % shift_minutes
+
+
+def generate_task_shifts(tournament, *, title: str, location_label: str, starts_at, ends_at, shift_minutes: int, needed_quantity: int, created_by=None, remainder: str = "extend") -> tuple[list[TournamentTask], bool]:
     """Bulk-creates one ``TournamentTask`` per ``shift_minutes``-sized slice
     between ``starts_at`` and ``ends_at`` -- e.g. 09:00-12:00 in 30-minute
     slices makes 6 tasks, each inheriting the same title/location/
@@ -49,7 +55,8 @@ def generate_task_shifts(tournament, *, title: str, location_label: str, starts_
     30-minute-shift, 100-minute window generates 09:00-09:30, 09:30-10:00,
     10:00-10:40, not three shifts plus 10 minutes uncovered). A window
     shorter than one shift's length still generates exactly one shift,
-    covering the whole window. The second return value is whether that
+    covering the whole window. ``remainder="shorter"`` keeps every shift at its length instead and adds one shorter shift for the minutes
+    left over. The second return value is whether that
     stretch happened, so the caller can tell staff a shift came out a
     different length than they asked for."""
     tasks = []
@@ -61,9 +68,9 @@ def generate_task_shifts(tournament, *, title: str, location_label: str, starts_
 
     extended = cursor < ends_at
     if extended:
-        if tasks:
+        if tasks and remainder == "extend":
             tasks[-1].ends_at = ends_at
-        else:
+        else:  # a shorter shift for what is left (or the one shift of a window shorter than a shift)
             tasks.append(TournamentTask(tournament=tournament, title=title, location_label=location_label, starts_at=cursor, ends_at=ends_at, needed_quantity=needed_quantity, created_by=created_by))
 
     return TournamentTask.objects.bulk_create(tasks), extended

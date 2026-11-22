@@ -400,6 +400,7 @@ class TaskGenerateIn(Schema):
     ends_at: datetime.datetime
     shift_minutes: int = Field(30, ge=5, le=1440)
     needed_quantity: int = Field(1, ge=1, le=32767)
+    remainder: Literal["extend", "shorter"] | None = None  # what to do with time left over after the last full shift; asked for when there is some
 
 
 class TaskAssignIn(Schema):
