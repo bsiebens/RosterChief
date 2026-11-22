@@ -96,7 +96,7 @@
 							<div
 								role="application"
 								aria-label={t('tn.sched.column', { field: f.field.name, day: fmtDay(day.date) })}
-								class="absolute inset-x-[12%] {rink ? '' : 'rounded-lg border-2 border-ink/25 bg-white'} {hover === f.field.id + day.date ? 'outline-2 outline-primary' : ''}"
+								class="absolute inset-x-[12%] {rink ? 'rounded-md bg-slate-200/85' : 'rounded-lg border-2 border-ink/25 bg-white'} {hover === f.field.id + day.date ? 'outline-2 outline-primary' : ''}"
 								style:top="{rink ? PAD : 0}px"
 								style:bottom="{rink ? PAD : 0}px"
 								ondragover={(e) => {
@@ -126,7 +126,7 @@
 										<span class="block truncate font-mono text-muted">{fmtTime(m.scheduled_start)} · {m.round_label}{m.leg ? ` · ${t('tn.leg', { n: m.leg })}` : ''}</span>
 									</button>
 								{:else if day.slots.some((x) => x.type === 'match')}
-									<div class="pointer-events-none absolute inset-x-0 flex items-center justify-center overflow-hidden rounded bg-ink/5 text-[11px] font-medium text-ink/70" style:top="{s.top_px}px" style:height="{s.height_px}px">
+									<div class="pointer-events-none absolute inset-x-0 flex items-center justify-center overflow-hidden rounded bg-slate-300/90 text-[11px] font-semibold text-ink/80" style:top="{s.top_px}px" style:height="{s.height_px}px">
 										{#if s.height_px >= 16}{s.rule?.summary ?? t('tn.sched.gap', { n: s.minutes })}{/if}
 									</div>
 								{/if}
