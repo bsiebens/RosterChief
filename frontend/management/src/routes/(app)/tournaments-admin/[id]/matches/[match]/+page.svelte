@@ -3,6 +3,7 @@
 	import { ArrowLeft, Check, Goal, ListOrdered, Pencil, Repeat, Shield, Timer, Trash2, Zap } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import NoticeAlert from '#lib/components/NoticeAlert.svelte';
+	import SearchSelect from '#lib/components/SearchSelect.svelte';
 	import TeamLogo from '#lib/components/tournaments/TeamLogo.svelte';
 	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { api } from '#lib/management-api.ts';
@@ -32,6 +33,11 @@
 	const roster = $derived<RosterPerson[]>(game?.rosters[f.side] ?? []);
 	const hasRoster = $derived(roster.length > 0);
 	const teamName = (side: 'home' | 'away' | null) => (side === 'home' ? m?.home_display : side === 'away' ? m?.away_display : '') ?? '';
+	/** Searchable lists: players by number and name, the penalty codes by name and code. */
+	const items = (list: RosterPerson[]) => list.map((p) => ({ id: p.id, label: who(p), sub: p.position ?? '' }));
+	/** A goalie change picks goalies; a team without any goalie marked lists everyone so the entry is never blocked. */
+	const goalies = $derived(roster.some((p) => p.is_goalie) ? roster.filter((p) => p.is_goalie) : roster);
+	const codeItems = $derived((game?.penalty_codes ?? []).map((c) => ({ id: c.code, label: `${c.name} · ${c.code}` })));
 	const who = (p: RosterPerson) => `${p.number !== null ? `#${p.number} ` : ''}${p.name}`;
 	const clockText = (e: { minute: number | null; second: number | null }) => (e.minute === null ? '' : `${e.minute}:${String(e.second ?? 0).padStart(2, '0')}`);
 	const typeLabel = (type: string) => t(`tn.scores.ev_${type}`);
@@ -181,10 +187,7 @@
 						<div class="form-control">
 							<label class="label-text mb-1 text-sm font-medium" for="g-player">{f.type === 'goal' ? t('tn.game.scorer') : t('tn.scores.ev_player')}</label>
 							{#if hasRoster}
-								<select id="g-player" class="select select-bordered w-full" bind:value={f.player_id}>
-									<option value="">{f.type === 'penalty' ? t('tn.game.team_penalty') : t('tn.game.no_player')}</option>
-									{#each roster as p (p.id)}<option value={p.id}>{who(p)}{p.position ? ` · ${p.position}` : ''}</option>{/each}
-								</select>
+								<SearchSelect id="g-player" items={items(roster)} bind:value={f.player_id} placeholder={f.type === 'penalty' ? t('tn.game.team_penalty') : t('tn.game.search_player')} />
 							{:else}
 								<input id="g-player" class="input input-bordered w-full" bind:value={f.player} placeholder={t('tn.game.player_free')} />
 								<span class="mt-1 text-xs text-muted">{t('tn.game.no_roster')}</span>
@@ -197,11 +200,8 @@
 						<div class="grid gap-3 sm:grid-cols-2">
 							{#each [['assist1', 'tn.game.assist_1'], ['assist2', 'tn.game.assist_2']] as [key, label] (key)}
 								<div class="form-control">
-									<label class="label-text mb-1 text-sm font-medium" for="g-{key}">{t(label)}</label>
-									<select id="g-{key}" class="select select-bordered w-full" bind:value={f[key as 'assist1' | 'assist2']} disabled={!hasRoster || (key === 'assist2' && !f.assist1)}>
-										<option value="">—</option>
-										{#each roster.filter((p) => p.id !== f.player_id && p.id !== (key === 'assist1' ? f.assist2 : f.assist1)) as p (p.id)}<option value={p.id}>{who(p)}</option>{/each}
-									</select>
+									<span class="label-text mb-1 text-sm font-medium">{t(label)}</span>
+									<SearchSelect id="g-{key}" items={items(roster.filter((p) => p.id !== f.player_id && p.id !== (key === 'assist1' ? f.assist2 : f.assist1)))} bind:value={f[key as 'assist1' | 'assist2']} placeholder={t('tn.game.search_player')} />
 								</div>
 							{/each}
 						</div>
@@ -212,10 +212,7 @@
 						{#if game.ice_hockey}
 							<div class="form-control">
 								<label class="label-text mb-1 text-sm font-medium" for="g-code">{t('tn.game.penalty_code')}</label>
-								<select id="g-code" class="select select-bordered w-full" bind:value={f.code} required>
-									<option value="" disabled>{t('tn.game.pick_code')}</option>
-									{#each game.penalty_codes as c (c.code)}<option value={c.code}>{c.code} · {c.name}</option>{/each}
-								</select>
+								<SearchSelect id="g-code" items={codeItems} bind:value={f.code} placeholder={t('tn.game.pick_code')} />
 								{#if run.fields.penalty_code}<span class="text-xs text-error">{run.fields.penalty_code}</span>{/if}
 							</div>
 							<fieldset class="grid gap-1">
@@ -239,17 +236,11 @@
 						<div class="grid gap-3 sm:grid-cols-2">
 							<div class="form-control">
 								<label class="label-text mb-1 text-sm font-medium" for="g-out">{t('tn.game.goalie_out')}</label>
-								<select id="g-out" class="select select-bordered w-full" bind:value={f.goalie_out} disabled={!hasRoster}>
-									<option value="">—</option>
-									{#each roster.filter((p) => p.id !== f.goalie_in) as p (p.id)}<option value={p.id}>{who(p)}{p.position ? ` · ${p.position}` : ''}</option>{/each}
-								</select>
+								<SearchSelect id="g-out" items={items(goalies.filter((p) => p.id !== f.goalie_in))} bind:value={f.goalie_out} placeholder={t('tn.game.search_player')} />
 							</div>
 							<div class="form-control">
 								<label class="label-text mb-1 text-sm font-medium" for="g-in">{t('tn.game.goalie_in')}</label>
-								<select id="g-in" class="select select-bordered w-full" bind:value={f.goalie_in} disabled={!hasRoster}>
-									<option value="">—</option>
-									{#each roster.filter((p) => p.id !== f.goalie_out) as p (p.id)}<option value={p.id}>{who(p)}{p.position ? ` · ${p.position}` : ''}</option>{/each}
-								</select>
+								<SearchSelect id="g-in" items={items(goalies.filter((p) => p.id !== f.goalie_out))} bind:value={f.goalie_in} placeholder={t('tn.game.search_player')} />
 							</div>
 						</div>
 						{#if !hasRoster}<p class="text-xs text-muted">{t('tn.game.no_roster')}</p>{/if}

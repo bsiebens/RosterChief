@@ -40,6 +40,7 @@ export type TournamentDetail = TournamentItem & {
 	default_match_duration_minutes: number | null;
 	default_gap_minutes: number;
 	clock_direction: 'up' | 'down';
+	ice_hockey: boolean;
 	schedule_needs_regeneration: boolean;
 	dates: string[];
 	location: string | null;
@@ -138,7 +139,7 @@ export type MatchDoc = {
 };
 export type ResultAttribute = { id: string; name: string; key: string; source: 'manual' | 'timeline'; event_type: string | null; aggregate: string | null; position: number };
 export type MatchEventType = 'goal' | 'penalty' | 'goalie_change' | 'timeout' | 'other';
-export type RosterPerson = { id: string; name: string; number: number | null; position?: string };
+export type RosterPerson = { id: string; name: string; number: number | null; position?: string; is_goalie?: boolean };
 export type MatchEvent = {
 	id: string;
 	type: MatchEventType;

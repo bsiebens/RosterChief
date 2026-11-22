@@ -9,6 +9,7 @@
 	import { t } from '#lib/i18n.svelte.ts';
 	import { eventHref } from '#lib/events/types.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
+	import { HOCKEY_POSITIONS, normalisePosition } from '#lib/hockey.ts';
 	import { fmtDate, fmtDay, headerSnapshot, numOrNull, Runner, strOrNull, TBASE, type Person } from '#lib/tournaments.svelte.ts';
 
 	let { data } = $props();
@@ -195,7 +196,18 @@
 			</div>
 			<Field label={t('tn.roster.jersey')} type="number" min="0" bind:value={f.jersey_number} error={run.fields.jersey_number} />
 		</div>
-		<Field label={t('tn.roster.position')} bind:value={f.position_label} error={run.fields.position_label} />
+		{#if tn.ice_hockey && f.role === 'player'}
+			<div class="form-control w-full">
+				<label class="label" for="r-pos"><span class="label-text">{t('tn.roster.position')}</span></label>
+				<select id="r-pos" class="select select-bordered w-full" value={normalisePosition(f.position_label)} onchange={(e) => (f.position_label = e.currentTarget.value)}>
+					<option value="">—</option>
+					{#each HOCKEY_POSITIONS as pos (pos.value)}<option value={pos.value}>{t(pos.key)}</option>{/each}
+				</select>
+				{#if run.fields.position_label}<span class="text-xs text-error">{run.fields.position_label}</span>{/if}
+			</div>
+		{:else}
+			<Field label={t('tn.roster.position')} bind:value={f.position_label} error={run.fields.position_label} />
+		{/if}
 		{#if f.role === 'player'}<Field label={t('tn.roster.dob')} type="date" bind:value={f.date_of_birth} error={run.fields.date_of_birth} />{/if}
 		<Field label={t('tn.roster.license')} bind:value={f.license_number} error={run.fields.license_number} />
 		<Field label={t('tn.roster.dietary')} bind:value={f.dietary_restrictions} error={run.fields.dietary_restrictions} />

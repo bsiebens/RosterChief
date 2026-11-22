@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { CircleAlert, Plus, Trash2 } from '@lucide/svelte';
+	import { HOCKEY_POSITIONS, normalisePosition } from '#lib/hockey.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { money } from '#lib/shop.ts';
 	import { blankPlayer, dayLabel, outOfRange, type LunchMode, type PlayerDraft } from '#lib/tournaments-public.ts';
@@ -15,7 +16,7 @@
 		errors = {}
 	}: {
 		players: PlayerDraft[];
-		tournament: { dates: string[]; start_date: string; lunch_mode: LunchMode; lunch_price_per_day: string | null; earliest_birth_year: number | null; latest_birth_year: number | null };
+		tournament: { ice_hockey?: boolean; dates: string[]; start_date: string; lunch_mode: LunchMode; lunch_price_per_day: string | null; earliest_birth_year: number | null; latest_birth_year: number | null };
 		errors?: Record<string, string>;
 	} = $props();
 
@@ -68,7 +69,15 @@
 				{/if}
 				<div class="form-control {p.role === 'player' ? 'sm:col-span-2' : 'sm:col-span-3'}">
 					<label class="label" for="{fid}-pos"><span class="label-text">{p.role === 'staff' ? t('tp.f.function') : t('tp.f.position')}</span></label>
-					<input id="{fid}-pos" class="input input-bordered w-full" bind:value={p.position_label} />
+					{#if tournament.ice_hockey && p.role === 'player'}
+						<select id="{fid}-pos" class="select select-bordered w-full" value={normalisePosition(p.position_label)} onchange={(e) => (p.position_label = e.currentTarget.value)}>
+							<option value="">—</option>
+							{#each HOCKEY_POSITIONS as pos (pos.value)}<option value={pos.value}>{t(pos.key)}</option>{/each}
+						</select>
+					{:else}
+						<input id="{fid}-pos" class="input input-bordered w-full" bind:value={p.position_label} />
+					{/if}
+					{#if err(i, 'position_label')}<span class="mt-1 block text-xs text-error">{err(i, 'position_label')}</span>{/if}
 				</div>
 				<div class="form-control {p.role === 'player' ? 'sm:col-span-2' : 'sm:col-span-3'}">
 					<label class="label" for="{fid}-num"><span class="label-text">{t('tp.f.jersey')}</span></label>
