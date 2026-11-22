@@ -85,6 +85,8 @@ const rows: [string, string, string, string][] = [
 	['tn.sponsors.replace_logo', 'Choose a file to replace the current logo.', 'Kies een bestand om het huidige logo te vervangen.', 'Choisissez un fichier pour remplacer le logo actuel.'],
 	['tn.sponsors.saved', 'Saved.', 'Opgeslagen.', 'Enregistré.'],
 	['tn.sponsors.removed', 'Sponsor removed.', 'Sponsor verwijderd.', 'Sponsor supprimé.'],
+	['tn.prev_status', 'Move back one step', 'Een stap terug', 'Revenir d’une étape'],
+	['tn.cancel_tournament', 'Cancel the tournament', 'Toernooi annuleren', 'Annuler le tournoi'],
 	['tn.next_status', 'Move to the next step', 'Naar de volgende stap', 'Passer à l’étape suivante'],
 	['tn.next_status_done', 'The tournament is now {status}.', 'Het toernooi is nu {status}.', 'Le tournoi est maintenant {status}.'],
 	['tn.card.public', 'Public link', 'Publieke link', 'Lien public'],
