@@ -177,6 +177,7 @@ class BlockIn(Schema):
     starts_at: datetime.datetime
     ends_at: datetime.datetime
     field_id: uuid.UUID | None = None
+    location: str = Field("", max_length=255)
     team_ids: list[uuid.UUID] = []
 
 
@@ -185,6 +186,7 @@ class BlockPatch(Schema):
     starts_at: datetime.datetime | None = None
     ends_at: datetime.datetime | None = None
     field_id: uuid.UUID | None = None
+    location: str | None = Field(None, max_length=255)
     team_ids: list[uuid.UUID] | None = None
 
 
@@ -194,6 +196,7 @@ class LunchSettingsIn(Schema):
     gap_after_minutes: int = Field(ge=0, le=600)
     capacity_teams: int = Field(ge=1, le=1000)
     interval_minutes: int = Field(ge=0, le=600)
+    location: str = Field("", max_length=255)  # where the teams eat; blank = not set
 
 
 class LunchDayIn(Schema):

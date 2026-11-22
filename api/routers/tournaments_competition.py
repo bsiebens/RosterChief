@@ -95,6 +95,7 @@ def block_out(block: ScheduleBlock) -> dict:
     return {
         "id": block.pk, "title": block.title, "kind": block.kind, "starts_at": block.starts_at, "ends_at": block.ends_at, "lunch_start": block.lunch_start, "lunch_end": block.lunch_end,
         "field": c.ref(block.field), "teams": [c.team_ref(t) for t in block.teams.all()],
+        "location": block.location or (block.tournament.lunch_location if block.kind == ScheduleBlock.Kind.LUNCH else ""),
     }  # fmt: skip
 
 
@@ -394,7 +395,7 @@ def create_block(request, tournament_id: uuid.UUID, payload: BlockIn):
     t = c.get_tournament(tournament_id)
     field = c.field_or_invalid(t, payload.field_id) if payload.field_id else None
     teams = _block_teams(t, payload.team_ids)
-    block = ScheduleBlock(tournament=t, title=payload.title, starts_at=payload.starts_at, ends_at=payload.ends_at, field=field)
+    block = ScheduleBlock(tournament=t, title=payload.title, starts_at=payload.starts_at, ends_at=payload.ends_at, field=field, location=payload.location.strip())
     c.validate(block)
     block.save()
     block.teams.set(teams)
@@ -412,6 +413,8 @@ def update_block(request, tournament_id: uuid.UUID, block_id: uuid.UUID, payload
         block.field = c.field_or_invalid(t, field_id) if field_id else None
     team_ids = data.pop("team_ids", None)
     teams = _block_teams(t, team_ids) if team_ids is not None else None
+    if data.get("location") is not None:
+        data["location"] = data["location"].strip()
     c.apply(block, data)
     c.validate(block)
     block.save()

@@ -51,6 +51,7 @@
             <div>
                 <h1>{{ tournament.name }}</h1>
                 <div class="muted">{% trans "Lunch summary — all teams" %}</div>
+                {% if tournament.lunch_location %}<div class="muted">{% trans "Lunch location" %}: {{ tournament.lunch_location }}</div>{% endif %}
             </div>
             <div class="muted">
                 {% blocktrans with generated=generated_at|date:"j F Y, H:i" %}Generated {{ generated }}{% endblocktrans %}

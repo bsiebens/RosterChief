@@ -199,6 +199,7 @@
 												title="{x.b.title} {hhmm(x.from)}–{hhmm(x.to)}{x.b.teams.length ? ` · ${x.b.teams.map((tm) => tm.name).join(', ')}` : ''}">
 												<span class="block truncate font-semibold">{x.b.title}</span>
 												{#if x.b.teams.length}<span class="block truncate">{x.b.teams.map((tm) => tm.name).join(', ')}</span>{/if}
+												{#if x.b.location}<span class="block truncate italic">{x.b.location}</span>{/if}
 											</div>
 										{/each}
 									</div>

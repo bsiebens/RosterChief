@@ -42,7 +42,7 @@ def lunch_doc(t: Tournament) -> dict:
     ]  # fmt: skip
     return {
         "enabled": t.lunch_mode != Tournament.LunchMode.NONE,
-        "settings": {key: getattr(t, attr) for key, attr in SETTINGS.items()},
+        "settings": {**{key: getattr(t, attr) for key, attr in SETTINGS.items()}, "location": t.lunch_location},
         "days": days,
         "generated": bool(blocks),
     }
@@ -73,7 +73,8 @@ def update_lunch(request, tournament_id: uuid.UUID, payload: LunchIn):
     with transaction.atomic():
         for key, attr in SETTINGS.items():
             setattr(t, attr, getattr(payload.settings, key))
-        t.save(update_fields=list(SETTINGS.values()))
+        t.lunch_location = payload.settings.location.strip()
+        t.save(update_fields=[*SETTINGS.values(), "lunch_location"])
         for row in payload.days:
             day = days[row.date]
             day.lunch_start, day.lunch_end = row.lunch_start, row.lunch_end

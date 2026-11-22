@@ -82,17 +82,17 @@
 	// --- blocks
 	let blockOpen = $state(false);
 	let editBlock = $state<ScheduleBlock | null>(null);
-	let bf = $state({ title: '', starts_at: '', ends_at: '', field_id: '', team_ids: [] as string[] });
+	let bf = $state({ title: '', starts_at: '', ends_at: '', field_id: '', location: '', team_ids: [] as string[] });
 	let delBlock = $state<ScheduleBlock | null>(null);
 	function openBlock(b: ScheduleBlock | null) {
 		editBlock = b;
-		bf = b ? { title: b.title, starts_at: toLocalInput(b.starts_at), ends_at: toLocalInput(b.ends_at), field_id: b.field?.id ?? '', team_ids: b.teams.map((x) => x.id) } : { title: '', starts_at: '', ends_at: '', field_id: '', team_ids: [] };
+		bf = b ? { title: b.title, starts_at: toLocalInput(b.starts_at), ends_at: toLocalInput(b.ends_at), field_id: b.field?.id ?? '', location: b.kind === 'lunch' ? '' : (b.location ?? ''), team_ids: b.teams.map((x) => x.id) } : { title: '', starts_at: '', ends_at: '', field_id: '', location: '', team_ids: [] };
 		run.clear();
 		blockOpen = true;
 	}
 	async function saveBlock(e: SubmitEvent) {
 		e.preventDefault();
-		const body = { title: bf.title.trim(), starts_at: fromLocalInput(bf.starts_at), ends_at: fromLocalInput(bf.ends_at), field_id: strOrNull(bf.field_id), team_ids: bf.team_ids };
+		const body = { title: bf.title.trim(), starts_at: fromLocalInput(bf.starts_at), ends_at: fromLocalInput(bf.ends_at), field_id: strOrNull(bf.field_id), location: bf.location.trim(), team_ids: bf.team_ids };
 		if (await (editBlock ? run.patch(`${base}/schedule-blocks/${editBlock.id}`, body) : run.post(`${base}/schedule-blocks`, body))) blockOpen = false;
 	}
 	const toggleTeam = (id: string) => (bf.team_ids = bf.team_ids.includes(id) ? bf.team_ids.filter((x) => x !== id) : [...bf.team_ids, id]);
@@ -114,6 +114,8 @@
 	let lset = $state(lunchForm(data.lunch as LunchDoc | null).set);
 	// svelte-ignore state_referenced_locally
 	let ldays = $state(lunchForm(data.lunch as LunchDoc | null).days);
+	// svelte-ignore state_referenced_locally
+	let llocation = $state(((data.lunch as LunchDoc | null)?.settings.location ?? '') as string);
 	let lresult = $state<LunchResult | null>(null);
 	let lgenOpen = $state(false);
 	let lclearOpen = $state(false);
@@ -123,15 +125,16 @@
 		const f = lunchForm(l);
 		lset = f.set;
 		ldays = f.days;
+		llocation = l.settings.location ?? '';
 	});
 	const lunchDirty = $derived(
-		!!lunch && (SETTING_KEYS.some((k) => lset[k] !== String(lunch.settings[k] ?? '')) || lunch.days.some((d) => (ldays[d.date]?.from ?? '') !== (d.lunch_start ?? '') || (ldays[d.date]?.to ?? '') !== (d.lunch_end ?? '')))
+		!!lunch && (llocation !== (lunch.settings.location ?? '') || SETTING_KEYS.some((k) => lset[k] !== String(lunch.settings[k] ?? '')) || lunch.days.some((d) => (ldays[d.date]?.from ?? '') !== (d.lunch_start ?? '') || (ldays[d.date]?.to ?? '') !== (d.lunch_end ?? '')))
 	);
 	const lerr = (k: string) => lrun.fields[`settings.${k}`] ?? lrun.fields[k];
 	const lerrOther = $derived(Object.entries(lrun.fields).filter(([k]) => !SETTING_KEYS.some((s) => k === s || k === `settings.${s}`)).map(([, v]) => v));
 	function saveLunch() {
 		lresult = null;
-		return lrun.put(`${base}/lunch`, { settings: Object.fromEntries(SETTING_KEYS.map((k) => [k, Number(lset[k])])), days: (lunch?.days ?? []).map((d) => ({ date: d.date, lunch_start: strOrNull(ldays[d.date]?.from), lunch_end: strOrNull(ldays[d.date]?.to) })) }, () => void (lrun.notice = t('tn.lunch.saved')), { notice: '' });
+		return lrun.put(`${base}/lunch`, { settings: { ...Object.fromEntries(SETTING_KEYS.map((k) => [k, Number(lset[k])])), location: llocation.trim() }, days: (lunch?.days ?? []).map((d) => ({ date: d.date, lunch_start: strOrNull(ldays[d.date]?.from), lunch_end: strOrNull(ldays[d.date]?.to) })) }, () => void (lrun.notice = t('tn.lunch.saved')), { notice: '' });
 	}
 	async function generateLunch() {
 		lgenOpen = false;
@@ -183,26 +186,38 @@
 				<p class="text-xs text-muted">{t('tn.sched.blocks_help')}</p>
 				{#if sched.blocks.length}
 					<div class="overflow-x-auto rounded-lg border border-line">
-						<table class="table table-sm w-full">
+						<table class="table w-full">
 							<thead>
 								<tr>
-									<th>{t('tn.sched.block_title')}</th>
-									<th>{t('tn.sched.col_day')}</th>
-									<th>{t('tn.sched.col_time')}</th>
-									<th>{t('tn.sched.col_field')}</th>
+									<th>{t('tn.sched.col_block')}</th>
+									<th>{t('tn.sched.col_when')}</th>
+									<th>{t('tn.sched.col_where')}</th>
 									<th>{t('tn.sched.col_teams')}</th>
-									<th class="w-20"></th>
+									<th class="w-24"></th>
 								</tr>
 							</thead>
 							<tbody>
 								{#each sched.blocks as b (b.id)}
 									<tr class="hover:bg-paper">
-										<td><div class="flex items-center gap-2 whitespace-nowrap"><strong class="leading-none text-ink">{b.title}</strong>{#if b.kind === 'lunch'}<span class="badge badge-sm badge-info">{t('tn.lunch.kind')}</span>{/if}</div></td>
-										<td class="font-mono text-xs whitespace-nowrap">{fmtDay(blockStart(b))}</td>
-										<td class="font-mono text-xs whitespace-nowrap">{fmtTime(blockStart(b))} – {fmtTime(blockEnd(b))}</td>
-										<td class="text-xs whitespace-nowrap">{b.field?.name ?? t('tn.sched.all_fields')}</td>
-										<td class="text-xs">{b.teams.length ? b.teams.map((x) => x.name).join(', ') : '—'}</td>
-										<td>
+										<td class="align-middle"><div class="flex items-center gap-2 whitespace-nowrap"><strong class="leading-none text-ink">{b.title}</strong>{#if b.kind === 'lunch'}<span class="badge badge-sm badge-info">{t('tn.lunch.kind')}</span>{/if}</div></td>
+										<td class="align-middle whitespace-nowrap">
+											<div class="text-sm font-semibold text-ink">{fmtDay(blockStart(b))}</div>
+											<div class="font-mono text-xs text-muted">{fmtTime(blockStart(b))} – {fmtTime(blockEnd(b))}</div>
+										</td>
+										<td class="align-middle whitespace-nowrap">
+											<div class="text-sm text-ink">{b.location || (b.field?.name ?? t('tn.sched.all_fields'))}</div>
+											{#if b.location}<div class="text-xs text-muted">{b.field?.name ?? t('tn.sched.all_fields')}</div>{/if}
+										</td>
+										<td class="align-middle">
+											{#if b.teams.length > 2}
+												<span class="badge badge-sm badge-ghost whitespace-nowrap" title={b.teams.map((x) => x.name).join(', ')}>{t('tn.sched.n_teams', { n: b.teams.length })}</span>
+											{:else if b.teams.length}
+												<span class="text-sm whitespace-nowrap">{b.teams.map((x) => x.name).join(', ')}</span>
+											{:else}
+												<span class="text-muted">—</span>
+											{/if}
+										</td>
+										<td class="align-middle">
 											<div class="flex items-center justify-end gap-1">
 												{#if canOperate && b.kind !== 'lunch'}
 													<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.sched.edit_block')} title={t('tn.sched.edit_block')} onclick={() => openBlock(b)}><Pencil size={13} /></button>
@@ -237,6 +252,7 @@
 					<Field label={t('tn.lunch.gap_after')} type="number" min="0" bind:value={lset.gap_after_minutes} error={lerr('gap_after_minutes')} help={t('tn.lunch.gap_after_help')} disabled={!canOperate} />
 					<Field label={t('tn.lunch.capacity')} type="number" min="1" bind:value={lset.capacity_teams} error={lerr('capacity_teams')} help={t('tn.lunch.capacity_help')} disabled={!canOperate} />
 					<Field label={t('tn.lunch.interval')} type="number" min="0" bind:value={lset.interval_minutes} error={lerr('interval_minutes')} help={t('tn.lunch.interval_help')} disabled={!canOperate} />
+					<div class="sm:col-span-2 lg:col-span-5"><Field label={t('tn.lunch.location')} bind:value={llocation} error={lerr('location')} help={t('tn.lunch.location_help')} placeholder={t('tn.lunch.location_ph')} disabled={!canOperate} /></div>
 				</div>
 				<div class="overflow-x-auto rounded-lg border border-line">
 					<table class="table">
@@ -432,11 +448,18 @@
 			<Field label={t('tn.sched.block_until')} type="datetime-local" bind:value={bf.ends_at} error={run.fields.ends_at} required />
 		</div>
 		<div class="form-control w-full">
-			<label class="label" for="bl-field"><span class="label-text">{t('tn.sched.field')}</span></label>
+			<label class="label" for="bl-field"><span class="label-text">{t('tn.sched.block_field')}</span></label>
 			<select id="bl-field" class="select select-bordered w-full" bind:value={bf.field_id}>
 				<option value="">{t('tn.sched.all_fields')}</option>
 				{#each sched?.fields ?? [] as f (f.id)}<option value={f.id}>{f.name}</option>{/each}
 			</select>
+		</div>
+		<div class="form-control w-full">
+			<label class="label" for="bl-location"><span class="label-text">{t('tn.sched.block_location')}</span></label>
+			<input id="bl-location" class="input input-bordered w-full" list="bl-locations" maxlength="255" placeholder={t('tn.sched.block_location_ph')} bind:value={bf.location} />
+			<datalist id="bl-locations">{#each sched?.fields ?? [] as f (f.id)}<option value={f.name}></option>{/each}</datalist>
+			<span class="mt-1 text-xs text-muted">{t('tn.sched.block_location_help')}</span>
+			{#if run.fields.location}<span class="text-xs text-error">{run.fields.location}</span>{/if}
 		</div>
 		<fieldset class="form-control">
 			<legend class="label"><span class="label-text">{t('tn.sched.block_teams')}</span></legend>

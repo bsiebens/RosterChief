@@ -514,6 +514,16 @@ class TournamentApiTests(TestCase):
         self.assertEqual(self.as_("operate", "delete", f"/matches/{Match.objects.get(leg_of=final).pk}").status_code, 204)  # the final goes with both legs
         self.assertFalse(Match.objects.filter(pk=final.pk).exists() or Match.objects.filter(leg_of_id=final.pk).exists())
 
+    def test_block_and_lunch_locations(self):
+        t = self.make()
+        r = self.as_("operate", "post", f"/{t.pk}/schedule-blocks", {"title": "Ceremony", "starts_at": "2026-09-19T09:00:00Z", "ends_at": "2026-09-19T09:30:00Z", "location": "  Main hall "})
+        self.assertEqual((r.status_code, r.json()["location"]), (201, "Main hall"), r.content)
+        bid = r.json()["id"]
+        self.assertEqual(self.as_("operate", "patch", f"/{t.pk}/schedule-blocks/{bid}", {"location": "Cafeteria"}).json()["location"], "Cafeteria")
+        body = self.as_("operate", "get", f"/{t.pk}/lunch").json()
+        r = self.as_("operate", "put", f"/{t.pk}/lunch", {"settings": {**body["settings"], "location": " Club bar "}, "days": []})
+        self.assertEqual(r.json()["settings"]["location"], "Club bar", r.content)
+
     def test_delete_only_a_draft_tournament(self):
         body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}
         tid = self.as_("manage", "post", "", body).json()["id"]
@@ -809,13 +819,13 @@ class TournamentApiTests(TestCase):
         t.days.create(date="2026-09-19", starts_at="09:00", ends_at="18:00")
         doc = self.as_("operate", "get", f"/{t.pk}/lunch").json()
         self.assertEqual(doc["enabled"], False)
-        self.assertEqual(doc["settings"], LUNCH_SETTINGS | {"duration_minutes": 30})
+        self.assertEqual(doc["settings"], LUNCH_SETTINGS | {"duration_minutes": 30, "location": ""})
         self.assertEqual(doc["days"], [{"date": "2026-09-19", "lunch_start": None, "lunch_end": None, "day_start": "09:00", "day_end": "18:00", "teams_eating": 0, "sittings": []}])
         self.assertFalse(doc["generated"])
         body = {"settings": {"duration_minutes": 40, "gap_before_minutes": 0, "gap_after_minutes": 5, "capacity_teams": 3, "interval_minutes": 0}, "days": [{"date": "2026-09-19", "lunch_start": "11:30", "lunch_end": "13:00"}]}
         r = self.as_("operate", "put", f"/{t.pk}/lunch", body)
         self.assertEqual(r.status_code, 200, r.content)
-        self.assertEqual(r.json()["settings"], body["settings"])
+        self.assertEqual(r.json()["settings"], {**body["settings"], "location": ""})
         self.assertEqual((r.json()["days"][0]["lunch_start"], r.json()["days"][0]["lunch_end"]), ("11:30", "13:00"))
         self.assertEqual(self.as_("manage", "get", f"/{t.pk}/lunch").json(), r.json())
         r = self.as_("operate", "put", f"/{t.pk}/lunch", {**body, "days": [{"date": "2026-09-19", "lunch_start": None, "lunch_end": None}]})
