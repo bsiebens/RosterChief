@@ -13,7 +13,7 @@
 	<div class="card card-body items-center py-8 text-center text-muted">{t('tp.standings.empty')}</div>
 {/if}
 
-<div class="grid items-start gap-4 lg:grid-cols-2">
+<div class="grid items-start gap-4 xl:grid-cols-2">
 {#each standings as s (s.stage.id)}
 	{#each s.tables as table (table.group?.id ?? 'all')}
 		{#if table.rows.length}

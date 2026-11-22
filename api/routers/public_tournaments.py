@@ -9,6 +9,7 @@ client address and email (429 + ``Retry-After``), a filled ``website`` field is 
 import secrets
 from decimal import Decimal
 from io import BytesIO
+from urllib.parse import quote
 
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
@@ -49,10 +50,27 @@ def _money(value):
     return None if value is None else f"{value:.2f}"
 
 
+def _address_line(location) -> str:
+    if location is None:
+        return ""
+    return ", ".join(part for part in (location.address, f"{location.zip_code} {location.city}".strip()) if part)
+
+
+def maps_url(location) -> str | None:
+    """A link that opens the venue in a maps view: its coordinates when the club has them, else a search for name and address."""
+    if location is None:
+        return None
+    if location.latitude is not None and location.longitude is not None:
+        query = f"{location.latitude},{location.longitude}"
+    else:
+        query = ", ".join(part for part in (location.name, location.address, f"{location.zip_code} {location.city}".strip()) if part)
+    return f"https://www.google.com/maps/search/?api=1&query={quote(query)}"
+
+
 def item(t: Tournament) -> dict:
     location = t.location
     return {
-        "slug": t.slug, "year": t.start_date.year, "path": t.public_key, "name": t.name, "start_date": t.start_date, "end_date": t.end_date, "days": c.days_out(t), "status": t.status, "location": location.name if location else None,
+        "slug": t.slug, "year": t.start_date.year, "path": t.public_key, "name": t.name, "start_date": t.start_date, "end_date": t.end_date, "days": c.days_out(t), "status": t.status, "location": location.name if location else None, "location_address": _address_line(location), "maps_url": maps_url(location),
         "accepts_registrations": t.accepts_registrations and t.status in OPEN_FOR_REGISTRATION,
     }  # fmt: skip
 

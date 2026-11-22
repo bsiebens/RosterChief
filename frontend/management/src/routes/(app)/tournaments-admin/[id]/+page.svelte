@@ -14,7 +14,7 @@
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
-	import { Runner, TBASE } from '#lib/tournaments.svelte.ts';
+	import { Runner, statusBadge, TBASE } from '#lib/tournaments.svelte.ts';
 	import { formOf, payload } from '#lib/tournaments-form.ts';
 
 	let { data } = $props();
@@ -91,11 +91,11 @@
 			<div class="grid gap-2">
 				{#if next || back}
 					<div class="grid gap-2 {next && back ? 'grid-cols-2' : ''}">
-						{#if back}<button class="btn btn-outline justify-between gap-2" type="button" disabled={run.busy} onclick={() => move(back)} title={t('tn.prev_status')}><ArrowLeft size={16} aria-hidden="true" /><span class="badge badge-ghost badge-sm">{t(`tn.status.${back}`)}</span></button>{/if}
-						{#if next}<button class="btn btn-primary justify-between gap-2" type="button" disabled={run.busy} onclick={() => move(next)} title={t('tn.next_status')}><span class="badge badge-sm">{t(`tn.status.${next}`)}</span><ArrowRight size={16} aria-hidden="true" /></button>{/if}
+						{#if back}<button class="btn btn-outline justify-between gap-2" type="button" disabled={run.busy} onclick={() => move(back)} title={t('tn.prev_status')}><ArrowLeft size={16} aria-hidden="true" /><span class="badge badge-sm {statusBadge(back)}">{t(`tn.status.${back}`)}</span></button>{/if}
+						{#if next}<button class="btn btn-outline justify-between gap-2" type="button" disabled={run.busy} onclick={() => move(next)} title={t('tn.next_status')}><span class="badge badge-sm {statusBadge(next)}">{t(`tn.status.${next}`)}</span><ArrowRight size={16} aria-hidden="true" /></button>{/if}
 					</div>
 				{/if}
-				<button class="btn btn-outline w-full gap-2" type="submit" disabled={run.busy}><Save size={16} /> {t('common.save')}</button>
+				<button class="btn btn-primary w-full gap-2" type="submit" disabled={run.busy}><Save size={16} /> {t('common.save')}</button>
 				{#if tn.status !== 'cancelled' && tn.status !== 'completed'}
 					<ActionList><ActionRow icon={Ban} danger onclick={() => move('cancelled')}>{t('tn.cancel_tournament')}</ActionRow></ActionList>
 				{/if}

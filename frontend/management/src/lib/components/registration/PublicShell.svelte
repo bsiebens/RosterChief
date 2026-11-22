@@ -7,7 +7,7 @@
 
 	/** The club-branded frame of the public registration pages: gradient header with the club name and crest, a narrow main column and the language switch. */
 	let { title, kicker, club, wide = false, full = false, children }: { title: string; kicker: string; club: ClubBrand | null; wide?: boolean; full?: boolean; children: Snippet } = $props();
-	const width = $derived(full ? 'max-w-6xl' : wide ? 'max-w-3xl' : 'max-w-2xl');
+	const width = $derived(full ? 'max-w-none xl:px-8' : wide ? 'max-w-3xl' : 'max-w-2xl');
 </script>
 
 <div class="min-h-screen bg-paper font-sans text-slate">

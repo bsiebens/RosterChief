@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { CalendarDays, Download, FileText, Lock, Mail, MapPin, Utensils, Wallet } from '@lucide/svelte';
+	import { CalendarDays, Download, FileText, Lock, Mail, Map, MapPin, Utensils, Wallet } from '@lucide/svelte';
 	import MatchList from '#lib/components/tournaments/MatchList.svelte';
 	import Standings from '#lib/components/tournaments/Standings.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -33,7 +33,7 @@
 	</div>
 	<dl class="grid gap-px bg-line sm:grid-cols-2 lg:grid-cols-4">
 		<div class="flex items-start gap-3 bg-white p-4"><span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-club/10 text-club"><CalendarDays size={18} aria-hidden="true" /></span><div class="min-w-0"><dt class="font-mono text-[10px] tracking-[.1em] text-muted uppercase">{t('tp.when')}</dt><dd class="text-sm font-semibold text-ink">{range(tn.start_date, tn.end_date)}</dd></div></div>
-		<div class="flex items-start gap-3 bg-white p-4"><span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-club/10 text-club"><MapPin size={18} aria-hidden="true" /></span><div class="min-w-0"><dt class="font-mono text-[10px] tracking-[.1em] text-muted uppercase">{t('tp.where')}</dt><dd class="text-sm font-semibold text-ink">{tn.location ?? '—'}</dd></div></div>
+		<div class="flex items-start gap-3 bg-white p-4"><span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-club/10 text-club"><MapPin size={18} aria-hidden="true" /></span><div class="min-w-0"><dt class="font-mono text-[10px] tracking-[.1em] text-muted uppercase">{t('tp.where')}</dt><dd class="text-sm font-semibold text-ink">{tn.location ?? '—'}{#if tn.location_address}<span class="block text-xs font-normal text-muted">{tn.location_address}</span>{/if}{#if tn.maps_url}<a class="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-club hover:underline" href={tn.maps_url} target="_blank" rel="noopener"><Map size={12} aria-hidden="true" /> {t('tp.view_map')}</a>{/if}</dd></div></div>
 		<div class="flex items-start gap-3 bg-white p-4"><span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-club/10 text-club"><Wallet size={18} aria-hidden="true" /></span><div class="min-w-0"><dt class="font-mono text-[10px] tracking-[.1em] text-muted uppercase">{t('tp.fee')}</dt><dd class="text-sm font-semibold text-ink">{#if tn.entry_fee_amount}{t('tp.fee_line', { fee: money(tn.entry_fee_amount) })}{#if tn.deposit_amount}<span class="block text-xs font-normal text-muted">{t('tp.deposit_line', { deposit: money(tn.deposit_amount) })}</span>{/if}{:else}—{/if}</dd></div></div>
 		<div class="flex items-start gap-3 bg-white p-4"><span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-club/10 text-club"><Utensils size={18} aria-hidden="true" /></span><div class="min-w-0"><dt class="font-mono text-[10px] tracking-[.1em] text-muted uppercase">{t('tp.lunch')}</dt><dd class="text-sm font-semibold text-ink">{#if tn.lunch_mode !== 'none'}{t(`tp.lunch.${tn.lunch_mode}`)}{#if tn.lunch_price_per_day}<span class="block text-xs font-normal text-muted">{t('tp.lunch.per_day', { price: money(tn.lunch_price_per_day) })}</span>{/if}{:else}—{/if}</dd></div></div>
 	</dl>
@@ -55,9 +55,6 @@
 				<MatchList matches={tn.upcoming_matches} slug={tn.path} />
 				<div class="border-t border-line px-4 py-3"><a class="link text-sm" href="/tournaments/{tn.path}/schedule">{t('tp.full_schedule')} →</a></div>
 			</section>
-		{/if}
-		{#if hasTables}
-			<Standings standings={tn.standings} brackets={tn.brackets} slug={tn.path} />
 		{/if}
 	</div>
 	<aside class="grid min-w-0 content-start gap-4">
@@ -87,6 +84,10 @@
 		{/if}
 	</aside>
 </div>
+
+{#if hasTables}
+	<Standings standings={tn.standings} brackets={tn.brackets} slug={tn.path} />
+{/if}
 
 {#snippet mark(sp: { name: string; logo_url: string | null })}
 	{#if sp.logo_url}<img src={sp.logo_url} alt={sp.name} class="h-14 max-w-full object-contain" />{:else}<span class="text-center font-display text-sm font-bold text-ink">{sp.name}</span>{/if}

@@ -3,7 +3,7 @@ import { getLang } from '#lib/i18n.svelte.ts';
 
 export type TournamentStatus = 'draft' | 'published' | 'in_progress' | 'completed' | 'cancelled';
 export type LunchMode = 'none' | 'optional' | 'mandatory';
-export type TournamentItem = { slug: string; year: number; path: string; name: string; start_date: string; end_date: string; status: TournamentStatus; location: string | null; accepts_registrations: boolean };
+export type TournamentItem = { slug: string; year: number; path: string; location_address: string; maps_url: string | null; name: string; start_date: string; end_date: string; status: TournamentStatus; location: string | null; accepts_registrations: boolean };
 export type TournamentList = { upcoming: TournamentItem[]; past: TournamentItem[] };
 
 export type TeamRef = { id: string; name: string; slug: string; logo_url: string | null; primary_color: string; secondary_color: string };
