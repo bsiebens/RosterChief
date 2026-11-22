@@ -171,7 +171,7 @@
 		<span class="flex items-center gap-1.5"><span class="inline-block size-3 rounded border border-sky-500 bg-sky-50"></span>{t('tn.bracket.before')}</span>
 		<span class="flex items-center gap-1.5"><span class="inline-block size-3 rounded border border-emerald-500 bg-emerald-50"></span>{t('tn.bracket.next')}</span>
 	</p>
-	<div class="max-h-[75vh] overflow-auto rounded-lg border border-line bg-paper/40 p-3">
+	<div class="overflow-x-auto overflow-y-hidden rounded-lg border border-line bg-paper/40 p-3">
 		<div class="relative" style:width="{width}px" style:height="{height + HEAD}px">
 			{#each layout.headings as label, col (col)}
 				<h3 class="absolute truncate text-xs font-bold text-muted" style:left="{col * (W + GAP)}px" style:width="{W}px" style:top="0">{label || t('tn.standings.round', { n: col + 1 })}</h3>
