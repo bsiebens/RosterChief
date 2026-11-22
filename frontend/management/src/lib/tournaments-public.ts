@@ -100,6 +100,7 @@ export type RegistrationStatus = {
 	mandatory_total: string | null;
 	lunch_total: string | null;
 	amount_owed: string | null;
+	unread_messages?: number;
 };
 
 export type PortalShiftTournament = { slug: string; public_path: string; name: string; start_date: string; end_date: string; shift_count: number };

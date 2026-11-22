@@ -52,6 +52,7 @@ def tournament_detail(t: Tournament, user) -> dict:
         "dates": t.date_range(), "days": c.days_out(t), "is_full": t.is_full, "location": c.ref(location),
         "pending_registration_count": t.registrations.filter(status=TournamentRegistration.Status.PENDING).count(),
         "teams_in_count": t.teams.filter(withdrawn_at__isnull=True).count(),
+        "unread_message_count": t.messages.filter(sender="team", read_by_organisers=False).count(),
         "can_manage": access.can_manage_tournaments(user), "can_operate": access.can_operate_tournaments(user),
     }  # fmt: skip
 

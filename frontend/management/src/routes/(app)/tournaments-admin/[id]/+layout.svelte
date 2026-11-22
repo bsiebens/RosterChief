@@ -17,6 +17,7 @@
 			{ key: '/schedule', label: t('tn.tab.schedule') },
 			{ key: '/scores', label: t('tn.tab.scores') },
 			{ key: '/standings', label: t('tn.tab.standings') },
+			{ key: '/messages', label: t('tn.tab.messages'), count: tn.unread_message_count, warn: true },
 			{ key: '/tasks', label: t('tn.tab.tasks') },
 			{ key: '/rooms', label: t('tn.tab.rooms') },
 			{ key: '/rules', label: t('tn.tab.rules'), manage: true },

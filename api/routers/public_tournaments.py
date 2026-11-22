@@ -31,8 +31,9 @@ from news.services import render_body_html
 from notifications import gateways
 from notifications.models import PushSettings
 from sponsoring.models import Sponsor
-from tournaments.models import Match, ScheduleBlock, Tournament, TournamentFollower, TournamentRegistration, TournamentRegistrationPlayer, TournamentRosterEntry, TournamentRosterRole, TournamentTeam
+from tournaments.models import Match, ScheduleBlock, Tournament, TournamentFollower, TournamentMessage, TournamentRegistration, TournamentRegistrationPlayer, TournamentRosterEntry, TournamentRosterRole, TournamentTeam
 from tournaments.services import notifications
+from tournaments.services.messages import message_out, thread_for_team, unread_for_team
 from tournaments.sports import is_ice_hockey
 
 router = Router(auth=None)
@@ -404,12 +405,39 @@ def _registration_doc(r: TournamentRegistration) -> dict:
         "players_editable": r.status == TournamentRegistration.Status.PENDING or _roster_editable(r), "roster_closed": _roster_closed(r),
         "lunch_is_mandatory": t.lunch_mode == Tournament.LunchMode.MANDATORY, "mandatory_total": _money(mandatory_total), "lunch_total": _money(lunch_total),
         "amount_owed": _money(_amount_owed(t, lunch_total, team)) if approved else None,
+        "unread_messages": unread_for_team(r),
     }  # fmt: skip
 
 
 @router.get("/{slug}/registrations/{token}", summary="The status of an application, by its private token", operation_id="public_tournaments_registration_status")
 def registration_status(request, slug: str, token: str):
     return _registration_doc(_registration(request, slug, token))
+
+
+class MessageIn(Schema):
+    body: str = Field(min_length=1, max_length=4000)
+
+
+@router.get("/{slug}/registrations/{token}/messages", summary="The conversation between this team and the organisers (marks it read)", operation_id="public_tournaments_team_messages")
+def team_messages(request, slug: str, token: str):
+    r = _registration(request, slug, token)
+    rows = thread_for_team(r)
+    r.messages_seen_at = timezone.now()
+    r.save(update_fields=["messages_seen_at"])
+    return {"messages": [message_out(m) for m in rows]}
+
+
+@router.post("/{slug}/registrations/{token}/messages", summary="Write to the organisers", operation_id="public_tournaments_team_message_send", response={201: dict})
+def team_message_send(request, slug: str, token: str, payload: MessageIn):
+    r = _registration(request, slug, token)
+    blocked = _throttled(request)
+    if blocked is not None:
+        return blocked
+    body = payload.body.strip()
+    if not body:
+        raise HttpError(422, "Write a message first.")
+    message = TournamentMessage.objects.create(tournament=r.tournament, registration=r, sender=TournamentMessage.Sender.TEAM, author=r.foreign_contact_name, body=body)
+    return 201, message_out(message)
 
 
 @router.put("/{slug}/registrations/{token}/players", summary="Replace the player list (pending application, or the live roster until the tournament starts)", operation_id="public_tournaments_players")

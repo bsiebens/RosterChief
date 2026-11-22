@@ -145,3 +145,10 @@ def dispatch_notify_tournament_shifts_open(tournament_id):
     from tournaments import tasks
 
     transaction.on_commit(lambda: tasks.notify_shifts_open.delay(str(tournament_id)))
+
+
+def send_organiser_message_email(registration, body: str, *, request=None) -> bool:
+    """Tell a team's contact that the organisers wrote to them: the text and the private link where they can answer."""
+    t = registration.tournament
+    lines = [_("The organisers of %(tournament)s sent a message to your team:") % {"tournament": t.name}, body, _("Read and answer it on your team page: %(url)s") % {"url": _status_url(registration, request=request)}]
+    return _send(registration, _("New message from the organisers of %(tournament)s") % {"tournament": t.name}, lines)

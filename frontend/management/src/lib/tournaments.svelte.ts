@@ -19,6 +19,7 @@ export type TournamentItem = {
 	max_teams: number | null;
 	accepts_registrations: boolean;
 	pending_registration_count: number;
+	unread_message_count?: number;
 	teams_in_count: number;
 };
 /** One day the tournament is played on, with its opening hours (HH:MM). */

@@ -796,6 +796,32 @@ class TournamentApiTests(TestCase):
             alerts.game_ended(mine.pk)
         self.assertEqual(t.followers.count(), 0)  # a subscription the push service dropped is forgotten
 
+    def test_organisers_and_teams_exchange_messages(self):
+        t = self.make(status="published")
+        body = {"foreign_name": "Visitors", "foreign_contact_name": "Vic", "foreign_contact_email": "v@x.test"}
+        token = self.call("post", f"/{t.slug}/registrations", None, body, prefix="/public/tournaments").json()["status_token"]
+        other = self.call("post", f"/{t.slug}/registrations", None, {**body, "foreign_name": "Others", "foreign_contact_email": "o@x.test"}, prefix="/public/tournaments").json()["status_token"]
+        rid = self.as_("manage", "get", f"/{t.pk}/registrations").json()["results"][0]["id"]
+        mine = f"/{t.slug}/registrations/{token}"
+        self.assertEqual(self.call("post", f"{mine}/messages", None, {"body": "  Can we play later on Sunday?  "}, prefix="/public/tournaments").status_code, 201)
+        self.assertEqual(self.as_("operate", "get", f"/{t.pk}/message-unread").json()["unread"], 1)
+        rows = self.as_("operate", "get", f"/{t.pk}/messages").json()
+        self.assertEqual((rows["unread_total"], len(rows["threads"])), (1, 2))
+        thread = self.as_("operate", "get", f"/{t.pk}/messages/{rows['threads'][0]['registration_id']}").json()
+        self.assertEqual([m["body"] for m in thread["messages"]], ["Can we play later on Sunday?"])
+        self.assertEqual(self.as_("operate", "get", f"/{t.pk}/message-unread").json()["unread"], 0)
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/messages/{rows['threads'][0]['registration_id']}", {"body": "Sure, 11:00."}).status_code, 201)
+        r = self.as_("operate", "post", f"/{t.pk}/message-broadcast", {"body": "Lunch is at 12:00"})
+        self.assertEqual(r.status_code, 201, r.content)
+        doc = self.call("get", mine, prefix="/public/tournaments").json()
+        self.assertEqual(doc["unread_messages"], 2)
+        texts = [m["body"] for m in self.call("get", f"{mine}/messages", prefix="/public/tournaments").json()["messages"]]
+        self.assertEqual(texts, ["Can we play later on Sunday?", "Sure, 11:00.", "Lunch is at 12:00"])
+        self.assertEqual(self.call("get", mine, prefix="/public/tournaments").json()["unread_messages"], 0)  # opened
+        theirs = [m["body"] for m in self.call("get", f"/{t.slug}/registrations/{other}/messages", prefix="/public/tournaments").json()["messages"]]
+        self.assertEqual(theirs, ["Lunch is at 12:00"])  # one team never sees another team's thread
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/messages/{rid}", {"body": ""}).status_code, 422)
+
     def test_public_endpoints_are_404_without_feature(self):
         t = self.make(status="published")
         self.features = Entitlements({})

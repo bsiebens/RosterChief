@@ -3,6 +3,7 @@
 	import Alert from '#lib/components/Alert.svelte';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import PlayersEditor from '#lib/components/tournaments/PlayersEditor.svelte';
+	import TeamMessages from '#lib/components/tournaments/public/TeamMessages.svelte';
 	import { page } from '$app/state';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { api } from '#lib/management-api.ts';
@@ -90,6 +91,8 @@
 		else logoError = res.fields.logo || failure(res);
 	}
 
+	let tab = $state<'team' | 'messages'>(page.url.searchParams.get('tab') === 'messages' ? 'messages' : 'team');
+	let unread = $derived(reg.unread_messages ?? 0);
 	const payKey = $derived(reg.team ? `tp.pay.${reg.team.payment_status}` : '');
 </script>
 
@@ -135,6 +138,17 @@
 	{/if}
 </section>
 
+<div class="flex gap-2" role="tablist">
+	{#each [['team', t('ts.team.tab_team')], ['messages', t('ts.team.tab_messages')]] as [key, label] (key)}
+		<button type="button" role="tab" aria-selected={tab === key} class="flex items-center gap-2 rounded-full border px-4 py-1.5 font-display text-xs font-extrabold tracking-[.08em] uppercase {tab === key ? 'border-ink bg-ink text-white' : 'border-line bg-white text-muted hover:text-ink'}" onclick={() => (tab = key as 'team' | 'messages')}>
+			{label}{#if key === 'messages' && unread > 0 && tab !== 'messages'}<span class="rounded-full bg-danger px-1.5 text-[10px] text-white">{unread}</span>{/if}
+		</button>
+	{/each}
+</div>
+
+{#if tab === 'messages'}
+	<TeamMessages {base} onread={() => (reg = { ...reg, unread_messages: 0 })} />
+{:else}
 {#if reg.team && r.status === 'approved' && !withdrawn}
 	<section class="card card-body gap-2" aria-labelledby="tp-pay">
 		<h2 id="tp-pay" class="font-display text-base font-bold text-ink">{t('tp.status.payment')}</h2>
@@ -178,6 +192,8 @@
 			{/if}
 		{/if}
 	</section>
+{/if}
+
 {/if}
 
 <p class="text-xs text-muted">{t('tp.status.keep_link')}{#if tn.contact_email} <a class="link" href="mailto:{tn.contact_email}">{tn.contact_email}</a>{/if}</p>
