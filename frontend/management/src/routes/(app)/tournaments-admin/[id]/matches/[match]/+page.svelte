@@ -428,7 +428,7 @@
 			<label class="form-control"><span class="label-text mb-1 truncate text-sm font-medium">{m?.away_display}</span><input class="input input-bordered w-full text-center font-mono text-2xl font-bold" type="number" min="0" required bind:value={rf.away} /></label>
 		</div>
 		{#if run.fields.score_away || run.fields.score_home}<span class="text-xs text-error">{run.fields.score_away ?? run.fields.score_home}</span>{/if}
-		{#if !nextPeriod}<label class="flex cursor-pointer items-center gap-3 rounded-lg border border-line p-3"><input type="checkbox" class="checkbox" bind:checked={rf.ot} /><span class="text-sm">{t('tn.scores.overtime')}</span></label>{/if}
+		{#if !nextPeriod}<label class="flex cursor-pointer items-center gap-3 rounded-lg border border-line p-3"><input type="checkbox" class="checkbox" bind:checked={rf.ot} /><span class="grid"><span class="text-sm">{t('tn.scores.overtime')}</span><span class="text-xs text-muted">{t('tn.scores.overtime_help')}</span></span></label>{/if}
 		{#if level}
 			<div class="grid gap-2 rounded-lg border border-line p-3">
 				<p class="text-sm font-semibold text-ink">{t('tn.scores.shots_title')}</p>

@@ -550,6 +550,7 @@ const rows: [string, string, string, string][] = [
 	['tn.scores.saved', 'Result saved.', 'Resultaat opgeslagen.', 'Résultat enregistré.'],
 	['tn.scores.complete', 'Complete', 'Afgewerkt', 'Terminé'],
 	['tn.scores.ot', 'OT', 'VL', 'Prol.'],
+	['tn.scores.overtime_help', 'Only a label (shown as OT in the lists). Enter the score including any overtime goals; it does not change the standings.', 'Enkel een label (OT in de lijsten). Geef de stand in met eventuele goals in de verlenging; het verandert de rangschikking niet.', 'Simple indication (OT dans les listes). Saisissez le score avec les buts de prolongation ; le classement ne change pas.'],
 	['tn.scores.overtime', 'Went to overtime', 'Verlengingen gespeeld', 'Prolongations jouées'],
 	['tn.legs_line', 'Period 1 {a} · Period 2 {b}', 'Periode 1 {a} · Periode 2 {b}', 'Période 1 {a} · Période 2 {b}'],
 	['tn.scores.legs', 'Periods', 'Periodes', 'Périodes'],

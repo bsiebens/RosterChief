@@ -195,7 +195,7 @@
 			<label class="form-control"><span class="label-text mb-1">{m?.away_display}</span><input class="input input-bordered w-full" type="number" min="0" required bind:value={f.away} /></label>
 		</div>
 		{#each ['score_home', 'score_away'] as k (k)}{#if run.fields[k]}<span class="text-xs text-error">{run.fields[k]}</span>{/if}{/each}
-		<label class="flex cursor-pointer items-center gap-3 rounded-lg border border-line p-3"><input type="checkbox" class="checkbox" bind:checked={f.ot} /><span class="text-sm">{t('tn.scores.overtime')}</span></label>
+		<label class="flex cursor-pointer items-center gap-3 rounded-lg border border-line p-3"><input type="checkbox" class="checkbox" bind:checked={f.ot} /><span class="grid"><span class="text-sm">{t('tn.scores.overtime')}</span><span class="text-xs text-muted">{t('tn.scores.overtime_help')}</span></span></label>
 		{#if firstLeg}
 			<p class="rounded-lg bg-paper p-3 text-sm text-muted">{t('tn.scores.first_leg', { h: firstLeg.score_home ?? '–', a: firstLeg.score_away ?? '–' })} · <strong class="text-ink">{t('tn.aggregate', { h: addedHome, a: addedAway })}</strong></p>
 		{/if}
