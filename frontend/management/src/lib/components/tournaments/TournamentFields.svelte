@@ -14,14 +14,16 @@
 <div class="grid gap-3">
 {#if part === 'basics'}
 	<Field label={t('tn.f.name')} bind:value={v.name} error={errors.name} required maxlength={200} />
-	<div class="grid gap-3 sm:grid-cols-2">
-		<div class="form-control w-full">
-			<label class="label" for="{id}-status"><span class="label-text">{t('tn.f.status')}</span></label>
-			<select id="{id}-status" class="select select-bordered w-full" bind:value={v.status}>
-				{#each STATUSES as s (s)}<option value={s}>{t(`tn.status.${s}`)}</option>{/each}
-			</select>
-			{#if errors.status}<span class="mt-1 block text-xs text-error">{errors.status}</span>{/if}
+	<fieldset class="grid gap-1.5">
+		<legend class="label-text text-sm font-medium">{t('tn.f.status')}</legend>
+		<div class="flex flex-wrap gap-2" role="radiogroup" aria-label={t('tn.f.status')}>
+			{#each STATUSES as st (st)}
+				<button type="button" role="radio" aria-checked={v.status === st} onclick={() => (v.status = st)} class="cursor-pointer rounded-lg border-2 px-4 py-2 font-display text-xs font-bold tracking-[.08em] uppercase transition-colors {v.status === st ? 'border-club bg-club/10 text-ink' : 'border-line bg-white text-muted hover:border-ink/40 hover:text-ink'}">{t(`tn.status.${st}`)}</button>
+			{/each}
 		</div>
+		{#if errors.status}<span class="text-xs text-error">{errors.status}</span>{/if}
+	</fieldset>
+	<div class="grid gap-3 sm:grid-cols-2">
 		<div class="form-control w-full">
 			<label class="label" for="{id}-home"><span class="label-text">{t('tn.f.home_team')}</span></label>
 			<select id="{id}-home" class="select select-bordered w-full" bind:value={v.home_team_id}>
