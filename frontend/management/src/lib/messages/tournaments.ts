@@ -264,8 +264,6 @@ const rows: [string, string, string, string][] = [
 	['tn.setup.feeds_advance', 'Best teams advance', 'De beste teams gaan door', 'Les meilleures équipes avancent'],
 	['tn.seed.placement_on', 'Every place is played for: the losers keep playing until each team has a final rank (set on the stage).', 'Er wordt om elke plaats gespeeld: de verliezers blijven spelen tot elk team een eindrang heeft (ingesteld op de fase).', 'On joue pour chaque place : les perdants continuent jusqu’à ce que chaque équipe ait un rang final (réglé sur la phase).'],
 	['tn.setup.full_ranking', 'Full ranking', 'Volledige rangschikking', 'Classement complet'],
-	['tn.setup.level_title', 'Level games', 'Gelijke spelen', 'Matchs nuls'],
-	['tn.setup.level_knockout', 'A knockout game always needs a winner.', 'Een knock-outwedstrijd heeft altijd een winnaar nodig.', 'Un match à élimination doit toujours avoir un vainqueur.'],
 	['tn.setup.allow_draws', 'Allow draws', 'Gelijkspel toestaan', 'Autoriser les matchs nuls'],
 	['tn.setup.allow_draws_help', 'A game may end level and both teams get the draw points. Switch it off when every game must have a winner.', 'Een wedstrijd mag gelijk eindigen en beide teams krijgen de punten voor gelijkspel. Zet uit als elke wedstrijd een winnaar moet hebben.', 'Un match peut finir à égalité et les deux équipes reçoivent les points du nul. Désactivez si chaque match doit avoir un vainqueur.'],
 	['tn.setup.penalty_shots', 'Decide level games with penalty shots', 'Gelijke wedstrijden beslissen met strafschoppen', 'Départager les égalités aux tirs au but'],

@@ -738,11 +738,8 @@
 				</span>
 			</label>
 		{/if}
-		<fieldset class="grid gap-3 rounded-lg border border-line p-3">
-			<legend class="px-1 font-display text-xs font-bold tracking-[.08em] text-muted uppercase">{t('tn.setup.level_title')}</legend>
-			{#if sf.format === 'single_elim' || sf.format === 'double_elim'}
-				<p class="text-sm text-muted">{t('tn.setup.level_knockout')}</p>
-			{:else}
+		<div class="grid gap-3 rounded-lg border border-line p-3">
+			{#if !(sf.format === 'single_elim' || sf.format === 'double_elim')}
 				<label class="flex cursor-pointer items-start gap-3">
 					<input type="checkbox" class="checkbox mt-0.5" bind:checked={sf.allow_draws} />
 					<span class="min-w-0">
@@ -760,7 +757,7 @@
 					</span>
 				</label>
 			{/if}
-		</fieldset>
+		</div>
 		{#if sf.format === 'swiss'}<Field label={t('tn.setup.rounds')} type="number" min="1" bind:value={sf.rounds} error={run.fields.rounds} required />{/if}
 		{#if sf.format === 'groups'}<Field label={t('tn.setup.num_groups')} type="number" min="1" bind:value={sf.num_groups} error={run.fields.num_groups} required />{/if}
 		<div class="grid grid-cols-3 gap-3">
