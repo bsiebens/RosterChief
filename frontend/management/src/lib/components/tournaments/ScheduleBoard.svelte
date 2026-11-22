@@ -151,8 +151,8 @@
 								ondragleave={() => (hover = '')}
 								ondrop={(e) => canOperate && drop(e, f.field.id, day.date, ax.start)}>
 								<!-- closed hours -->
-								<span class="pointer-events-none absolute inset-x-0 top-0 bg-slate-100" style:height="{open * ppm}px"></span>
-								<span class="pointer-events-none absolute inset-x-0 bottom-0 bg-slate-100" style:height="{Math.max(0, height - close * ppm)}px"></span>
+								<span class="pointer-events-none absolute inset-x-0 top-0 border-b border-slate-300" style:height="{open * ppm}px" style="background-image: repeating-linear-gradient(135deg, rgb(148 163 184 / 0.45) 0 2px, transparent 2px 7px); background-color: rgb(241 245 249);"></span>
+								<span class="pointer-events-none absolute inset-x-0 bottom-0 border-t border-slate-300" style:height="{Math.max(0, height - close * ppm)}px" style="background-image: repeating-linear-gradient(135deg, rgb(148 163 184 / 0.45) 0 2px, transparent 2px 7px); background-color: rgb(241 245 249);"></span>
 								{#each hours(ax) as m (m)}
 									<span class="pointer-events-none absolute inset-x-0 border-t border-line" style:top="{(m - ax.start) * ppm}px"></span>
 								{/each}
