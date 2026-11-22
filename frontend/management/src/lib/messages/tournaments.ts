@@ -10,6 +10,7 @@ const rows: [string, string, string, string][] = [
 	['tn.nav.list', 'All tournaments', 'Alle toernooien', 'Tous les tournois'],
 	['tn.nav.dressing_rooms', 'Dressing rooms', 'Kleedkamers', 'Vestiaires'],
 	['tn.title', 'Tournaments', 'Toernooien', 'Tournois'],
+	['tn.back_to_list', 'All tournaments', 'Alle toernooien', 'Tous les tournois'],
 	['tn.count', '{n} tournaments', '{n} toernooien', '{n} tournois'],
 	['tn.add', 'Add tournament', 'Toernooi toevoegen', 'Ajouter un tournoi'],
 	['tn.create', 'Create tournament', 'Toernooi aanmaken', 'Créer le tournoi'],

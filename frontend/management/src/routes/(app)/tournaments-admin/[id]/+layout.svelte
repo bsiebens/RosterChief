@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ArrowLeft } from '@lucide/svelte';
 	import { onDestroy } from 'svelte';
 	import { page } from '$app/state';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -33,8 +34,9 @@
 	const isActive = (key: string) => (key === '' ? page.url.pathname === base : page.url.pathname.startsWith(base + key) || (key === '/scores' && page.url.pathname.startsWith(`${base}/matches/`)));
 </script>
 
-<nav class="card mb-5 overflow-x-auto px-3" aria-label={t('tn.tabs_label')}>
-	<div class="flex min-w-max">
+<nav class="card mb-5 flex items-center gap-3 px-3" aria-label={t('tn.tabs_label')}>
+	<div class="flex min-w-0 flex-1 overflow-x-auto">
+		<div class="flex min-w-max">
 		{#each tabs as tab (tab.key)}
 			<a
 				href="{base}{tab.key}"
@@ -44,7 +46,9 @@
 				{#if tab.count !== undefined && (tab.count > 0 || !tab.warn)}<span class="badge badge-sm {tab.warn ? 'badge-warning' : 'badge-ghost text-ink'} min-w-5 font-mono text-xs font-semibold">{tab.count}</span>{/if}
 			</a>
 		{/each}
+		</div>
 	</div>
+	<a class="btn btn-outline shrink-0 gap-2" href={TBASE}><ArrowLeft size={16} aria-hidden="true" /> {t('tn.back_to_list')}</a>
 </nav>
 
 {@render children()}
