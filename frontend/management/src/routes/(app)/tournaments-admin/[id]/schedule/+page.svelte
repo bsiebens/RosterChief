@@ -72,16 +72,24 @@
 	const lrun = new Runner();
 	const lunch = $derived(data.lunch as LunchDoc | null);
 	const SETTING_KEYS = ['duration_minutes', 'gap_before_minutes', 'gap_after_minutes', 'capacity_teams', 'interval_minutes'] as const;
-	let lset = $state<Record<string, string>>({});
-	let ldays = $state<Record<string, { from: string; to: string }>>({});
+	/** The form values of the lunch document. Built synchronously for the first (server) render: effects do not run there. */
+	const lunchForm = (l: LunchDoc | null) => ({
+		set: Object.fromEntries(SETTING_KEYS.map((k) => [k, String(l?.settings[k] ?? '')])) as Record<string, string>,
+		days: Object.fromEntries((l?.days ?? []).map((d) => [d.date, { from: d.lunch_start ?? '', to: d.lunch_end ?? '' }])) as Record<string, { from: string; to: string }>
+	});
+	// svelte-ignore state_referenced_locally
+	let lset = $state(lunchForm(data.lunch as LunchDoc | null).set);
+	// svelte-ignore state_referenced_locally
+	let ldays = $state(lunchForm(data.lunch as LunchDoc | null).days);
 	let lresult = $state<LunchResult | null>(null);
 	let lgenOpen = $state(false);
 	let lclearOpen = $state(false);
 	$effect(() => {
 		const l = lunch;
 		if (!l) return;
-		lset = Object.fromEntries(SETTING_KEYS.map((k) => [k, String(l.settings[k] ?? '')]));
-		ldays = Object.fromEntries(l.days.map((d) => [d.date, { from: d.lunch_start ?? '', to: d.lunch_end ?? '' }]));
+		const f = lunchForm(l);
+		lset = f.set;
+		ldays = f.days;
 	});
 	const lunchDirty = $derived(
 		!!lunch && (SETTING_KEYS.some((k) => lset[k] !== String(lunch.settings[k] ?? '')) || lunch.days.some((d) => (ldays[d.date]?.from ?? '') !== (d.lunch_start ?? '') || (ldays[d.date]?.to ?? '') !== (d.lunch_end ?? '')))
@@ -194,8 +202,8 @@
 								<tr class="hover:bg-paper">
 									<td class="font-semibold whitespace-nowrap text-ink">{fmtDay(d.date)}</td>
 									<td class="hidden font-mono text-xs whitespace-nowrap sm:table-cell">{d.day_start}–{d.day_end}</td>
-									<td><input class="input input-bordered input-sm w-28" type="time" aria-label="{t('tn.lunch.col.from')} {fmtDay(d.date)}" bind:value={ldays[d.date].from} disabled={!canOperate} /></td>
-									<td><input class="input input-bordered input-sm w-28" type="time" aria-label="{t('tn.lunch.col.to')} {fmtDay(d.date)}" bind:value={ldays[d.date].to} disabled={!canOperate} /></td>
+									<td>{#if ldays[d.date]}<input class="input input-bordered input-sm w-28" type="time" aria-label="{t('tn.lunch.col.from')} {fmtDay(d.date)}" bind:value={ldays[d.date].from} disabled={!canOperate} />{/if}</td>
+									<td>{#if ldays[d.date]}<input class="input input-bordered input-sm w-28" type="time" aria-label="{t('tn.lunch.col.to')} {fmtDay(d.date)}" bind:value={ldays[d.date].to} disabled={!canOperate} />{/if}</td>
 									<td class="hidden sm:table-cell">{d.teams_eating}</td>
 									<td>
 										<div class="flex flex-wrap gap-1.5">
