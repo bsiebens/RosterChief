@@ -23,8 +23,8 @@
 			</select>
 			{#if errors.home_team_id}<span class="mt-1 block text-xs text-error">{errors.home_team_id}</span>{/if}
 		</div>
+		<Field label={t('tn.f.contact_email')} type="email" bind:value={v.contact_email} error={errors.contact_email} />
 	</div>
-	<Field label={t('tn.f.contact_email')} type="email" bind:value={v.contact_email} error={errors.contact_email} />
 	<div class="form-control w-full">
 		<label class="label" for="{id}-desc"><span class="label-text">{t('tn.f.description')}</span></label>
 		<textarea id="{id}-desc" class="textarea textarea-bordered min-h-28 w-full" bind:value={v.description}></textarea>
