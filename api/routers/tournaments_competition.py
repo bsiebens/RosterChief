@@ -207,6 +207,25 @@ def _manual_values(tournament, submitted) -> list:
     return out
 
 
+def _decided_result(stage, payload) -> tuple[int | None, int | None]:
+    """The penalty shots to store for a result, after checking the stage's draw rule: a level score is only accepted when the stage allows
+    draws, or when penalty shots (filled in and different) decide it. Shots are dropped from a result that is not level."""
+    if payload.score_home != payload.score_away:
+        return None, None
+    if stage.allows_draws:
+        return payload.penalty_home, payload.penalty_away
+    if not stage.uses_penalty_shots:
+        message = "This stage does not allow draws: enter the final score including any overtime goals."
+        raise Invalid(message, {"score_away": [message]}, code="draw_not_allowed")
+    if payload.penalty_home is None or payload.penalty_away is None:
+        message = "The game is level: enter the penalty shots score that decided it."
+        raise Invalid(message, {"penalty_home": [message]}, code="penalty_shots_required")
+    if payload.penalty_home == payload.penalty_away:
+        message = "Penalty shots must have a winner."
+        raise Invalid(message, {"penalty_away": [message]}, code="penalty_shots_level")
+    return payload.penalty_home, payload.penalty_away
+
+
 @router.post("/matches/{match_id}/result", summary="Enter the final score; later bracket slots fill in from it", operation_id="tournaments_match_result")
 def result(request, match_id: uuid.UUID, payload: ResultIn):
     c.gate_operate(request)
@@ -214,9 +233,10 @@ def result(request, match_id: uuid.UUID, payload: ResultIn):
     if match.home_team_id is None or match.away_team_id is None:
         raise Invalid("Both teams must be known before a score can be recorded.", {"detail": ["Both teams must be known before a score can be recorded."]}, code="teams_unknown")
     values = _manual_values(match.stage.tournament, payload.attributes)
+    penalty_home, penalty_away = _decided_result(match.stage, payload)
     with transaction.atomic():
         updated = svc.record_result(
-            match, score_home=payload.score_home, score_away=payload.score_away, went_to_overtime=payload.went_to_overtime, penalty_home=payload.penalty_home, penalty_away=payload.penalty_away
+            match, score_home=payload.score_home, score_away=payload.score_away, went_to_overtime=payload.went_to_overtime, penalty_home=penalty_home, penalty_away=penalty_away
         )  # fmt: skip
         for attribute, value in values:
             MatchAttributeValue.objects.update_or_create(match=match, attribute=attribute, defaults={"home_value": value.home, "away_value": value.away})

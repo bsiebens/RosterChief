@@ -5,7 +5,7 @@ import type { PageServerLoad } from './$types';
 
 export type ScoresData = {
 	stages: {
-		stage: Pick<StageDoc, 'id' | 'name' | 'format'>;
+		stage: Pick<StageDoc, 'id' | 'name' | 'format' | 'allow_draws' | 'penalty_shots'>;
 		ready_for_next_phase: boolean;
 		swiss_ready_for_next_round: boolean;
 		rounds: { round_number: number; label: string; all_complete: boolean; matches: MatchDoc[] }[];

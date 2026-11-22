@@ -400,6 +400,50 @@ class TournamentApiTests(TestCase):
         sid = self.as_("operate", "post", f"/{t.pk}/stages", {"name": "KO ranked", "format": "single_elim", "placement": True}).json()["id"]
         self.assertEqual(self.as_("operate", "post", f"/{t.pk}/stages/{sid}/generate-matches", {}).status_code, 422)
 
+    def test_stage_draw_rules_and_penalty_shots(self):
+        t = self.make()
+        for i in range(1, 5):
+            TournamentTeam.objects.create(tournament=t, foreign_name=f"T{i}", foreign_contact_name="C", foreign_contact_email="c@x.test", seed=i)
+        mk = lambda body: self.as_("operate", "post", f"/{t.pk}/stages", body).json()  # noqa: E731
+        table = mk({"name": "RR", "format": "round_robin"})
+        strict = mk({"name": "RR no draws", "format": "round_robin", "allow_draws": False})
+        shots = mk({"name": "RR shots", "format": "round_robin", "allow_draws": False, "penalty_shots": True})
+        ko = mk({"name": "KO", "format": "single_elim"})
+        self.assertEqual([(s["allow_draws"], s["penalty_shots"]) for s in (table, strict, shots, ko)], [(True, False), (False, False), (False, True), (False, True)])
+        # the setting survives an edit of another field, and a knockout cannot allow draws
+        self.assertFalse(self.as_("operate", "patch", f"/{t.pk}/stages/{strict['id']}", {"name": "Strict"}).json()["allow_draws"])
+        self.assertFalse(mk({"name": "KO2", "format": "double_elim", "allow_draws": True})["allow_draws"])
+
+        def play(stage, **result):
+            self.as_("operate", "post", f"/{t.pk}/stages/{stage['id']}/generate-matches", {})
+            match = Match.objects.filter(stage_id=stage["id"]).order_by("round_number", "sequence").first()
+            return self.as_("operate", "post", f"/matches/{match.pk}/result", {"score_home": 1, "score_away": 1, **result}), match
+
+        r, _m = play(table)
+        self.assertEqual(r.status_code, 200)  # a draw is fine here
+        r, _m = play(strict)
+        self.assertEqual((r.status_code, r.json()["code"]), (422, "draw_not_allowed"))
+        r, m = play(shots)
+        self.assertEqual((r.status_code, r.json()["code"]), (422, "penalty_shots_required"))
+        self.assertEqual(self.as_("operate", "post", f"/matches/{m.pk}/result", {"score_home": 1, "score_away": 1, "penalty_home": 3, "penalty_away": 3}).status_code, 422)
+        self.assertEqual(self.as_("operate", "post", f"/matches/{m.pk}/result", {"score_home": 1, "score_away": 1, "penalty_home": 4, "penalty_away": 3}).status_code, 200)
+        m.refresh_from_db()
+        self.assertEqual(m.winner, m.home_team)  # the shootout decided it
+        # a result that is not level drops stale shots
+        r = self.as_("operate", "post", f"/matches/{m.pk}/result", {"score_home": 2, "score_away": 1, "penalty_home": 4, "penalty_away": 3})
+        self.assertEqual(r.status_code, 200)
+        m.refresh_from_db()
+        self.assertEqual((m.penalty_home, m.penalty_away), (None, None))
+
+    def test_a_shootout_win_counts_as_a_win_in_the_standings(self):
+        t = self.make()
+        a = TournamentTeam.objects.create(tournament=t, foreign_name="A", foreign_contact_name="C", foreign_contact_email="c@x.test", seed=1)
+        b = TournamentTeam.objects.create(tournament=t, foreign_name="B", foreign_contact_name="C", foreign_contact_email="c@x.test", seed=2)
+        stage = TournamentStage.objects.create(tournament=t, name="RR", format="round_robin", config={"allow_draws": False, "penalty_shots": True})
+        Match.objects.create(stage=stage, round_number=1, sequence=0, home_team=a, away_team=b, status=Match.Status.COMPLETE, score_home=2, score_away=2, penalty_home=1, penalty_away=3)
+        rows = {r["team"]["name"]: r for r in self.as_("operate", "get", f"/{t.pk}/standings").json()["standings"][0]["tables"][0]["rows"]}
+        self.assertEqual((rows["B"]["won"], rows["B"]["points"], rows["A"]["lost"], rows["A"]["drawn"]), (1, 3, 1, 0))
+
     def test_delete_only_a_draft_tournament(self):
         body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}
         tid = self.as_("manage", "post", "", body).json()["id"]

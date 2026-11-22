@@ -53,8 +53,8 @@
 	}
 
 	// --- stages
-	type StageForm = { name: string; format: string; placement: boolean; rounds: string; num_groups: string; points_win: string; points_draw: string; points_loss: string; tiebreakers: Tiebreaker[] };
-	const blankStage = (): StageForm => ({ name: '', format: 'round_robin', placement: false, rounds: '', num_groups: '', points_win: '3', points_draw: '1', points_loss: '0', tiebreakers: [{ criterion: 'goal_diff', direction: 'most' }, { criterion: 'goals_for', direction: 'most' }] });
+	type StageForm = { name: string; format: string; placement: boolean; allow_draws: boolean; penalty_shots: boolean; rounds: string; num_groups: string; points_win: string; points_draw: string; points_loss: string; tiebreakers: Tiebreaker[] };
+	const blankStage = (): StageForm => ({ name: '', format: 'round_robin', placement: false, allow_draws: true, penalty_shots: true, rounds: '', num_groups: '', points_win: '3', points_draw: '1', points_loss: '0', tiebreakers: [{ criterion: 'goal_diff', direction: 'most' }, { criterion: 'goals_for', direction: 'most' }] });
 	let stageOpen = $state(false);
 	let editStage = $state<StageDoc | null>(null);
 	let sf = $state<StageForm>(blankStage());
@@ -63,7 +63,7 @@
 	function openStage(s: StageDoc | null) {
 		editStage = s;
 		sf = s
-			? { name: s.name, format: s.format, placement: s.placement, rounds: s.rounds === null ? '' : String(s.rounds), num_groups: s.num_groups === null ? '' : String(s.num_groups), points_win: String(s.points_win), points_draw: String(s.points_draw), points_loss: String(s.points_loss), tiebreakers: (s.tiebreakers ?? []).map((x) => ({ ...x })) }
+			? { name: s.name, format: s.format, placement: s.placement, allow_draws: s.is_knockout ? true : s.allow_draws, penalty_shots: s.penalty_shots, rounds: s.rounds === null ? '' : String(s.rounds), num_groups: s.num_groups === null ? '' : String(s.num_groups), points_win: String(s.points_win), points_draw: String(s.points_draw), points_loss: String(s.points_loss), tiebreakers: (s.tiebreakers ?? []).map((x) => ({ ...x })) }
 			: blankStage();
 		run.clear();
 		stageOpen = true;
@@ -74,6 +74,8 @@
 			name: sf.name.trim(),
 			format: sf.format,
 			placement: sf.format === 'single_elim' || sf.format === 'double_elim' ? sf.placement : false,
+			allow_draws: sf.allow_draws,
+			penalty_shots: sf.penalty_shots,
 			rounds: sf.format === 'swiss' ? numOrNull(sf.rounds) : null,
 			num_groups: sf.format === 'groups' ? numOrNull(sf.num_groups) : null,
 			points_win: Number(sf.points_win || 0),
@@ -736,11 +738,36 @@
 				</span>
 			</label>
 		{/if}
+		<fieldset class="grid gap-3 rounded-lg border border-line p-3">
+			<legend class="px-1 font-display text-xs font-bold tracking-[.08em] text-muted uppercase">{t('tn.setup.level_title')}</legend>
+			{#if sf.format === 'single_elim' || sf.format === 'double_elim'}
+				<p class="text-sm text-muted">{t('tn.setup.level_knockout')}</p>
+			{:else}
+				<label class="flex cursor-pointer items-start gap-3">
+					<input type="checkbox" class="checkbox mt-0.5" bind:checked={sf.allow_draws} />
+					<span class="min-w-0">
+						<span class="block text-sm font-semibold text-ink">{t('tn.setup.allow_draws')}</span>
+						<span class="block text-xs text-muted">{t('tn.setup.allow_draws_help')}</span>
+					</span>
+				</label>
+			{/if}
+			{#if sf.format === 'single_elim' || sf.format === 'double_elim' || !sf.allow_draws}
+				<label class="flex cursor-pointer items-start gap-3">
+					<input type="checkbox" class="checkbox mt-0.5" bind:checked={sf.penalty_shots} />
+					<span class="min-w-0">
+						<span class="block text-sm font-semibold text-ink">{t('tn.setup.penalty_shots')}</span>
+						<span class="block text-xs text-muted">{sf.penalty_shots ? t('tn.setup.penalty_shots_on') : t('tn.setup.penalty_shots_off')}</span>
+					</span>
+				</label>
+			{/if}
+		</fieldset>
 		{#if sf.format === 'swiss'}<Field label={t('tn.setup.rounds')} type="number" min="1" bind:value={sf.rounds} error={run.fields.rounds} required />{/if}
 		{#if sf.format === 'groups'}<Field label={t('tn.setup.num_groups')} type="number" min="1" bind:value={sf.num_groups} error={run.fields.num_groups} required />{/if}
 		<div class="grid grid-cols-3 gap-3">
 			<Field label={t('tn.setup.points_win')} type="number" bind:value={sf.points_win} error={run.fields.points_win} />
-			<Field label={t('tn.setup.points_draw')} type="number" bind:value={sf.points_draw} error={run.fields.points_draw} />
+			{#if sf.allow_draws && sf.format !== 'single_elim' && sf.format !== 'double_elim'}
+				<Field label={t('tn.setup.points_draw')} type="number" bind:value={sf.points_draw} error={run.fields.points_draw} />
+			{/if}
 			<Field label={t('tn.setup.points_loss')} type="number" bind:value={sf.points_loss} error={run.fields.points_loss} />
 		</div>
 		<fieldset class="grid gap-2">

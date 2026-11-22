@@ -21,13 +21,19 @@
 
 	let open = $state(false);
 	let m = $state<MatchDoc | null>(null);
+	let mStage = $state<{ allow_draws: boolean; penalty_shots: boolean } | null>(null);
 	let f = $state({ home: '', away: '', ot: false, ph: '', pa: '', attrs: {} as Record<string, { home: string; away: string }> });
-	function openResult(match: MatchDoc) {
+	function openResult(match: MatchDoc, stage: { allow_draws: boolean; penalty_shots: boolean }) {
 		m = match;
+		mStage = stage;
 		f = { home: match.score_home === null ? '' : String(match.score_home), away: match.score_away === null ? '' : String(match.score_away), ot: match.went_to_overtime, ph: match.penalty_home === null ? '' : String(match.penalty_home), pa: match.penalty_away === null ? '' : String(match.penalty_away), attrs: Object.fromEntries(manualAttrs.map((a) => [a.key, { home: String(match.attributes?.[a.key]?.home ?? 0), away: String(match.attributes?.[a.key]?.away ?? 0) }])) };
 		run.clear();
 		open = true;
 	}
+	// A level score needs deciding when the stage does not allow draws: by penalty shots, or (without them) by playing on.
+	const level = $derived(f.home !== '' && f.away !== '' && Number(f.home) === Number(f.away));
+	const needsShots = $derived(level && !!mStage && !mStage.allow_draws && mStage.penalty_shots);
+	const drawBlocked = $derived(level && !!mStage && !mStage.allow_draws && !mStage.penalty_shots);
 	async function save(e: SubmitEvent) {
 		e.preventDefault();
 		if (!m) return;
@@ -118,7 +124,7 @@
 											<td class="text-sm">{x.away_display}</td>
 											<td class="w-32 text-right"><div class="flex items-center justify-end gap-1">
 												<button class="btn btn-outline btn-xs btn-square relative" type="button" aria-label={t('tn.scores.timeline')} title={t('tn.scores.timeline')} onclick={() => openTimeline(x)}><ListOrdered size={13} />{#if (x.event_count ?? 0) > 0}<span class="badge badge-neutral badge-xs absolute -top-1.5 -right-1.5">{x.event_count}</span>{/if}</button>
-												{#if canOperate}<button class="btn btn-outline btn-xs" type="button" disabled={!x.home_team || !x.away_team} onclick={() => openResult(x)}>{done(x) ? t('common.edit') : t('tn.scores.enter')}</button>{/if}
+												{#if canOperate}<button class="btn btn-outline btn-xs" type="button" disabled={!x.home_team || !x.away_team} onclick={() => openResult(x, st.stage)}>{done(x) ? t('common.edit') : t('tn.scores.enter')}</button>{/if}
 											</div></td>
 										</tr>
 									{/each}
@@ -146,10 +152,19 @@
 		</div>
 		{#each ['score_home', 'score_away'] as k (k)}{#if run.fields[k]}<span class="text-xs text-error">{run.fields[k]}</span>{/if}{/each}
 		<label class="flex cursor-pointer items-center gap-3 rounded-lg border border-line p-3"><input type="checkbox" class="checkbox" bind:checked={f.ot} /><span class="text-sm">{t('tn.scores.overtime')}</span></label>
-		<div class="grid grid-cols-2 gap-3">
-			<label class="form-control"><span class="label-text mb-1">{t('tn.scores.pen_home')}</span><input class="input input-bordered w-full" type="number" min="0" bind:value={f.ph} /></label>
-			<label class="form-control"><span class="label-text mb-1">{t('tn.scores.pen_away')}</span><input class="input input-bordered w-full" type="number" min="0" bind:value={f.pa} /></label>
-		</div>
+		{#if drawBlocked}
+			<Alert kind="warning">{t('tn.scores.draw_blocked')}</Alert>
+		{:else if needsShots}
+			<div class="grid gap-2 rounded-lg border border-line p-3">
+				<p class="text-sm font-semibold text-ink">{t('tn.scores.shots_title')}</p>
+				<p class="text-xs text-muted">{t('tn.scores.shots_help')}</p>
+				<div class="grid grid-cols-2 gap-3">
+					<label class="form-control"><span class="label-text mb-1">{t('tn.scores.pen_home')}</span><input class="input input-bordered w-full" type="number" min="0" required bind:value={f.ph} /></label>
+					<label class="form-control"><span class="label-text mb-1">{t('tn.scores.pen_away')}</span><input class="input input-bordered w-full" type="number" min="0" required bind:value={f.pa} /></label>
+				</div>
+				{#each ['penalty_home', 'penalty_away'] as k (k)}{#if run.fields[k]}<span class="text-xs text-error">{run.fields[k]}</span>{/if}{/each}
+			</div>
+		{/if}
 		{#if manualAttrs.length}
 			<div class="grid gap-2 rounded-lg border border-line p-3">
 				<p class="text-xs font-bold text-muted">{t('tn.scores.attr_manual')}</p>
@@ -172,7 +187,7 @@
 		{/if}
 		<div class="modal-action mt-2 flex justify-end gap-2">
 			<button class="btn btn-outline" type="button" onclick={() => (open = false)}>{t('common.cancel')}</button>
-			<button class="btn btn-primary" type="submit" disabled={run.busy}>{t('common.save')}</button>
+			<button class="btn btn-primary" type="submit" disabled={run.busy || drawBlocked}>{t('common.save')}</button>
 		</div>
 	</form>
 </Modal>

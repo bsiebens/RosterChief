@@ -236,6 +236,7 @@ def stage_summary(stage: TournamentStage) -> dict:
     return {
         "id": stage.pk, "name": stage.name, "sequence": stage.sequence, "format": stage.format, "status": stage.status,
         "rounds": config.get("rounds"), "num_groups": config.get("num_groups"), "placement": bool(config.get("placement")),
+        "allow_draws": stage.allows_draws, "penalty_shots": stage.uses_penalty_shots, "is_knockout": stage.is_knockout,
         "points_win": points.get("win", 3), "points_draw": points.get("draw", 1), "points_loss": points.get("loss", 0),
         "tiebreakers": tiebreakers, "tiebreaker_1": legacy[0] if legacy else None, "tiebreaker_2": legacy[1] if len(legacy) > 1 else None,
     }

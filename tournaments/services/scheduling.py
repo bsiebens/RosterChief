@@ -894,12 +894,16 @@ def compute_standings(stage: TournamentStage, *, group: TournamentGroup | None =
             home["attributes"][value.attribute.key] += value.home_value
             away["attributes"][value.attribute.key] += value.away_value
 
-        if match.score_home > match.score_away:
+        # A game level after play but decided by penalty shots has a winner: it counts as a win and a loss, not as a draw.
+        shootout = match.score_home == match.score_away and match.penalty_home is not None and match.penalty_away is not None and match.penalty_home != match.penalty_away
+        home_won = match.score_home > match.score_away or (shootout and match.penalty_home > match.penalty_away)
+        away_won = match.score_away > match.score_home or (shootout and match.penalty_away > match.penalty_home)
+        if home_won:
             home["won"] += 1
             away["lost"] += 1
             home["points"] += points_config["win"]
             away["points"] += points_config["loss"]
-        elif match.score_away > match.score_home:
+        elif away_won:
             away["won"] += 1
             home["lost"] += 1
             away["points"] += points_config["win"]
@@ -956,12 +960,11 @@ def _break_ties(tied_rows: list[dict], tiebreakers: list[dict]) -> list[dict]:
     if criterion == "head_to_head":
         team_ids = {row["team"].id for row in tied_rows}
         mini_table = {row["team"].id: 0 for row in tied_rows}
-        head_to_head_matches = Match.objects.filter(status=Match.Status.COMPLETE, score_home__isnull=False, score_away__isnull=False, home_team_id__in=team_ids, away_team_id__in=team_ids)
+        head_to_head_matches = Match.objects.filter(status=Match.Status.COMPLETE, score_home__isnull=False, score_away__isnull=False, home_team_id__in=team_ids, away_team_id__in=team_ids).select_related("home_team", "away_team")
         for match in head_to_head_matches:
-            if match.score_home > match.score_away:
-                mini_table[match.home_team_id] += 3
-            elif match.score_away > match.score_home:
-                mini_table[match.away_team_id] += 3
+            decided = match.winner  # the score, or the shootout when the score is level
+            if decided is not None:
+                mini_table[decided.id] += 3
             else:
                 mini_table[match.home_team_id] += 1
                 mini_table[match.away_team_id] += 1

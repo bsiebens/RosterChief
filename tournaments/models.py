@@ -472,6 +472,21 @@ class TournamentStage(UUIDModel):
     def __str__(self):
         return f"{self.tournament} - {self.name}"
 
+    @property
+    def is_knockout(self) -> bool:
+        return self.format in (self.Format.SINGLE_ELIM, self.Format.DOUBLE_ELIM)
+
+    @property
+    def allows_draws(self) -> bool:
+        """Whether a game of this stage may end level. A knockout never can (someone has to advance); a table stage can unless its
+        setting says otherwise."""
+        return not self.is_knockout and (self.config or {}).get("allow_draws", True)
+
+    @property
+    def uses_penalty_shots(self) -> bool:
+        """Whether a level game is decided by penalty shots (only matters when draws are not allowed). Defaults on for knockouts."""
+        return bool((self.config or {}).get("penalty_shots", self.is_knockout))
+
 
 class TournamentGroup(UUIDModel):
     """Populated only for group-flavoured stages, including a groups stage
@@ -906,7 +921,9 @@ class Match(UUIDModel):
             return self.home_team
         if self.score_away > self.score_home:
             return self.away_team
-        return None  # a draw has no winner/loser to feed forward without penalty scores
+        if self.penalty_home is not None and self.penalty_away is not None and self.penalty_home != self.penalty_away:
+            return self.home_team if self.penalty_home > self.penalty_away else self.away_team  # level after play: the shootout decides
+        return None  # a draw has no winner/loser to feed forward
 
     @property
     def loser(self):

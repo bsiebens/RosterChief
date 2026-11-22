@@ -64,6 +64,7 @@ def _stage_doc(stage: TournamentStage, stage_count: int) -> dict:
 def _stage_values(stage: TournamentStage, payload: dict):
     """Apply the stage form fields: name/sequence/format, ``config`` (rounds, num_groups), ``standings_config`` (points, tiebreakers)."""
     current = c.stage_summary(stage) if stage.pk else {}
+    stored = dict(stage.config or {})  # what was saved before: the summary reports effective values, which must not leak across a format change
     merged = {**current, **payload}
     if merged.get("format") == TournamentStage.Format.SWISS and not merged.get("rounds"):
         raise Invalid("Required for a Swiss stage.", {"rounds": ["Required for a Swiss stage."]})
@@ -72,6 +73,13 @@ def _stage_values(stage: TournamentStage, payload: dict):
     stage.name, stage.format = merged["name"], merged["format"]
     stage.sequence = merged["sequence"] if merged.get("sequence") is not None else stage.sequence
     stage.config = {k: merged[k] for k in ("rounds", "num_groups") if merged.get(k)}
+    knockout = merged["format"] in (TournamentStage.Format.SINGLE_ELIM, TournamentStage.Format.DOUBLE_ELIM)
+    allow_draws = payload["allow_draws"] if payload.get("allow_draws") is not None else stored.get("allow_draws", True)
+    penalty_shots = payload["penalty_shots"] if payload.get("penalty_shots") is not None else stored.get("penalty_shots")
+    if not knockout and allow_draws is False:
+        stage.config["allow_draws"] = False  # "draws allowed" is the default, so only the exception is stored
+    if (knockout or allow_draws is False) and penalty_shots is not None:
+        stage.config["penalty_shots"] = bool(penalty_shots)
     if merged.get("placement") and merged["format"] in SEEDABLE:
         stage.config["placement"] = True  # a full ranking: the losers play on until every place is decided
     stage.standings_config = {

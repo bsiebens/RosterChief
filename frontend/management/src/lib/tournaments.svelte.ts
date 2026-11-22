@@ -149,6 +149,9 @@ export type StageDoc = {
 	needs_seed_choice: boolean;
 	supports_placement: boolean;
 	placement: boolean;
+	allow_draws: boolean;
+	penalty_shots: boolean;
+	is_knockout: boolean;
 };
 export type FieldDoc = { id: string; name: string; availability: { date: string; start: string; end: string }[] };
 export type BreakRule = {
