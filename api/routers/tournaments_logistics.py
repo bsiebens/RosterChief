@@ -6,17 +6,18 @@ needs ``tournaments.manage_tournaments``. Members claim shifts themselves throug
 import itertools
 import uuid
 
+from django.http import HttpResponse
 from ninja import Router
 
 from api.auth import AUTHENTICATORS
 from api.routers import tournaments_common as c
 from api.schemas_tournaments import DressingAssignIn, DressingRoomIn, DressingRoomPatch, TaskAssignIn, TaskGenerateIn, TaskIn, TaskPatch
-from events.services.tasks import claim_label_for
 from formbuilder.services.management import Conflict
 from members.models import Member
 from members.services.errors import Invalid
 from tournaments.models import DressingRoom, DressingRoomAssignment, TournamentTask, TournamentTaskClaim, TournamentTeam
 from tournaments.services import dressing_rooms as rooms_svc
+from tournaments.services import pdf as pdf_svc
 from tournaments.services import tasks as tasks_svc
 
 router = Router(auth=AUTHENTICATORS)
@@ -31,7 +32,7 @@ def task_out(task: TournamentTask) -> dict:
     return {
         "id": task.pk, "title": task.title, "description": task.description, "starts_at": task.starts_at, "ends_at": task.ends_at, "location_label": task.location_label,
         "needed_quantity": task.needed_quantity, "claimed_count": len(claims), "open_slots": max(task.needed_quantity - len(claims), 0), "is_full": len(claims) >= task.needed_quantity,
-        "claims": [{"id": cl.pk, "member": c.ref(cl.member), "label": claim_label_for(cl.member), "claimed_at": cl.claimed_at} for cl in claims],
+        "claims": [{"id": cl.pk, "member": c.ref(cl.member), "label": cl.member.get_full_name(), "claimed_at": cl.claimed_at} for cl in claims],
     }  # fmt: skip
 
 
@@ -51,6 +52,20 @@ def _creator(request):
 def list_tasks(request, tournament_id: uuid.UUID):
     c.gate_view(request)
     return {"results": [task_out(t) for t in _tasks(c.get_tournament(tournament_id))]}
+
+
+@router.get("/{tournament_id}/tasks/pdf", summary="The volunteer overview as a PDF: a block chart per day plus the shift list", operation_id="tournaments_tasks_pdf")
+def tasks_pdf(request, tournament_id: uuid.UUID):
+    c.gate_view(request)
+    t = c.get_tournament(tournament_id)
+    try:
+        data = pdf_svc.tasks_pdf(request.tenant, t)
+    except pdf_svc.PDFUnavailable:
+        return HttpResponse('{"detail": "PDF rendering is not available.", "code": "pdf_unavailable"}', status=503, content_type="application/json")
+    response = HttpResponse(data, content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="{t.slug}-volunteers.pdf"'
+    response["Cache-Control"] = "private, no-store"
+    return response
 
 
 @router.get("/{tournament_id}/tasks/print", summary="Print overview: shifts per location with timeline positions", operation_id="tournaments_tasks_print")

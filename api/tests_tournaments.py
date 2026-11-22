@@ -550,6 +550,28 @@ class TournamentApiTests(TestCase):
         t.tasks.all().delete()
         self.assertEqual(self.as_("operate", "post", f"/{t.pk}/tasks/generate", {**gen, "ends_at": "2026-09-19T10:00:00Z"}).json()["created_count"], 1)
 
+    def test_tasks_overview_pdf_context_and_endpoint(self):
+        from django.template.loader import render_to_string
+
+        t = self.make()
+        gen = {"title": "Clock", "location_label": "Box", "starts_at": "2026-09-19T09:00:00Z", "ends_at": "2026-09-19T17:00:00Z", "shift_minutes": 120, "needed_quantity": 2, "remainder": "shorter"}
+        self.as_("operate", "post", f"/{t.pk}/tasks/generate", gen)
+        task = t.tasks.order_by("starts_at").first()
+        self.as_("operate", "post", f"/{t.pk}/tasks/{task.pk}/assign", {"member_id": str(self.users["manage_member"].pk)})
+        from tournaments.services.pdf import tasks_overview_context
+
+        ctx = tasks_overview_context(t)
+        self.assertEqual((ctx["task_count"], ctx["total_slots"], ctx["open_slots"], len(ctx["days"])), (4, 8, 7, 1))
+        day = ctx["days"][0]
+        self.assertEqual(len(day["rows"]), 1)
+        self.assertEqual([round(b["width"]) for b in day["rows"][0]["blocks"]], [25, 25, 25, 25])  # four two-hour blocks on an 8 hour axis
+        html = render_to_string("tournaments/pdf/tasks.html", {"club": self.club, "tournament": t, **ctx, "generated_at": task.created})
+        self.assertIn("Clock", html)
+        self.assertIn("1/2", html)
+        with mock.patch("tournaments.services.pdf._write_pdf", return_value=b"%PDF-1"):
+            r = self.as_("manage", "get", f"/{t.pk}/tasks/pdf")
+            self.assertEqual((r.status_code, r["Content-Type"]), (200, "application/pdf"))
+
     def test_delete_only_a_draft_tournament(self):
         body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}
         tid = self.as_("manage", "post", "", body).json()["id"]
@@ -973,6 +995,8 @@ class TournamentApiTests(TestCase):
         listed = self.call("get", f"/{t.slug}/tasks", plain, prefix="/portal/tournaments").json()["results"]
         self.assertEqual([x["claimed"] for x in listed], [1, 0, 0])
         self.assertEqual(self.as_("operate", "get", f"/{t.pk}/tasks").json()["results"][0]["claims"][0]["member"]["id"], str(self.users["plain_member"].pk))
+        claim = self.as_("operate", "get", f"/{t.pk}/tasks").json()["results"][0]["claims"][0]
+        self.assertEqual(claim["label"], self.users["plain_member"].get_full_name())  # the person, not their family
         r = self.as_("operate", "post", f"/{t.pk}/tasks/{task.pk}/assign", {"member_id": str(self.users["manage_member"].pk)})
         self.assertEqual(r.status_code, 409)  # full
         self.assertEqual(self.call("delete", f"/tasks/{task.pk}/claim", plain, prefix="/portal/tournaments").json()["claimed"], 0)

@@ -99,7 +99,7 @@
 </script>
 
 {#snippet actions()}
-	<a class="btn btn-outline gap-2" href="{TBASE}/{hdr.id}/tasks/print"><Printer size={16} /> {t('tn.tasks.print')}</a>
+	<a class="btn btn-outline gap-2" href="/api/v1/tournaments/{hdr.id}/tasks/pdf" target="_blank" rel="noopener"><Printer size={16} /> {t('tn.tasks.print')}</a>
 	{#if hdr.canOperate}
 		<button class="btn btn-outline gap-2" type="button" onclick={() => { run.clear(); gap = null; genOpen = true; }}><Wand2 size={16} /> {t('tn.tasks.generate')}</button>
 		{#if hdr.taskCount > 0}<button class="btn btn-outline btn-error gap-2" type="button" onclick={() => { run.clear(); clearOpen = true; }}><Eraser size={16} /> {t('tn.tasks.clear')}</button>{/if}
