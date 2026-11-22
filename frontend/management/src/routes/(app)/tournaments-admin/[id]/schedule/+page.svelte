@@ -184,8 +184,8 @@
 				{#each sched.blocks as b (b.id)}
 					<div class="flex flex-wrap items-center gap-3 rounded-lg border border-line p-3">
 						<div class="min-w-0 flex-1">
-							<strong class="text-ink">{b.title}</strong>{#if b.kind === 'lunch'} <span class="badge badge-sm badge-info">{t('tn.lunch.kind')}</span>{/if}
-							<p class="font-mono text-xs text-muted">{fmtDateTime(b.starts_at)} – {fmtTime(b.ends_at)} · {b.field?.name ?? t('tn.sched.all_fields')}{b.teams.length ? ` · ${b.teams.map((x) => x.name).join(', ')}` : ''}</p>
+							<div class="flex items-center gap-2"><strong class="leading-none text-ink">{b.title}</strong>{#if b.kind === 'lunch'}<span class="badge badge-sm badge-info">{t('tn.lunch.kind')}</span>{/if}</div>
+							<p class="mt-1.5 font-mono text-xs text-muted">{fmtDateTime(b.starts_at)} – {fmtTime(b.ends_at)} · {b.field?.name ?? t('tn.sched.all_fields')}{b.teams.length ? ` · ${b.teams.map((x) => x.name).join(', ')}` : ''}</p>
 						</div>
 						{#if canOperate && b.kind !== 'lunch'}
 							<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.sched.edit_block')} onclick={() => openBlock(b)}><Pencil size={13} /></button>
