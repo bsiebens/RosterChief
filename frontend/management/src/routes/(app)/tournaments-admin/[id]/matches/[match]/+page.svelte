@@ -194,9 +194,9 @@
 	{#if data.error || !game || !m}
 		<Alert kind="error">{t('common.error.generic')}</Alert>
 	{:else}
-		<section class="card card-body card-hl gap-2">
+		<section class="card card-body card-hl relative gap-2">
 			<p class="text-xs text-muted">{[m.round_label || t('tn.standings.round', { n: m.round_number }), m.scheduled_start ? fmtDateTime(m.scheduled_start) : '', m.field?.name, m.leg ? t('tn.leg', { n: m.leg }) : ''].filter(Boolean).join(' · ')}</p>
-			{#if live}<div class="flex justify-center"><LiveBadge size="lg" /></div>{/if}
+			{#if live}<div class="absolute top-4 right-4"><LiveBadge /></div>{/if}
 			<div class="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
 				<div class="flex items-center justify-end gap-2 text-right font-display text-lg font-extrabold text-ink">
 					{m.home_display}

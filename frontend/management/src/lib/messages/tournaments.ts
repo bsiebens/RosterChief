@@ -550,6 +550,8 @@ const rows: [string, string, string, string][] = [
 	['tn.scores.complete', 'Complete', 'Afgewerkt', 'Terminé'],
 	['tn.scores.ot', 'OT', 'VL', 'Prol.'],
 	['tn.scores.overtime', 'Went to overtime', 'Verlengingen gespeeld', 'Prolongations jouées'],
+	['tn.legs_line', 'Leg 1 {a} · Leg 2 {b}', 'Wedstrijd 1 {a} · Wedstrijd 2 {b}', 'Aller {a} · Retour {b}'],
+	['tn.scores.legs', 'Legs', 'Wedstrijden', 'Matchs'],
 	['tn.scores.first_leg', 'First leg: {h}–{a}', 'Eerste wedstrijd: {h}–{a}', 'Match aller : {h}–{a}'],
 	['tn.scores.draw_blocked', 'This stage does not allow draws: change the score so one team wins, including any overtime goals.', 'Deze fase staat geen gelijkspel toe: pas de stand aan zodat één team wint, inclusief eventuele verlengingsdoelpunten.', 'Cette phase n’autorise pas les matchs nuls : modifiez le score pour qu’une équipe gagne, buts de prolongation compris.'],
 	['tn.scores.shots_title', 'Level game: penalty shots', 'Gelijke stand: strafschoppen', 'Égalité : tirs au but'],
