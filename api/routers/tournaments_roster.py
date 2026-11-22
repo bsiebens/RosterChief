@@ -5,6 +5,7 @@ a roster needs ``tournaments.operate_tournaments``. Staff can always edit a rost
 import datetime
 import uuid
 
+from django.db import connection
 from django.http import HttpResponse
 from ninja import Router
 
@@ -15,6 +16,7 @@ from members.services.errors import Invalid
 from tournaments.models import Tournament, TournamentRosterEntry, TournamentRosterRole
 from tournaments.services import pdf as pdf_svc
 from tournaments.services.lunch import daily_lunch_summary
+from tournaments.sports import HOCKEY_POSITIONS, is_ice_hockey, normalise_position
 
 router = Router(auth=AUTHENTICATORS)
 
@@ -38,6 +40,19 @@ def lunch_out(tournament: Tournament, entries) -> list[dict]:
     if tournament.lunch_mode == Tournament.LunchMode.NONE:
         return []
     return [{"date": d["date"], "player_count": d["player_count"], "staff_count": d["staff_count"], "dietary_notes": d["dietary_notes"]} for d in daily_lunch_summary(tournament, entries)]
+
+
+def check_position(label: str, role: str, key: str = "position_label") -> str:
+    """The position to store. Ice hockey players have a fixed choice (forward, defense, goalie): a recognised word is mapped onto it, anything
+    else is a 422; blank stays blank, and staff functions and every other sport are free text."""
+    label = (label or "").strip()
+    if not label or role == TournamentRosterRole.STAFF or not is_ice_hockey(getattr(connection.tenant, "sport", None)):
+        return label
+    position = normalise_position(label)
+    if not position:
+        message = f"Choose one of: {', '.join(HOCKEY_POSITIONS)}."
+        raise Invalid(message, {key: [message]})
+    return position
 
 
 def roster_doc(tournament: Tournament, team) -> dict:
@@ -75,7 +90,7 @@ def add_entry(request, tournament_id: uuid.UUID, team_id: uuid.UUID, payload: Ro
     check_birth_date(payload.date_of_birth)
     entry = TournamentRosterEntry(
         tournament_team=team, foreign_first_name=payload.first_name.strip(), foreign_last_name=payload.last_name.strip(), jersey_number=payload.jersey_number, role=payload.role,
-        position_label=payload.position_label, date_of_birth=None if payload.role == TournamentRosterRole.STAFF else payload.date_of_birth, license_number=payload.license_number,
+        position_label=check_position(payload.position_label, payload.role), date_of_birth=None if payload.role == TournamentRosterRole.STAFF else payload.date_of_birth, license_number=payload.license_number,
         dietary_restrictions=payload.dietary_restrictions, lunch_days=lunch_days_for(tournament, payload.lunch_days),
     )  # fmt: skip
     c.validate(entry)
@@ -111,6 +126,8 @@ def update_entry(request, tournament_id: uuid.UUID, team_id: uuid.UUID, entry_id
     entry = _entry(team, entry_id)
     data = payload.dict(exclude_unset=True)
     check_birth_date(data.get("date_of_birth"))
+    if "position_label" in data:
+        data["position_label"] = check_position(data["position_label"], data.get("role", entry.role))
     names = {"first_name": "foreign_first_name", "last_name": "foreign_last_name"}
     for key, attr in names.items():
         if key in data and not entry.member_id:

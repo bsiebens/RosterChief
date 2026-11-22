@@ -67,3 +67,18 @@ def penalty_minutes(length: str) -> int:
 def is_ice_hockey(sport) -> bool:
     """Whether a ``club.Sport`` (or ``None``) is ice hockey: its name or slug mentions hockey."""
     return bool(sport and re.search(r"hockey", f"{sport.name} {sport.slug}", re.IGNORECASE))
+
+
+#: The fixed positions of an ice hockey player. Free text (a coach typing "centre" or "keeper") is mapped onto one of them.
+HOCKEY_POSITIONS = ("Forward", "Defense", "Goalie")
+_POSITION_ALIASES = {
+    "Forward": {"forward", "forwards", "fw", "f", "wing", "winger", "left wing", "right wing", "lw", "rw", "center", "centre", "c", "attacker", "striker"},
+    "Defense": {"defense", "defence", "defenseman", "defenceman", "defender", "d", "dm"},
+    "Goalie": {"goalie", "goalies", "goalkeeper", "goaltender", "keeper", "g", "gk"},
+}
+
+
+def normalise_position(label: str | None) -> str:
+    """The ice hockey position a free text label stands for ("Forward", "Defense" or "Goalie"), or "" when it is empty or unknown."""
+    key = (label or "").strip().lower()
+    return next((position for position, aliases in _POSITION_ALIASES.items() if key in aliases or key == position.lower()), "")

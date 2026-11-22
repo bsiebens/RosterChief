@@ -12,7 +12,7 @@ from io import BytesIO
 
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import Q
 from django.utils import timezone
 from ninja import File, Router, UploadedFile
@@ -21,12 +21,13 @@ from ninja.errors import HttpError
 from api.routers import tournaments_common as c
 from api.routers.public_registration import _address, _count, _too_many
 from api.routers.tournaments_competition import stages_doc, standings_doc
-from api.routers.tournaments_roster import check_birth_date, lunch_days_for
+from api.routers.tournaments_roster import check_birth_date, check_position, lunch_days_for
 from api.schemas_tournaments import PlayerRowIn, PlayersIn, PublicRegistrationIn
 from members.services.errors import Invalid
 from news.services import render_body_html
 from tournaments.models import Match, Tournament, TournamentRegistration, TournamentRegistrationPlayer, TournamentRosterEntry, TournamentRosterRole, TournamentTeam
 from tournaments.services import notifications
+from tournaments.sports import is_ice_hockey
 
 router = Router(auth=None)
 
@@ -80,7 +81,7 @@ def detail(request, slug: str):
         **item(t),
         "description_html": render_body_html(t.description) if t.description else "", "contact_email": t.contact_email, "earliest_birth_year": t.earliest_birth_year, "latest_birth_year": t.latest_birth_year,
         "entry_fee_amount": _money(t.entry_fee_amount), "deposit_amount": _money(t.deposit_amount), "lunch_mode": t.lunch_mode, "lunch_price_per_day": _money(t.lunch_price_per_day),
-        "dates": t.date_range(), "registration_open": t.registration_open, "stages": [c.stage_summary(s) for s in t.stages.order_by("sequence")],
+        "ice_hockey": is_ice_hockey(getattr(connection.tenant, "sport", None)), "dates": t.date_range(), "registration_open": t.registration_open, "stages": [c.stage_summary(s) for s in t.stages.order_by("sequence")],
         "upcoming_matches": _upcoming_matches(t), **standings_doc(t),
     }  # fmt: skip
 
@@ -156,7 +157,7 @@ def _people(t: Tournament, rows: list[PlayerRowIn]) -> list[dict]:
             jerseys.add(row.jersey_number)
         out.append(
             {
-                "first_name": first, "last_name": last, "jersey_number": row.jersey_number, "role": row.role, "position_label": row.position_label.strip(),
+                "first_name": first, "last_name": last, "jersey_number": row.jersey_number, "role": row.role, "position_label": check_position(row.position_label, row.role, f"{key}.position_label"),
                 "date_of_birth": None if row.role == TournamentRosterRole.STAFF else row.date_of_birth, "license_number": row.license_number.strip(),
                 "dietary_restrictions": row.dietary_restrictions.strip(), "lunch_days": lunch_days_for(t, row.lunch_days),
             }
@@ -242,7 +243,7 @@ def _registration_doc(r: TournamentRegistration) -> dict:
     mandatory_total, lunch_total = _lunch_totals(t, rows)
     return {
         "tournament": {
-            **item(t), "contact_email": t.contact_email, "lunch_mode": t.lunch_mode, "lunch_price_per_day": _money(t.lunch_price_per_day), "dates": t.date_range(),
+            **item(t), "contact_email": t.contact_email, "lunch_mode": t.lunch_mode, "lunch_price_per_day": _money(t.lunch_price_per_day), "dates": t.date_range(), "ice_hockey": is_ice_hockey(getattr(connection.tenant, "sport", None)),
             "earliest_birth_year": t.earliest_birth_year, "latest_birth_year": t.latest_birth_year,
         },
         "registration": {

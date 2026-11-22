@@ -6,13 +6,14 @@ rather than each reimplementing them.
 
 from datetime import datetime, time
 
-from django.db import transaction
+from django.db import connection, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from teams.models import TeamMembership
 
 from ..models import TournamentRegistration, TournamentRosterEntry, TournamentRosterRole, TournamentTeam
+from ..sports import is_ice_hockey, normalise_position
 
 
 class RegistrationDecisionError(Exception):
@@ -237,7 +238,8 @@ def sync_team_roster(team: TournamentTeam) -> None:
         number = membership.jersey_number if membership and membership.jersey_number not in taken else None
         if number is not None:
             taken.add(number)
-        return number, (membership.position.name if membership and membership.position_id else "")
+        name = membership.position.name if membership and membership.position_id else ""
+        return number, (normalise_position(name) if is_ice_hockey(getattr(connection.tenant, "sport", None)) else name)  # ice hockey: forward, defense or goalie
 
     for entry in team.roster_entries.filter(member_id__in=wanted & on_roster, role=TournamentRosterRole.PLAYER):
         if entry.jersey_number is not None and entry.position_label:

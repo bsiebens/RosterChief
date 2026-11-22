@@ -1176,7 +1176,7 @@ class TournamentApiTests(TestCase):
 
         self.club.sport = Sport.objects.create(name="Ice hockey")
         self.club.save()
-        _t, _stage, _teams, (m1, _m2) = self._league()
+        t, _stage, _teams, (m1, _m2) = self._league()
         home, away = m1.home_team, m1.away_team
         mk = lambda team, n, first: TournamentRosterEntry.objects.create(tournament_team=team, foreign_first_name=first, foreign_last_name="X", jersey_number=n)  # noqa: E731
         h1, h2, h3 = mk(home, 9, "Ann"), mk(home, 10, "Bo"), mk(home, 30, "Gil")
@@ -1187,6 +1187,15 @@ class TournamentApiTests(TestCase):
         self.assertIn("BOARD", [p["code"] for p in doc["penalty_codes"]])
         self.assertEqual(doc["penalty_lengths"], ["2", "2+2", "5", "10", "20"])
         self.assertEqual([p["number"] for p in doc["rosters"]["home"]], [9, 10, 30])
+        self.assertTrue(doc["rosters"]["home"][0]["position"] == "" and not any(p["is_goalie"] for p in doc["rosters"]["home"]))
+        # fixed positions: variants are mapped, anything else is refused, staff stay free text
+        base = {"first_name": "Gus", "last_name": "Y", "jersey_number": 31, "role": "player"}
+        r = self.as_("operate", "post", f"/{t.pk}/teams/{home.pk}/roster", {**base, "position_label": "keeper"})
+        self.assertEqual((r.status_code, r.json()["position_label"]), (201, "Goalie"), r.content)
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/teams/{home.pk}/roster", {**base, "jersey_number": 32, "position_label": "striker x"}).status_code, 422)
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/teams/{home.pk}/roster", {**base, "jersey_number": 33, "role": "staff", "position_label": "Head coach"}).status_code, 201)
+        doc = self.as_("operate", "get", url).json()
+        self.assertEqual([p["number"] for p in doc["rosters"]["home"] if p["is_goalie"]], [31])
         # a goal with scorer and two assists, at minute and second
         r = self.as_("operate", "post", url, {"type": "goal", "side": "home", "minute": 3, "second": 41, "player_id": str(h1.pk), "assist_ids": [str(h2.pk), str(h3.pk)]})
         self.assertEqual(r.status_code, 201, r.content)

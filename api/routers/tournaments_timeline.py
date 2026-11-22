@@ -18,7 +18,7 @@ from members.services.errors import Invalid
 from tournaments.models import MatchAttribute, MatchEvent, MatchEventType, TournamentRosterEntry
 from tournaments.services import timeline
 from tournaments.services.scheduling import ATTR_PREFIX, stage_tiebreakers
-from tournaments.sports import ICE_HOCKEY_PENALTIES, PENALTY_LENGTHS, is_ice_hockey, penalty_minutes
+from tournaments.sports import ICE_HOCKEY_PENALTIES, PENALTY_LENGTHS, is_ice_hockey, normalise_position, penalty_minutes
 
 router = Router(auth=AUTHENTICATORS)
 
@@ -134,7 +134,8 @@ def _roster(team) -> list[dict]:
     if team is None:
         return []
     entries = team.roster_entries.select_related("member").filter(role="player").order_by("jersey_number", "pk")
-    return [{**_person(e), "position": e.position_label} for e in entries]
+    hockey = is_ice_hockey(getattr(connection.tenant, "sport", None))
+    return [{**_person(e), "position": normalise_position(e.position_label) if hockey else e.position_label, "is_goalie": hockey and normalise_position(e.position_label) == "Goalie"} for e in entries]
 
 
 def _entry(match, side, entry_id, key):
