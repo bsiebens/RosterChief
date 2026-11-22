@@ -140,6 +140,7 @@ export type StageDoc = {
 	groups: { id: string; name: string }[];
 	needs_seed_choice: boolean;
 	supports_placement: boolean;
+	placement: boolean;
 };
 export type FieldDoc = { id: string; name: string; availability: { date: string; start: string; end: string }[] };
 export type BreakRule = {

@@ -354,6 +354,28 @@ class TournamentApiTests(TestCase):
             self.assertEqual({r["played"] for r in table["rows"]}, {0})
             self.assertEqual([r["rank"] for r in table["rows"]], [1, 2])
 
+    def test_a_knockout_stage_can_play_for_every_place(self):
+        t = self.make()
+        for i in range(1, 5):
+            TournamentTeam.objects.create(tournament=t, foreign_name=f"T{i}", foreign_contact_name="C", foreign_contact_email="c@x.test", seed=i)
+        plain = self.as_("operate", "post", f"/{t.pk}/stages", {"name": "KO", "format": "single_elim"}).json()
+        full = self.as_("operate", "post", f"/{t.pk}/stages", {"name": "KO ranked", "format": "single_elim", "placement": True}).json()
+        self.assertEqual((plain["placement"], full["placement"]), (False, True))
+        gen = lambda sid: self.as_("operate", "post", f"/{t.pk}/stages/{sid}/generate-matches", {})  # noqa: E731
+        self.assertEqual(gen(plain["id"]).json()["generated_count"], 3)  # two semi-finals and a final: the losers are simply out
+        self.assertEqual(gen(full["id"]).json()["generated_count"], 4)  # plus the match for third place: every team gets a rank
+        # the setting survives an edit of another field, and only exists for single elimination
+        self.assertTrue(self.as_("operate", "patch", f"/{t.pk}/stages/{full['id']}", {"name": "Ranked"}).json()["placement"])
+        other = self.as_("operate", "post", f"/{t.pk}/stages", {"name": "RR", "format": "round_robin", "placement": True}).json()
+        self.assertFalse(other["placement"])
+
+    def test_a_placement_bracket_needs_a_power_of_two_number_of_teams(self):
+        t = self.make()
+        for i in range(1, 6):
+            TournamentTeam.objects.create(tournament=t, foreign_name=f"T{i}", foreign_contact_name="C", foreign_contact_email="c@x.test", seed=i)
+        sid = self.as_("operate", "post", f"/{t.pk}/stages", {"name": "KO ranked", "format": "single_elim", "placement": True}).json()["id"]
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/stages/{sid}/generate-matches", {}).status_code, 422)
+
     def test_delete_only_a_draft_tournament(self):
         body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}
         tid = self.as_("manage", "post", "", body).json()["id"]

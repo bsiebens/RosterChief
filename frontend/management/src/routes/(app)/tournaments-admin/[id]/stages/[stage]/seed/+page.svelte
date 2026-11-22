@@ -86,7 +86,11 @@
 					</li>
 				{/each}
 			</ol>
-			<label class="flex items-center gap-2 text-sm"><input type="checkbox" class="checkbox checkbox-sm" bind:checked={withPlacement} /> {t('tn.setup.placement')}</label>
+			{#if seed?.placement}
+				<p class="text-sm text-muted">{t('tn.seed.placement_on')}</p>
+			{:else}
+				<label class="flex items-center gap-2 text-sm"><input type="checkbox" class="checkbox checkbox-sm" bind:checked={withPlacement} /> {t('tn.setup.placement')}</label>
+			{/if}
 			<div class="flex justify-end"><button class="btn btn-primary" type="submit" disabled={run.busy}>{t('tn.seed.generate')}</button></div>
 		</form>
 	{/if}

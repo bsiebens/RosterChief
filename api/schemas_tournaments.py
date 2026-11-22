@@ -202,6 +202,7 @@ class StageIn(Schema):
     format: StageFormat
     rounds: int | None = Field(None, ge=1, le=1000)
     num_groups: int | None = Field(None, ge=1, le=1000)
+    placement: bool = False  # single elimination only: keep playing for every place, so each team ends with a final rank
     points_win: int = Field(3, ge=0, le=1000)
     points_draw: int = Field(1, ge=0, le=1000)
     points_loss: int = Field(0, ge=0, le=1000)
@@ -215,6 +216,7 @@ class StagePatch(Schema):
     format: StageFormat | None = None
     rounds: int | None = Field(None, ge=1, le=1000)
     num_groups: int | None = Field(None, ge=1, le=1000)
+    placement: bool | None = None
     points_win: int | None = Field(None, ge=0, le=1000)
     points_draw: int | None = Field(None, ge=0, le=1000)
     points_loss: int | None = Field(None, ge=0, le=1000)

@@ -206,7 +206,7 @@ def stage_summary(stage: TournamentStage) -> dict:
     points, tiebreakers = standings.get("points", {}), standings.get("tiebreakers", [])
     return {
         "id": stage.pk, "name": stage.name, "sequence": stage.sequence, "format": stage.format, "status": stage.status,
-        "rounds": config.get("rounds"), "num_groups": config.get("num_groups"),
+        "rounds": config.get("rounds"), "num_groups": config.get("num_groups"), "placement": bool(config.get("placement")),
         "points_win": points.get("win", 3), "points_draw": points.get("draw", 1), "points_loss": points.get("loss", 0),
         "tiebreaker_1": tiebreakers[0] if tiebreakers else "goal_diff", "tiebreaker_2": tiebreakers[1] if len(tiebreakers) > 1 else None,
     }

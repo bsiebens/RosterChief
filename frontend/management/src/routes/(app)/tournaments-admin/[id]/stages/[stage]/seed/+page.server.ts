@@ -4,6 +4,7 @@ import type { PageServerLoad } from './$types';
 
 export type SeedData = {
 	already_generated: boolean;
+	placement: boolean;
 	slot_count: number;
 	slots: { type: 'team'; team_id: string }[];
 	teams: TTeamRef[];

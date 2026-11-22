@@ -129,6 +129,7 @@ def generate_stage_matches(stage: TournamentStage, *, entries: list | None = Non
         raise SchedulingError(_("This stage already has matches -- delete them first to regenerate."))
     if stage.format == TournamentStage.Format.CUSTOM:
         raise SchedulingError(_("A custom-format stage has no automatic generator -- build its matches directly."))
+    with_placement = with_placement or (stage.format == TournamentStage.Format.SINGLE_ELIM and bool((stage.config or {}).get("placement")))  # the stage's own setting
     if with_placement and stage.format != TournamentStage.Format.SINGLE_ELIM:
         raise SchedulingError(_("A full placement bracket is only available for single elimination."))
 

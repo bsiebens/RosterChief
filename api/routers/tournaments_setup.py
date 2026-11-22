@@ -72,6 +72,8 @@ def _stage_values(stage: TournamentStage, payload: dict):
     stage.name, stage.format = merged["name"], merged["format"]
     stage.sequence = merged["sequence"] if merged.get("sequence") is not None else stage.sequence
     stage.config = {k: merged[k] for k in ("rounds", "num_groups") if merged.get(k)}
+    if merged.get("placement") and merged["format"] == TournamentStage.Format.SINGLE_ELIM:
+        stage.config["placement"] = True  # a full ranking: the losers play on until every place is decided
     stage.standings_config = {
         "points": {"win": merged.get("points_win", 3), "draw": merged.get("points_draw", 1), "loss": merged.get("points_loss", 0)},
         "tiebreakers": [v for v in (merged.get("tiebreaker_1"), merged.get("tiebreaker_2")) if v] or ["goal_diff", "goals_for"],
@@ -213,7 +215,7 @@ def seed_form(request, tournament_id: uuid.UUID, stage_id: uuid.UUID):
         slots *= 2
     groups = TournamentGroup.objects.filter(stage__tournament=t).select_related("stage").order_by("stage__sequence", "sequence")
     return {
-        "already_generated": stage.matches.exists(), "slot_count": slots, "slots": [{"type": "team", "team_id": team.pk} for team in teams],
+        "already_generated": stage.matches.exists(), "placement": bool((stage.config or {}).get("placement")), "slot_count": slots, "slots": [{"type": "team", "team_id": team.pk} for team in teams],
         "teams": [c.team_ref(team) for team in teams], "groups": [{"id": g.pk, "name": f"{g.stage.name} - {g.name}", "stage_id": g.stage_id} for g in groups],
     }  # fmt: skip
 

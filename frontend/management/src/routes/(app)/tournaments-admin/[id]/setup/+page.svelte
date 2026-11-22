@@ -53,8 +53,8 @@
 	}
 
 	// --- stages
-	type StageForm = { name: string; format: string; rounds: string; num_groups: string; points_win: string; points_draw: string; points_loss: string; tiebreaker_1: string; tiebreaker_2: string };
-	const blankStage = (): StageForm => ({ name: '', format: 'round_robin', rounds: '', num_groups: '', points_win: '3', points_draw: '1', points_loss: '0', tiebreaker_1: 'goal_diff', tiebreaker_2: 'goals_for' });
+	type StageForm = { name: string; format: string; placement: boolean; rounds: string; num_groups: string; points_win: string; points_draw: string; points_loss: string; tiebreaker_1: string; tiebreaker_2: string };
+	const blankStage = (): StageForm => ({ name: '', format: 'round_robin', placement: false, rounds: '', num_groups: '', points_win: '3', points_draw: '1', points_loss: '0', tiebreaker_1: 'goal_diff', tiebreaker_2: 'goals_for' });
 	let stageOpen = $state(false);
 	let editStage = $state<StageDoc | null>(null);
 	let sf = $state<StageForm>(blankStage());
@@ -63,7 +63,7 @@
 	function openStage(s: StageDoc | null) {
 		editStage = s;
 		sf = s
-			? { name: s.name, format: s.format, rounds: s.rounds === null ? '' : String(s.rounds), num_groups: s.num_groups === null ? '' : String(s.num_groups), points_win: String(s.points_win), points_draw: String(s.points_draw), points_loss: String(s.points_loss), tiebreaker_1: s.tiebreaker_1, tiebreaker_2: s.tiebreaker_2 }
+			? { name: s.name, format: s.format, placement: s.placement, rounds: s.rounds === null ? '' : String(s.rounds), num_groups: s.num_groups === null ? '' : String(s.num_groups), points_win: String(s.points_win), points_draw: String(s.points_draw), points_loss: String(s.points_loss), tiebreaker_1: s.tiebreaker_1, tiebreaker_2: s.tiebreaker_2 }
 			: blankStage();
 		run.clear();
 		stageOpen = true;
@@ -73,6 +73,7 @@
 		const body = {
 			name: sf.name.trim(),
 			format: sf.format,
+			placement: sf.format === 'single_elim' ? sf.placement : false,
 			rounds: sf.format === 'swiss' ? numOrNull(sf.rounds) : null,
 			num_groups: sf.format === 'groups' ? numOrNull(sf.num_groups) : null,
 			points_win: Number(sf.points_win || 0),
@@ -239,9 +240,8 @@
 	async function removeStage() {
 		if (delStage && (await run.del(`${base}/stages/${delStage.id}`))) delStageOpen = false;
 	}
-	let placement = $state<Record<string, boolean>>({});
 	const doGenerate = (s: StageDoc, regenerate: boolean) =>
-		run.post<{ generated_count: number }>(`${base}/stages/${s.id}/generate-matches`, { ...(placement[s.id] ? { with_placement: true } : {}), ...(regenerate ? { regenerate: true } : {}) }, (d) => void (run.notice = t('tn.setup.generated', { n: d?.generated_count ?? 0 })), { notice: '' });
+		run.post<{ generated_count: number }>(`${base}/stages/${s.id}/generate-matches`, regenerate ? { regenerate: true } : {}, (d) => void (run.notice = t('tn.setup.generated', { n: d?.generated_count ?? 0 })), { notice: '' });
 	// Regenerating throws the stage's matches (and any changes made to them) away, so it asks first.
 	let regenStage = $state<StageDoc | null>(null);
 	let regenOpen = $state(false);
@@ -346,6 +346,7 @@
 						{#each stageList as s, i (s.id)}
 							{@const Icon = FORMAT_ICONS[s.format]}
 							{@const isSel = selectedId === s.id}
+							{@const canGenerate = canOperate && (isKnockout(s) || s.needs_seed_choice || s.format !== 'custom')}
 							<div class="flex flex-col items-stretch md:flex-row md:items-start">
 								<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
 								<div
@@ -374,6 +375,7 @@
 											<strong class="block truncate text-ink"><span class="font-mono text-xs text-muted">{i + 1}.</span> {s.name}</strong>
 											<span class="mt-1 flex flex-wrap items-center gap-1">
 												<span class="badge badge-sm badge-outline">{t(`tn.format.${s.format}`)}</span>
+												{#if s.placement}<span class="badge badge-sm badge-info">{t('tn.setup.full_ranking')}</span>{/if}
 												<span class="badge badge-sm {s.status === 'active' ? 'badge-success' : s.status === 'complete' ? 'badge-neutral' : 'badge-ghost'}">{t(`tn.stage_status.${s.status}`)}</span>
 											</span>
 										</button>
@@ -393,22 +395,20 @@
 											<dd class="text-sm font-semibold text-ink">{s.points_win} / {s.points_draw} / {s.points_loss}</dd>
 										</div>
 									</dl>
-									<button class="btn btn-outline btn-xs w-full gap-1" type="button" aria-pressed={isSel} onclick={() => toggleStage(s.id)}>
-										<ListChecks size={13} aria-hidden="true" />
-										{isSel ? t('tn.setup.hide_matches') : t('tn.setup.view_matches', { n: s.match_count })}
-									</button>
-									{#if canOperate}
-										<div class="flex flex-wrap items-center gap-2">
+									<div class="grid grid-cols-2 gap-2">
+										<button class="btn btn-outline btn-xs w-full gap-1 {canGenerate ? '' : 'col-span-2'}" type="button" aria-pressed={isSel} onclick={() => toggleStage(s.id)}>
+											<ListChecks size={13} aria-hidden="true" />
+											{isSel ? t('tn.setup.hide_matches') : t('tn.setup.view_matches', { n: s.match_count })}
+										</button>
+										{#if canGenerate}
 											{#if isKnockout(s) || s.needs_seed_choice}
-												<a class="btn btn-primary btn-xs gap-1" href="{TBASE}/{tn.id}/stages/{s.id}/seed"><Swords size={13} /> {t('tn.setup.seed')}</a>
-											{:else if s.format !== 'custom'}
-												<button class="btn btn-primary btn-xs" type="button" disabled={run.busy} onclick={() => generate(s)}>{s.match_count ? t('tn.setup.regenerate') : t('tn.setup.generate')}</button>
+												<a class="btn btn-primary btn-xs w-full gap-1" href="{TBASE}/{tn.id}/stages/{s.id}/seed"><Swords size={13} /> {t('tn.setup.seed')}</a>
+											{:else}
+												<button class="btn btn-primary btn-xs w-full" type="button" disabled={run.busy} onclick={() => generate(s)}>{s.match_count ? t('tn.setup.regenerate') : t('tn.setup.generate')}</button>
 											{/if}
-											{#if s.format === 'groups'}<a class="btn btn-outline btn-xs" href="{TBASE}/{tn.id}/stages/{s.id}/next-phase">{t('tn.setup.next_phase')}</a>{/if}
-										</div>
-										{#if s.supports_placement && !isKnockout(s) && !s.needs_seed_choice}
-											<label class="flex items-center gap-1 text-xs"><input type="checkbox" class="checkbox checkbox-xs" bind:checked={placement[s.id]} /> {t('tn.setup.placement')}</label>
 										{/if}
+									</div>
+									{#if canOperate}
 										<div class="flex items-center justify-between gap-1">
 											<span class="flex items-center gap-0.5">
 												<button class="btn btn-ghost btn-xs btn-square" type="button" disabled={i === 0 || run.busy} aria-label={t('tn.setup.stage_left')} title={t('tn.setup.stage_left')} onclick={() => moveStage(i, i - 1)}><ArrowLeft size={14} /></button>
@@ -422,10 +422,13 @@
 									{/if}
 								</div>
 								{#if i < stageList.length - 1}
-									<div class="flex flex-col items-center justify-center gap-0.5 px-2 py-1 text-muted md:w-24" aria-hidden="true">
-										<ArrowRight size={20} class="rotate-90 md:rotate-0" />
+									<div class="flex flex-col items-center justify-center gap-1.5 px-2 py-1 text-muted md:w-28">
+										<ArrowRight size={20} class="rotate-90 md:rotate-0" aria-hidden="true" />
 										{#if s.format === 'groups' && isKnockout(stageList[i + 1])}<span class="text-center text-[11px] leading-tight">{t('tn.setup.feeds_advance')}</span>{/if}
 									</div>
+									{#if canOperate && s.format === 'groups'}
+										<a class="btn btn-outline btn-xs self-center whitespace-nowrap" href="{TBASE}/{tn.id}/stages/{s.id}/next-phase">{t('tn.setup.next_phase')}</a>
+									{/if}
 								{/if}
 							</div>
 						{/each}
@@ -605,6 +608,15 @@
 			</div>
 			{#if run.fields.format}<span class="text-xs text-error">{run.fields.format}</span>{/if}
 		</fieldset>
+		{#if sf.format === 'single_elim'}
+			<label class="flex cursor-pointer items-start gap-3 rounded-lg border border-line p-3">
+				<input type="checkbox" class="checkbox mt-0.5" bind:checked={sf.placement} />
+				<span class="min-w-0">
+					<span class="block text-sm font-semibold text-ink">{t('tn.setup.placement_title')}</span>
+					<span class="block text-xs text-muted">{t('tn.setup.placement_help')}</span>
+				</span>
+			</label>
+		{/if}
 		{#if sf.format === 'swiss'}<Field label={t('tn.setup.rounds')} type="number" min="1" bind:value={sf.rounds} error={run.fields.rounds} required />{/if}
 		{#if sf.format === 'groups'}<Field label={t('tn.setup.num_groups')} type="number" min="1" bind:value={sf.num_groups} error={run.fields.num_groups} required />{/if}
 		<div class="grid grid-cols-3 gap-3">
