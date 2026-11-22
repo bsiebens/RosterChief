@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { afterNavigate } from '$app/navigation';
-	import { Menu } from '@lucide/svelte';
-	import { header } from '#lib/header.svelte.ts';
+	import { ArrowLeft, Menu } from '@lucide/svelte';
+	import { header, headerBack } from '#lib/header.svelte.ts';
 	import AppSwitcher from '#lib/components/AppSwitcher.svelte';
 	import PhoneHeader from '#lib/components/mobile/PhoneHeader.svelte';
 	import PortalNav from '#lib/components/PortalNav.svelte';
@@ -122,6 +122,7 @@
 				{/if}
 				{#snippet failed()}{/snippet}
 			</svelte:boundary>
+			{#if headerBack.link}<a class="btn btn-outline gap-2" href={headerBack.link.href}><ArrowLeft size={16} aria-hidden="true" /> {headerBack.link.label}</a>{/if}
 			{#if management}<NotificationBell />{/if}
 			{#if portal}<div class="hidden md:block"><NotificationBell {portal} /></div>{/if}
 			{#if !clubShell}<LangSwitcher /><AccountMenu {email} />{/if}

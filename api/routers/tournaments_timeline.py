@@ -229,8 +229,10 @@ def events(request, match_id: uuid.UUID):
     match = _match(match_id)
     sport = getattr(connection.tenant, "sport", None)
     hockey = is_ice_hockey(sport)
+    tie = [match] if match.leg_number is None else sorted([m for m in [match.leg_of, *match.leg_of.first_legs.all()] if m is not None] if match.leg_of_id else [match, *match.first_legs.all()], key=lambda m: m.leg_number or 0)
+    legs = [{"id": m.pk, "leg": m.leg_number, "status": m.status, "score_home": m.score_home, "score_away": m.score_away} for m in tie] if match.leg_number is not None else []
     return {
-        "match": c.match_out(match), "events": [event_out(e) for e in match.events.select_related("player_entry").all()],
+        "legs": legs, "match": c.match_out(match), "events": [event_out(e) for e in match.events.select_related("player_entry").all()],
         "sport": {"slug": sport.slug, "name": sport.name} if sport else None, "ice_hockey": hockey,
         "penalty_codes": [{"code": code, "name": name} for code, name in ICE_HOCKEY_PENALTIES] if hockey else [], "penalty_lengths": PENALTY_LENGTHS if hockey else [],
         "rosters": {"home": _roster(match.home_team), "away": _roster(match.away_team)},

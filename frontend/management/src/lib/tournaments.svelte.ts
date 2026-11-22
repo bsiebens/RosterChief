@@ -163,6 +163,8 @@ export type MatchEvent = {
 };
 /** The data of the game timeline screen: the match, its events, the players of both teams and the ice hockey lists (empty for other sports). */
 export type GameTimeline = {
+	/** The periods of a game played back and forth (empty for a single game), with their scores. */
+	legs: { id: string; leg: number; status: string; score_home: number | null; score_away: number | null }[];
 	match: MatchDoc;
 	events: MatchEvent[];
 	sport: { slug: string; name: string } | null;

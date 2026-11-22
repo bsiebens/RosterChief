@@ -500,6 +500,9 @@ class TournamentApiTests(TestCase):
         self.assertEqual(r.status_code, 200, r.content)
         body = r.json()["match"]
         self.assertEqual((body["leg"], body["aggregate"]), (2, [3, 2]))
+        doc = self.as_("operate", "get", f"/matches/{semi.pk}/events").json()
+        self.assertEqual([(x["leg"], x["score_home"]) for x in doc["legs"]], [(1, 1), (2, 2)])  # both periods of the tie, in order
+        self.assertEqual([x["leg"] for x in self.as_("operate", "get", f"/matches/{first.pk}/events").json()["legs"]], [1, 2])
         semi.refresh_from_db()
         self.assertEqual(semi.winner, semi.home_team)
         final = ties[2]
