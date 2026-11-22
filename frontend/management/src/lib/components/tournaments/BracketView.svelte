@@ -15,7 +15,9 @@
 
 	const all = $derived(new Map(rounds.flatMap((r) => r.matches ?? []).map((m) => [m.id, m])));
 	const twoLegged = $derived([...all.values()].some((m) => m.leg));
-	const H = $derived(twoLegged ? 92 : 58);
+	const CAP = 18; // caption row of a box: its round, and the leg columns
+	const ROW = $derived(twoLegged ? 34 : 28);
+	const H = $derived(CAP + 2 * ROW);
 	const STEP = $derived(H + SPACE);
 
 	type Node = { m: MatchDoc; col: number; y: number; lane: number };
@@ -26,23 +28,41 @@
 	 * ladder runs underneath the final instead of crossing it. Within a lane a game sits between the games that feed it.
 	 */
 	const layout = $derived.by(() => {
-		const items: { m: MatchDoc; col: number }[] = [];
-		rounds.forEach((r, col) => (r.matches ?? []).filter((m) => m.leg !== 1).forEach((m) => items.push({ m, col })));
+		const raw: { m: MatchDoc; round: number }[] = [];
+		rounds.forEach((r, round) => (r.matches ?? []).filter((m) => m.leg !== 1).forEach((m) => raw.push({ m, round })));
 		const lane = new Map<string, number>();
-		for (const { m } of items) {
+		for (const { m } of raw) {
 			let l = 0;
 			for (const s of [m.home_source, m.away_source]) {
 				if (s?.type === 'match' && lane.has(s.match_id)) l = Math.max(l, lane.get(s.match_id)! + (s.is_winner ? 0 : 1));
 			}
 			lane.set(m.id, l);
 		}
+		// Columns by depth: the main bracket runs round by round; a placement game stands one column after the latest game it is fed by,
+		// so "Semifinal" and "Ranks 5-8 - Semifinal" (and the final, 3rd and 5th place games) line up.
+		const mainRounds = [...new Set(raw.filter((r) => lane.get(r.m.id) === 0).map((r) => r.round))].sort((a, b) => a - b);
+		const colOf = new Map<string, number>();
+		for (const { m, round } of raw) {
+			if (lane.get(m.id) === 0) {
+				colOf.set(m.id, mainRounds.indexOf(round));
+				continue;
+			}
+			const fed = [m.home_source, m.away_source].flatMap((s) => (s?.type === 'match' && colOf.has(s.match_id) ? [colOf.get(s.match_id)!] : []));
+			colOf.set(m.id, fed.length ? Math.max(...fed) + 1 : 0);
+		}
+		const items = raw.map(({ m }) => ({ m, col: colOf.get(m.id)! }));
+		const columns = Math.max(0, ...items.map((i) => i.col)) + 1;
+		const headings = Array.from({ length: columns }, (_, c) => {
+			const here = items.filter((i) => i.col === c);
+			return (here.find((i) => lane.get(i.m.id) === 0) ?? here[0])?.m.round_label || '';
+		});
 		const lanes = Math.max(0, ...lane.values()) + 1;
 		const nodes = new Map<string, Node>();
 		let top = 0;
 		for (let l = 0; l < lanes; l++) {
 			const offset = top + (l > 0 ? LANE_HEAD : 0);
 			let bottom = 0;
-			rounds.forEach((_r, col) => {
+			for (let col = 0; col < columns; col++) {
 				const mine = items.filter((i) => i.col === col && lane.get(i.m.id) === l);
 				const wanted = mine.map(({ m }) => {
 					const ys = [m.home_source, m.away_source].flatMap((s) => (s?.type === 'match' && nodes.has(s.match_id) && nodes.get(s.match_id)!.lane === l ? [nodes.get(s.match_id)!.y - offset] : []));
@@ -66,14 +86,14 @@
 					nodes.set(o.m.id, { m: o.m, col, y: offset + y, lane: l });
 					bottom = Math.max(bottom, offset + y + H);
 				}
-			});
+			}
 			top = bottom + LANE_GAP;
 		}
-		return { nodes, lanes, laneTops: Array.from({ length: lanes }, (_, l) => Math.min(Infinity, ...[...nodes.values()].filter((n) => n.lane === l).map((n) => n.y)) - (l > 0 ? LANE_HEAD : 0)) };
+		return { nodes, lanes, columns, headings, laneTops: Array.from({ length: lanes }, (_, l) => Math.min(Infinity, ...[...nodes.values()].filter((n) => n.lane === l).map((n) => n.y)) - (l > 0 ? LANE_HEAD : 0)) };
 	});
 	const nodes = $derived(layout.nodes);
 	const height = $derived(Math.max(0, ...[...nodes.values()].map((n) => n.y + H)));
-	const width = $derived(rounds.length * (W + GAP) - GAP);
+	const width = $derived(layout.columns * (W + GAP) - GAP);
 
 	let hover = $state<string | null>(null);
 	/** What feeds a game (every earlier game its teams come from, winners and losers alike) and what it feeds. */
@@ -118,7 +138,7 @@
 				const x1 = from.col * (W + GAP) + W;
 				const x2 = n.col * (W + GAP);
 				const y1 = from.y + H / 2;
-				const y2 = n.y + H / 2 + (side === 'home_source' ? -7 : 7);
+				const y2 = n.y + CAP + ROW / 2 + (side === 'home_source' ? 0 : ROW);
 				// the vertical part runs in the gap right after the source column; the rest is straight, so nothing is hidden behind a box
 				// every game gets its own vertical track in the gap, so lines of different games never run on top of each other
 				const track = (Math.round(from.y / STEP) % 5) * 8;
@@ -153,8 +173,8 @@
 	</p>
 	<div class="max-h-[75vh] overflow-auto rounded-lg border border-line bg-paper/40 p-3">
 		<div class="relative" style:width="{width}px" style:height="{height + HEAD}px">
-			{#each rounds as r, col (col)}
-				<h3 class="absolute truncate text-xs font-bold text-muted" style:left="{col * (W + GAP)}px" style:width="{W}px" style:top="0">{r.label ?? t('tn.standings.round', { n: r.round_number ?? col + 1 })}</h3>
+			{#each layout.headings as label, col (col)}
+				<h3 class="absolute truncate text-xs font-bold text-muted" style:left="{col * (W + GAP)}px" style:width="{W}px" style:top="0">{label || t('tn.standings.round', { n: col + 1 })}</h3>
 			{/each}
 			{#each layout.laneTops as top, l (l)}
 				{#if l > 0}
@@ -181,9 +201,10 @@
 			{#each nodes.values() as n (n.m.id)}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div class="absolute overflow-hidden rounded-lg border text-xs shadow-sm transition-opacity {role(n.m.id) === 'self' ? 'border-ink bg-white ring-2 ring-ink' : role(n.m.id) === 'before' ? 'border-sky-500 bg-sky-50 ring-1 ring-sky-400' : role(n.m.id) === 'next' ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-400' : 'border-line bg-white'} {role(n.m.id) === 'other' ? 'opacity-35' : ''}" onmouseenter={() => (hover = n.m.id)} onmouseleave={() => (hover = null)} style:left="{n.col * (W + GAP)}px" style:top="{HEAD + n.y}px" style:width="{W}px" style:height="{H}px">
-					{#if n.m.leg}
-						<div class="flex items-center justify-end gap-2 border-b border-line bg-subhead px-2 py-0.5 font-mono text-[10px] text-muted"><span>{t('tn.leg', { n: 1 })}</span><span>{t('tn.leg', { n: 2 })}</span><span class="w-5 text-right">Σ</span></div>
-					{/if}
+					<div class="flex h-[18px] items-center justify-between gap-2 border-b border-line bg-subhead px-2 font-mono text-[10px] text-muted">
+						<span class="truncate">{n.m.round_label}</span>
+						{#if n.m.leg}<span class="flex shrink-0 items-center gap-2"><span>{t('tn.leg', { n: 1 })}</span><span>{t('tn.leg', { n: 2 })}</span><span class="w-5 text-right">Σ</span></span>{/if}
+					</div>
 					{#each rows(n.m) as row, i (i)}
 						<div class="flex items-center justify-between gap-2 px-2 {i === 0 ? 'border-b border-line' : ''} {n.m.leg ? 'h-[34px]' : 'h-[28px]'}">
 							<span class="truncate {row.win ? 'font-bold text-ink' : 'text-ink/80'}">{row.name}</span>
