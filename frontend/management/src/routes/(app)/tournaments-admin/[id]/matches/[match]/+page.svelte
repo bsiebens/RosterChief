@@ -143,7 +143,7 @@
 	let doneOpen = $state(false);
 	let rf = $state({ home: '', away: '', ot: false, ph: '', pa: '' });
 	function openComplete() {
-		rf = { home: String(m?.score_home ?? 0), away: String(m?.score_away ?? 0), ot: m?.went_to_overtime ?? false, ph: '', pa: '' };
+		rf = { home: String((m?.score_home ?? 0) + offHome), away: String((m?.score_away ?? 0) + offAway), ot: m?.went_to_overtime ?? false, ph: '', pa: '' };
 		run.clear();
 		doneOpen = true;
 	}
@@ -153,13 +153,16 @@
 	const periodNo = $derived(isTie ? (periods.find((p) => p.id === m?.id)?.leg ?? 1) : 1);
 	const nextPeriod = $derived(isTie ? (periods.find((p) => p.leg === periodNo + 1) ?? null) : null);
 	const otherPeriods = $derived(periods.filter((p) => p.id !== m?.id));
+	/** On the last period the dialog edits the score of the whole game; the other periods are subtracted again when saving. */
+	const offHome = $derived(isTie && !nextPeriod ? otherPeriods.reduce((n, p) => n + (p.score_home ?? 0), 0) : 0);
+	const offAway = $derived(isTie && !nextPeriod ? otherPeriods.reduce((n, p) => n + (p.score_away ?? 0), 0) : 0);
 	/** The score of the whole game as typed in the dialog: the other periods as saved plus this one. */
-	const gameHome = $derived(otherPeriods.reduce((n, p) => n + (p.score_home ?? 0), 0) + Number(rf.home || 0));
-	const gameAway = $derived(otherPeriods.reduce((n, p) => n + (p.score_away ?? 0), 0) + Number(rf.away || 0));
+	const gameHome = $derived(nextPeriod || !isTie ? Number(rf.home || 0) : Number(rf.home || 0));
+	const gameAway = $derived(Number(rf.away || 0));
 	const level = $derived(rf.home !== '' && rf.away !== '' && !nextPeriod && gameHome === gameAway);
 	async function confirmComplete(e: SubmitEvent) {
 		e.preventDefault();
-		const body = { score_home: Number(rf.home), score_away: Number(rf.away), went_to_overtime: nextPeriod ? false : rf.ot, penalty_home: level ? numOrNull(rf.ph) : null, penalty_away: level ? numOrNull(rf.pa) : null };
+		const body = { score_home: Number(rf.home) - offHome, score_away: Number(rf.away) - offAway, went_to_overtime: nextPeriod ? false : rf.ot, penalty_home: level ? numOrNull(rf.ph) : null, penalty_away: level ? numOrNull(rf.pa) : null };
 		const nextId = nextPeriod?.id;
 		const goalies = { home_goalie_id: currentGoalie('home') || null, away_goalie_id: currentGoalie('away') || null };
 		if (await run.post(`/tournaments/matches/${data.matchId}/result`, body, undefined, { notice: nextId ? undefined : t('tn.game.completed_done'), reload: !nextId })) {
@@ -418,7 +421,7 @@
 		{#if isTie && !nextPeriod}
 			<div class="grid gap-1 rounded-lg border border-line bg-paper p-3 text-sm">
 				{#each otherPeriods as p (p.id)}<div class="flex justify-between"><span class="text-muted">{t('tn.leg', { n: p.leg })}</span><span class="font-mono font-semibold">{p.score_home ?? 0}:{p.score_away ?? 0}</span></div>{/each}
-				<div class="flex justify-between"><span class="text-muted">{t('tn.leg', { n: periodNo })}</span><span class="font-mono font-semibold">{rf.home || 0}:{rf.away || 0}</span></div>
+				<div class="flex justify-between"><span class="text-muted">{t('tn.leg', { n: periodNo })}</span><span class="font-mono font-semibold">{Number(rf.home || 0) - offHome}:{Number(rf.away || 0) - offAway}</span></div>
 				<div class="flex justify-between border-t border-line pt-1"><span class="font-semibold text-ink">{t('tn.game.whole_game')}</span><span class="font-mono text-base font-extrabold text-ink">{gameHome}:{gameAway}</span></div>
 			</div>
 		{/if}
@@ -428,7 +431,7 @@
 			<label class="form-control"><span class="label-text mb-1 truncate text-sm font-medium">{m?.away_display}</span><input class="input input-bordered w-full text-center font-mono text-2xl font-bold" type="number" min="0" required bind:value={rf.away} /></label>
 		</div>
 		{#if run.fields.score_away || run.fields.score_home}<span class="text-xs text-error">{run.fields.score_away ?? run.fields.score_home}</span>{/if}
-		{#if !nextPeriod}<label class="flex cursor-pointer items-center gap-3 rounded-lg border border-line p-3"><input type="checkbox" class="checkbox" bind:checked={rf.ot} /><span class="grid"><span class="text-sm">{t('tn.scores.overtime')}</span><span class="text-xs text-muted">{t('tn.scores.overtime_help')}</span></span></label>{/if}
+		{#if !nextPeriod}<label class="flex cursor-pointer items-center gap-3 rounded-lg border border-line p-3"><input type="checkbox" class="checkbox" bind:checked={rf.ot} /><span class="grid"><span class="text-sm font-semibold text-ink">{t('tn.scores.overtime')}</span><span class="text-xs text-muted">{t('tn.scores.overtime_help')}</span></span></label>{/if}
 		{#if level}
 			<div class="grid gap-2 rounded-lg border border-line p-3">
 				<p class="text-sm font-semibold text-ink">{t('tn.scores.shots_title')}</p>
