@@ -122,7 +122,13 @@ export type MatchDoc = {
 	away_team: TTeamRef | null;
 	home_display: string;
 	away_display: string;
+	/** Per-match attribute totals (e.g. penalty minutes), keyed by attribute key. */
+	attributes?: Record<string, { home: number; away: number }>;
+	event_count?: number;
 };
+export type ResultAttribute = { id: string; name: string; key: string; source: 'manual' | 'timeline'; event_type: string | null; aggregate: string | null; position: number };
+export type MatchEventType = 'goal' | 'penalty' | 'goalie_change' | 'timeout' | 'other';
+export type MatchEvent = { id: string; type: MatchEventType; side: 'home' | 'away' | null; minute: number | null; player: string; note: string; value: number | null };
 export type StageDoc = {
 	id: string;
 	name: string;
