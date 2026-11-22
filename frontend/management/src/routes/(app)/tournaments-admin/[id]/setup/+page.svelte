@@ -73,7 +73,7 @@
 		const body = {
 			name: sf.name.trim(),
 			format: sf.format,
-			placement: sf.format === 'single_elim' ? sf.placement : false,
+			placement: sf.format === 'single_elim' || sf.format === 'double_elim' ? sf.placement : false,
 			rounds: sf.format === 'swiss' ? numOrNull(sf.rounds) : null,
 			num_groups: sf.format === 'groups' ? numOrNull(sf.num_groups) : null,
 			points_win: Number(sf.points_win || 0),
@@ -631,7 +631,7 @@
 			</div>
 			{#if run.fields.format}<span class="text-xs text-error">{run.fields.format}</span>{/if}
 		</fieldset>
-		{#if sf.format === 'single_elim'}
+		{#if sf.format === 'single_elim' || sf.format === 'double_elim'}
 			<label class="flex cursor-pointer items-start gap-3 rounded-lg border border-line p-3">
 				<input type="checkbox" class="checkbox mt-0.5" bind:checked={sf.placement} />
 				<span class="min-w-0">

@@ -41,7 +41,7 @@ from .models import (
     TournamentTaskClaim,
     TournamentTeam,
 )
-from .services.brackets import BracketError, single_elimination_placement_bracket
+from .services.brackets import BracketError, double_elimination_bracket, double_elimination_placement_bracket, single_elimination_placement_bracket
 from .services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room, windows_conflict
 from .services.lunch_schedule import _assign, build_sittings, clear_lunch_schedule, generate_lunch_schedule
 from .services.notifications import notify_tournament_shifts_open
@@ -1490,6 +1490,75 @@ class SingleEliminationPlacementBracketTests(TestCase):
         self.assertEqual([round_[0]["round_label"] for round_ in rounds], ["Quarterfinal", "Semifinal", "Ranks 5-8 · Semifinal", "7th place", "5th place", "3rd place", "Final"])
 
 
+class DoubleEliminationPlacementBracketTests(TestCase):
+    def flat(self, count):
+        rounds = double_elimination_placement_bracket([f"T{i}" for i in range(1, count + 1)])
+        return rounds, [slot for round_ in rounds for slot in round_]
+
+    def test_requires_a_power_of_two_of_at_least_four(self):
+        for count in (2, 3, 6):
+            with self.assertRaises(BracketError):
+                double_elimination_placement_bracket([f"T{i}" for i in range(1, count + 1)])
+
+    def test_plain_bracket_is_untouched_apart_from_the_added_matches(self):
+        for count in (4, 8, 16):
+            teams = [f"T{i}" for i in range(1, count + 1)]
+            plain = [slot for round_ in double_elimination_bracket(teams) for slot in round_]
+            _rounds, full = self.flat(count)
+            self.assertEqual(full[: len(plain) - 1], plain[:-1])  # everything up to the grand final
+            self.assertEqual(full[-1], plain[-1])  # the grand final stays last, with the same sources
+
+    def test_four_teams(self):
+        rounds, matches = self.flat(4)
+        self.assertEqual(len(matches), 6)  # 5 plain + 3rd place
+        self.assertEqual([round_[0]["round_label"] for round_ in rounds], ["Semifinal", "Final", "Losers round 1", "3rd place", "Grand final"])
+        third = matches[4]
+        # the winners-final loser and the losers-final loser play for 3rd
+        self.assertEqual((third["home_source_index"], third["home_source_is_winner"]), (2, False))
+        self.assertEqual((third["away_source_index"], third["away_source_is_winner"]), (3, False))
+
+    def test_eight_teams(self):
+        rounds, matches = self.flat(8)
+        self.assertEqual(len(matches), 16)  # 13 plain + 3 classification matches
+        self.assertEqual([round_[0]["round_label"] for round_ in rounds][-4:], ["7th place", "5th place", "3rd place", "Grand final"])
+
+    def test_sixteen_teams(self):
+        rounds, matches = self.flat(16)
+        self.assertEqual(len(matches), 40)  # 29 plain + 3rd, 5th, 7th + two ladders of four (4 each)
+        labels = [round_[0]["round_label"] for round_ in rounds]
+        self.assertIn("Ranks 13-16 · Semifinal", labels)
+        self.assertIn("Ranks 9-12 · Semifinal", labels)
+        self.assertIn("13th place", labels)
+        self.assertIn("9th place", labels)
+
+    def test_every_rank_is_reachable_exactly_once_and_sources_are_wired(self):
+        for count in (4, 8, 16):
+            _rounds, matches = self.flat(count)
+            consumed = set()
+            for index, slot in enumerate(matches):
+                for side in ("home", "away"):
+                    source = slot.get(f"{side}_source_index")
+                    if source is None:
+                        continue
+                    self.assertLess(source, index)
+                    key = (source, slot.get(f"{side}_source_is_winner", True))
+                    self.assertNotIn(key, consumed)  # no match result feeds two slots
+                    consumed.add(key)
+            # An outcome nobody consumes is where a team's journey ends, i.e. one final rank: N teams, N distinct ranks.
+            unconsumed = [(i, w) for i in range(len(matches)) for w in (True, False) if (i, w) not in consumed]
+            self.assertEqual(len(unconsumed), count)
+
+    def test_no_match_is_stuck_with_two_unreachable_sources(self):
+        _rounds, matches = self.flat(8)
+        # a match's sources must each be a real earlier match, and a round-1 match must be seeded with real teams on both sides
+        for index, slot in enumerate(matches):
+            for side in ("home", "away"):
+                has_team, has_source = f"{side}_team" in slot, f"{side}_source_index" in slot
+                self.assertTrue(has_team != has_source)
+                if has_source:
+                    self.assertTrue(0 <= slot[f"{side}_source_index"] < index)
+
+
 class GenerateStageMatchesTests(TournamentsTestCase):
     def make_teams(self, count):
         return [TournamentTeam.objects.create(tournament=self.tournament, foreign_name=f"Team {i}", seed=i) for i in range(1, count + 1)]
@@ -1588,9 +1657,9 @@ class GenerateStageMatchesTests(TournamentsTestCase):
         self.assertFalse(losers_final.home_source_is_winner)
         self.assertFalse(losers_final.away_source_is_winner)
 
-    def test_with_placement_rejected_for_non_single_elim_formats(self):
+    def test_with_placement_rejected_for_non_knockout_formats(self):
         teams = self.make_teams(4)
-        for format_value in (TournamentStage.Format.ROUND_ROBIN, TournamentStage.Format.DOUBLE_ELIM):
+        for format_value in (TournamentStage.Format.ROUND_ROBIN, TournamentStage.Format.GROUPS):
             stage = TournamentStage.objects.create(tournament=self.tournament, name=format_value, format=format_value)
             with self.assertRaises(SchedulingError):
                 generate_stage_matches(stage, entries=teams, with_placement=True)
@@ -1612,6 +1681,52 @@ class GenerateStageMatchesTests(TournamentsTestCase):
         self.assertFalse(third_place.away_source_is_winner)
         self.assertEqual(Match.objects.filter(stage=stage, round_label="5th place").count(), 1)
         self.assertEqual(Match.objects.filter(stage=stage, round_label="7th place").count(), 1)
+
+
+    def test_double_elim_with_placement_persists_the_classification_matches(self):
+        teams = self.make_teams(8)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="DE", format=TournamentStage.Format.DOUBLE_ELIM)
+
+        matches = generate_stage_matches(stage, entries=teams, with_placement=True)
+
+        self.assertEqual(len(matches), 16)  # 13 plain + 3rd, 5th and 7th place
+        third = Match.objects.get(stage=stage, round_label="3rd place")
+        self.assertFalse(third.home_source_is_winner)
+        self.assertFalse(third.away_source_is_winner)
+        self.assertEqual(matches[-1].round_label, "Grand final")
+
+    def test_double_elim_uses_the_stages_own_placement_setting(self):
+        teams = self.make_teams(4)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="DE", format=TournamentStage.Format.DOUBLE_ELIM, config={"placement": True})
+
+        self.assertEqual(len(generate_stage_matches(stage, entries=teams)), 6)
+
+    def test_double_elim_with_placement_needs_a_power_of_two(self):
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="DE", format=TournamentStage.Format.DOUBLE_ELIM)
+
+        with self.assertRaises(SchedulingError):
+            generate_stage_matches(stage, entries=self.make_teams(6), with_placement=True)
+
+    def test_a_whole_double_elim_with_placement_plays_out_to_a_complete_ranking(self):
+        teams = self.make_teams(4)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="DE", format=TournamentStage.Format.DOUBLE_ELIM, config={"placement": True})
+        generate_stage_matches(stage, entries=teams)
+
+        # Always let the better (lower) seed win; play whatever has both teams known until nothing is left.
+        while True:
+            ready = [m for m in Match.objects.filter(stage=stage, status=Match.Status.SCHEDULED).order_by("round_number", "sequence") if m.home_team_id and m.away_team_id]
+            if not ready:
+                break
+            match = ready[0]
+            home_wins = match.home_team.seed < match.away_team.seed
+            record_result(match, score_home=2 if home_wins else 1, score_away=1 if home_wins else 2)
+
+        self.assertFalse(Match.objects.filter(stage=stage).exclude(status=Match.Status.COMPLETE).exists())
+        final = Match.objects.get(stage=stage, round_label="Grand final")
+        third = Match.objects.get(stage=stage, round_label="3rd place")
+        ranking = [final.winner, final.loser, third.winner, third.loser]
+        self.assertCountEqual([t.pk for t in ranking], [t.pk for t in teams])
+        self.assertEqual([t.seed for t in ranking], [1, 3, 2, 4])  # the better seed always won
 
 
 class GroupRankSeedTests(TournamentsTestCase):
