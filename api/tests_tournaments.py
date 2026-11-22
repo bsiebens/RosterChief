@@ -20,7 +20,7 @@ from events.models import Attendance, Event, Season
 from features.entitlements import Entitlement, Entitlements
 from members.models import Member
 from teams.models import Position, StaffAssignment, Team, TeamMembership
-from tournaments.models import Match, MatchAttribute, MatchAttributeValue, MatchEvent, Tournament, TournamentField, TournamentGroup, TournamentRosterEntry, TournamentStage, TournamentTask, TournamentTeam
+from tournaments.models import Match, MatchAttribute, MatchAttributeValue, MatchEvent, ScheduleBlock, Tournament, TournamentField, TournamentGroup, TournamentRosterEntry, TournamentStage, TournamentTask, TournamentTeam
 
 BASE = "/api/v1"
 WITH = Entitlements({"tournaments": Entitlement(True)})
@@ -722,6 +722,22 @@ class TournamentApiTests(TestCase):
         self.assertEqual((r.status_code, r.json()["code"]), (422, "closed"))
         started = self.make(name="S", status="in_progress")
         self.assertEqual(self.call("post", f"/{started.slug}/registrations", None, body, prefix="/public/tournaments").status_code, 404)
+
+    def test_public_game_page_combines_the_periods_and_the_team_page_lists_blocks(self):
+        t = self.make(status="in_progress")
+        a, b = self.foreign(t, "Alpha"), self.foreign(t, "Bravo")
+        stage = TournamentStage.objects.create(tournament=t, name="KO", format="single_elim", config={"two_legged": True})
+        tie = Match.objects.create(stage=stage, round_number=1, sequence=0, home_team=a, away_team=b, status=Match.Status.COMPLETE, score_home=1, score_away=0)
+        first = Match.objects.create(stage=stage, round_number=1, sequence=1, home_team=a, away_team=b, status=Match.Status.COMPLETE, score_home=2, score_away=2, leg_of=tie)
+        for chosen in (tie, first):  # either period opens the whole game
+            doc = self.call("get", f"/{t.slug}/matches/{chosen.pk}", prefix="/public/tournaments").json()
+            self.assertEqual([p["match"]["id"] for p in doc["periods"]], [str(first.pk), str(tie.pk)] if doc["periods"][0]["match"]["id"] == str(first.pk) else [str(tie.pk), str(first.pk)])
+            self.assertEqual(len(doc["periods"]), 2)
+        block = ScheduleBlock.objects.create(tournament=t, title="Opening", starts_at=timezone.now(), ends_at=timezone.now() + datetime.timedelta(hours=1))
+        block.teams.add(a)
+        team_doc = self.call("get", f"/{t.slug}/teams/{a.slug}", prefix="/public/tournaments").json()
+        self.assertEqual([x["title"] for x in team_doc["blocks"]], ["Opening"])
+        self.assertEqual(self.call("get", f"/{t.slug}/teams/{b.slug}", prefix="/public/tournaments").json()["blocks"], [])
 
     def test_public_endpoints_are_404_without_feature(self):
         t = self.make(status="published")

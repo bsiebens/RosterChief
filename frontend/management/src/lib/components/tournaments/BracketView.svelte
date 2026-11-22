@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { t } from '#lib/i18n.svelte.ts';
 	import type { MatchDoc } from '#lib/tournaments.svelte.ts';
 
@@ -6,7 +7,7 @@
 	 * A knockout drawn as a bracket: one column per round, each game centred between the games that feed it, with elbow lines from a game
 	 * to the one its winner (solid) or loser (dashed) goes to. A back-and-forth tie is one box with both legs and the total.
 	 */
-	let { rounds }: { rounds: { round_number?: number; label?: string; matches?: MatchDoc[] }[] } = $props();
+	let { rounds, link = null }: { rounds: { round_number?: number; label?: string; matches?: MatchDoc[] }[]; link?: ((id: string) => string) | null } = $props();
 
 	const W = 300; // box width
 	const GAP = 56; // room for the connectors between columns
@@ -210,8 +211,8 @@
 				{/each}
 			</svg>
 			{#each nodes.values() as n (n.m.id)}
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<div class="absolute overflow-hidden rounded-lg border text-xs shadow-sm transition-opacity {role(n.m.id) === 'self' ? 'border-ink bg-white ring-2 ring-ink' : role(n.m.id) === 'before' ? 'border-sky-500 bg-sky-50 ring-1 ring-sky-400' : role(n.m.id) === 'next' ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-400' : 'border-line bg-white'} {role(n.m.id) === 'other' ? 'opacity-35' : ''}" onmouseenter={() => (hover = n.m.id)} onmouseleave={() => (hover = null)} style:left="{n.col * (W + GAP)}px" style:top="{HEAD + n.y}px" style:width="{W}px" style:height="{H}px">
+				<!-- svelte-ignore a11y_no_static_element_interactions, a11y_no_noninteractive_tabindex -->
+				<div class="absolute overflow-hidden {link ? 'cursor-pointer' : ''} rounded-lg border text-xs shadow-sm transition-opacity {role(n.m.id) === 'self' ? 'border-ink bg-white ring-2 ring-ink' : role(n.m.id) === 'before' ? 'border-sky-500 bg-sky-50 ring-1 ring-sky-400' : role(n.m.id) === 'next' ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-400' : 'border-line bg-white'} {role(n.m.id) === 'other' ? 'opacity-35' : ''}" onmouseenter={() => (hover = n.m.id)} onmouseleave={() => (hover = null)} onclick={link ? () => goto(link!(n.m.id)) : undefined} onkeydown={link ? (e) => { if (e.key === 'Enter') goto(link!(n.m.id)); } : undefined} role={link ? 'link' : undefined} tabindex={link ? 0 : undefined} style:left="{n.col * (W + GAP)}px" style:top="{HEAD + n.y}px" style:width="{W}px" style:height="{H}px">
 					<div class="flex h-[18px] items-center justify-between gap-2 border-b border-line bg-subhead px-2 font-mono text-[10px] text-muted">
 						<span class="truncate">{n.m.round_label}</span>
 						{#if n.m.leg}<span class="flex shrink-0 items-center gap-2"><span class="w-6 text-right">P1</span><span class="w-6 text-right">P2</span><span class="w-5 text-right">Σ</span></span>{/if}

@@ -121,7 +121,15 @@
 {:else}
 	<form class="grid gap-4" onsubmit={submit} novalidate>
 		<p class="text-muted">{t('tp.register.intro')}</p>
-		{#if tn.entry_fee_amount}<p class="text-sm text-muted">{t('tp.fee_line', { fee: money(tn.entry_fee_amount) })}{#if tn.deposit_amount} · {t('tp.deposit_line', { deposit: money(tn.deposit_amount) })}{/if}</p>{/if}
+		<!-- what taking part costs and requires: kept off the overview, shown here where the team signs up -->
+		<section class="overflow-hidden rounded-2xl border border-line bg-white shadow-sm" aria-label={t('ts.good_to_know')}>
+			<dl class="grid gap-px bg-line sm:grid-cols-2 lg:grid-cols-4">
+				<div class="bg-white p-4"><dt class="font-display text-xs font-extrabold tracking-[.1em] text-muted uppercase">{t('tp.fee')}</dt><dd class="mt-1 font-display text-2xl font-extrabold text-ink">{tn.entry_fee_amount ? money(tn.entry_fee_amount) : t('ts.free')}</dd><dd class="text-xs text-muted">{t('ts.per_team')}</dd></div>
+				<div class="bg-white p-4"><dt class="font-display text-xs font-extrabold tracking-[.1em] text-muted uppercase">{t('ts.deposit')}</dt><dd class="mt-1 font-display text-2xl font-extrabold text-ink">{tn.deposit_amount ? money(tn.deposit_amount) : '—'}</dd><dd class="text-xs text-muted">{t('ts.deposit_note')}</dd></div>
+				<div class="bg-white p-4"><dt class="font-display text-xs font-extrabold tracking-[.1em] text-muted uppercase">{t('tp.lunch')}</dt><dd class="mt-1 text-sm font-semibold text-ink">{t(`tp.lunch.${tn.lunch_mode}`)}</dd>{#if tn.lunch_mode !== 'none' && tn.lunch_price_per_day}<dd class="text-xs text-muted">{t('tp.lunch.per_day', { price: money(tn.lunch_price_per_day) })}</dd>{/if}</div>
+				<div class="bg-white p-4"><dt class="font-display text-xs font-extrabold tracking-[.1em] text-muted uppercase">{t('ts.category')}</dt><dd class="mt-1 text-sm font-semibold text-ink">{tn.earliest_birth_year !== null && tn.latest_birth_year !== null ? t('ts.born_range', { earliest: tn.earliest_birth_year, latest: tn.latest_birth_year }) : tn.earliest_birth_year !== null ? t('ts.born_from', { year: tn.earliest_birth_year }) : tn.latest_birth_year !== null ? t('ts.born_until', { year: tn.latest_birth_year }) : t('ts.all_ages')}</dd></div>
+			</dl>
+		</section>
 
 		<div id="tp-errors" tabindex="-1" class="outline-none" role={formError || summary.length ? 'alert' : undefined}>
 			{#if formError || summary.length}

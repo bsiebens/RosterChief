@@ -23,11 +23,12 @@ from api.routers import tournaments_common as c
 from api.routers.public_registration import _address, _count, _too_many
 from api.routers.tournaments_competition import stages_doc, standings_doc
 from api.routers.tournaments_roster import check_birth_date, check_position, lunch_days_for
+from api.routers.tournaments_timeline import event_out
 from api.schemas_tournaments import PlayerRowIn, PlayersIn, PublicRegistrationIn
 from members.services.errors import Invalid
 from news.services import render_body_html
 from sponsoring.models import Sponsor
-from tournaments.models import Match, Tournament, TournamentRegistration, TournamentRegistrationPlayer, TournamentRosterEntry, TournamentRosterRole, TournamentTeam
+from tournaments.models import Match, ScheduleBlock, Tournament, TournamentRegistration, TournamentRegistrationPlayer, TournamentRosterEntry, TournamentRosterRole, TournamentTeam
 from tournaments.services import notifications
 from tournaments.sports import is_ice_hockey
 
@@ -72,6 +73,7 @@ def item(t: Tournament) -> dict:
     return {
         "slug": t.slug, "year": t.start_date.year, "path": t.public_key, "name": t.name, "start_date": t.start_date, "end_date": t.end_date, "days": c.days_out(t), "status": t.status, "location": location.name if location else None,
         "location_address": _address_line(location), "maps_url": maps_url(location),
+        "latitude": location.latitude if location else None, "longitude": location.longitude if location else None,
         "accepts_registrations": t.accepts_registrations and t.status in OPEN_FOR_REGISTRATION,
     }  # fmt: skip
 
@@ -85,9 +87,40 @@ def _sponsors(t: Tournament) -> list[dict]:
     return out
 
 
-def _upcoming_matches(t, limit=5):
+def _block(b: ScheduleBlock, tournament: Tournament) -> dict:
+    """A block for the public pages: a lunch shows its real sitting (not the padded window the scheduler keeps games out of)."""
+    lunch = b.kind == ScheduleBlock.Kind.LUNCH
+    return {
+        "id": b.pk, "title": b.title, "kind": b.kind, "starts_at": b.lunch_start if lunch and b.lunch_start else b.starts_at, "ends_at": b.lunch_end if lunch and b.lunch_end else b.ends_at,
+        "location": b.location or (tournament.lunch_location if lunch else "") or (b.field.name if b.field_id else ""),
+        "team_ids": [x.pk for x in b.teams.all()],
+    }  # fmt: skip
+
+
+def _blocks(t: Tournament) -> list[dict]:
+    return [_block(b, t) for b in t.schedule_blocks.select_related("field").prefetch_related("teams").order_by("starts_at")]
+
+
+def _match_docs(qs) -> list[dict]:
+    qs = list(qs)
+    c.prime_matches(qs)
+    return [c.match_out(m) for m in qs]
+
+
+_RELATED = ("stage", "field", "home_team__team", "away_team__team", "home_source_match", "away_source_match", "home_source_group", "away_source_group")
+
+
+def _live_matches(t) -> list[dict]:
+    return _match_docs(Match.objects.filter(stage__tournament=t, status=Match.Status.IN_PROGRESS).select_related(*_RELATED).order_by("scheduled_start"))
+
+
+def _recent_matches(t, limit=6) -> list[dict]:
+    return _match_docs(Match.objects.filter(stage__tournament=t, status=Match.Status.COMPLETE, leg_of__isnull=True).select_related(*_RELATED).order_by("-scheduled_start")[:limit])
+
+
+def _upcoming_matches(t, limit=6):
     qs = (
-        Match.objects.filter(stage__tournament=t).exclude(status=Match.Status.COMPLETE).exclude(scheduled_start__isnull=True)
+        Match.objects.filter(stage__tournament=t, status=Match.Status.SCHEDULED).exclude(scheduled_start__isnull=True)
         .select_related("stage", "field", "home_team__team", "away_team__team", "home_source_match", "away_source_match", "home_source_group", "away_source_group")
         .order_by("scheduled_start")[:limit]
     )  # fmt: skip
@@ -111,7 +144,7 @@ def detail(request, slug: str):
         "description_html": render_body_html(t.description) if t.description else "", "contact_email": t.contact_email, "earliest_birth_year": t.earliest_birth_year, "latest_birth_year": t.latest_birth_year,
         "entry_fee_amount": _money(t.entry_fee_amount), "deposit_amount": _money(t.deposit_amount), "lunch_mode": t.lunch_mode, "lunch_price_per_day": _money(t.lunch_price_per_day),
         "ice_hockey": is_ice_hockey(getattr(connection.tenant, "sport", None)), "dates": t.date_range(), "registration_open": t.registration_open, "stages": [c.stage_summary(s) for s in t.stages.order_by("sequence")],
-        "upcoming_matches": _upcoming_matches(t), **standings_doc(t),
+        "upcoming_matches": _upcoming_matches(t), "live_matches": _live_matches(t), "recent_matches": _recent_matches(t), **standings_doc(t),
         "rules_html": render_body_html(t.rules_markdown) if t.rules_markdown else "", "rules_file_url": c.url(t.rules_file) if t.rules_file else None, "sponsors": _sponsors(t),
     }  # fmt: skip
 
@@ -119,7 +152,7 @@ def detail(request, slug: str):
 @router.get("/{slug}/schedule", summary="Every match by stage and round", operation_id="public_tournaments_schedule")
 def schedule(request, slug: str):
     t = _tournament(request, slug)
-    return {"tournament": item(t), "stages": stages_doc(t)}
+    return {"tournament": item(t), "stages": stages_doc(t), "blocks": _blocks(t)}
 
 
 @router.get("/{slug}/standings", summary="Standings and brackets", operation_id="public_tournaments_standings")
@@ -153,6 +186,24 @@ def team(request, slug: str, team_slug: str):
         "roster": [{"name": e.display_name, "role": e.role, "position_label": e.position_label, "jersey_number": e.jersey_number} for e in entries],
         "dressing_rooms": [{"name": a.dressing_room.name, "assigned_from": a.assigned_from, "assigned_until": a.assigned_until} for a in team.dressing_room_assignments.select_related("dressing_room")],
         "matches": [c.match_out(m) for m in matches],
+        "blocks": [b for b in _blocks(t) if team.pk in b["team_ids"]],
+    }  # fmt: skip
+
+
+@router.get("/{slug}/matches/{match_id}", summary="One game with its timeline; a game in periods comes back as all its periods", operation_id="public_tournaments_match")
+def game(request, slug: str, match_id: str):
+    t = _tournament(request, slug)
+    chosen = c.get_or_404(Match.objects.select_related("stage"), pk=match_id, stage__tournament=t)
+    tie_id = chosen.leg_of_id or chosen.pk  # the second leg is the tie's own match, the first leg points at it
+    legs = list(
+        Match.objects.filter(Q(pk=tie_id) | Q(leg_of_id=tie_id)).select_related("stage", "group", "field", "home_team__team", "away_team__team", "home_source_match", "away_source_match", "home_source_group", "away_source_group").order_by("leg_of_id")
+    )  # the first leg has leg_of set, so it sorts after NULL; reorder by the leg number below
+    c.prime_matches(legs)
+    docs = sorted((c.match_out(m) for m in legs), key=lambda d: d.get("leg") or 1)
+    by_id = {m.pk: m for m in legs}
+    return {
+        "tournament": item(t), "ice_hockey": is_ice_hockey(getattr(connection.tenant, "sport", None)), "clock_direction": t.clock_direction,
+        "periods": [{"match": d, "events": [event_out(e) for e in by_id[d["id"]].events.select_related("player_entry").all()]} for d in docs],
     }  # fmt: skip
 
 
