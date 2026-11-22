@@ -355,6 +355,7 @@ const rows: [string, string, string, string][] = [
 	['tn.seed.back', 'Back to fields & stages', 'Terug naar velden & fases', 'Retour aux terrains et phases'],
 	['tn.seed.help', 'Fill each slot with a team, with the team that finishes at a given rank of a group, or leave it out. Slots are paired in order.', 'Vul elk plaatsje met een team, met het team dat op een bepaalde plaats van een groep eindigt, of laat het weg. Plaatsen worden in volgorde gekoppeld.', 'Remplissez chaque place avec une équipe, avec l’équipe classée à un rang donné d’un groupe, ou laissez-la vide. Les places sont appariées dans l’ordre.'],
 	['tn.seed.already', 'Matches were already generated for this stage. Generating again replaces them.', 'Voor deze fase zijn al wedstrijden gegenereerd. Opnieuw genereren vervangt ze.', 'Des matchs ont déjà été générés pour cette phase. Une nouvelle génération les remplace.'],
+	['tn.seed.fill_groups', 'Fill by group rank', 'Vul in volgens groepsrang', 'Remplir selon le rang de groupe'],
 	['tn.seed.fill', 'Fill in order of entry', 'Vullen in volgorde van inschrijving', 'Remplir dans l’ordre d’inscription'],
 	['tn.seed.slot_type', 'Kind of slot {n}', 'Soort plaats {n}', 'Type de place {n}'],
 	['tn.seed.type_team', 'Team', 'Team', 'Équipe'],

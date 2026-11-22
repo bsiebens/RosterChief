@@ -52,6 +52,12 @@
 		}
 	}
 	/** Fill the slots in the order of the entered teams (a quick start). */
+	/** Fill the slots with the group ranks, best first: A1, B1, A2, B2, ... so the seeds follow the group tables. */
+	function fillByGroupRank() {
+		const gs = seed?.groups ?? [];
+		if (!gs.length) return;
+		slots = slots.map((s, i) => ({ ...s, type: 'group', group_id: gs[i % gs.length].id, rank: String(Math.floor(i / gs.length) + 1) }));
+	}
 	const fillInOrder = () => seed && (slots = slots.map((s, i) => ({ ...s, type: 'team', team_id: seed!.teams[i]?.id ?? '' })));
 </script>
 
@@ -66,7 +72,10 @@
 			{#if seed.already_generated}<Alert kind="warning">{t('tn.seed.already')}</Alert>{/if}
 			<p class="text-xs text-muted">{t('tn.seed.help')}</p>
 			{#if run.error}<Alert kind="error">{run.error}</Alert>{/if}
-			<div><button class="btn btn-outline btn-sm" type="button" onclick={fillInOrder}>{t('tn.seed.fill')}</button></div>
+			<div class="flex flex-wrap gap-2">
+				<button class="btn btn-outline btn-sm" type="button" onclick={fillInOrder}>{t('tn.seed.fill')}</button>
+				{#if seed.groups.length}<button class="btn btn-outline btn-sm" type="button" onclick={fillByGroupRank}>{t('tn.seed.fill_groups')}</button>{/if}
+			</div>
 			<ol class="grid gap-2">
 				{#each slots as s, i (i)}
 					<li class="grid grid-cols-[2rem_7rem_1fr] items-center gap-2 sm:grid-cols-[2rem_8rem_1fr_6rem]">
