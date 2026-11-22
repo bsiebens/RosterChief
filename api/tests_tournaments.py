@@ -1127,7 +1127,7 @@ class TournamentApiTests(TestCase):
         url = f"/matches/{m1.pk}/events"
         doc = self.as_("operate", "get", url).json()
         self.assertTrue(doc["ice_hockey"])
-        self.assertIn("BOA", [p["code"] for p in doc["penalty_codes"]])
+        self.assertIn("BOARD", [p["code"] for p in doc["penalty_codes"]])
         self.assertEqual(doc["penalty_lengths"], ["2", "2+2", "5", "10", "20"])
         self.assertEqual([p["number"] for p in doc["rosters"]["home"]], [9, 10, 30])
         # a goal with scorer and two assists, at minute and second
@@ -1142,10 +1142,10 @@ class TournamentApiTests(TestCase):
         self.assertEqual(self.as_("operate", "post", url, {"type": "goal", "side": "home", "minute": 4, "assist_ids": [str(h1.pk), str(h2.pk), str(h3.pk)]}).status_code, 422)
         # a penalty needs a code and a length; the player is optional (a team penalty); the length gives the minutes
         self.assertEqual(self.as_("operate", "post", url, {"type": "penalty", "side": "away", "minute": 5, "penalty_code": "NOPE", "penalty_length": "2"}).status_code, 422)
-        self.assertEqual(self.as_("operate", "post", url, {"type": "penalty", "side": "away", "minute": 5, "penalty_code": "HOK"}).status_code, 422)
-        r = self.as_("operate", "post", url, {"type": "penalty", "side": "away", "minute": 5, "second": 0, "penalty_code": "HOK", "penalty_length": "2+2"})
+        self.assertEqual(self.as_("operate", "post", url, {"type": "penalty", "side": "away", "minute": 5, "penalty_code": "HOOK"}).status_code, 422)
+        r = self.as_("operate", "post", url, {"type": "penalty", "side": "away", "minute": 5, "second": 0, "penalty_code": "HOOK", "penalty_length": "2+2"})
         self.assertEqual((r.status_code, r.json()["penalty_name"], r.json()["value"], r.json()["player"]), (201, "Hooking", 4, ""))
-        r = self.as_("operate", "post", url, {"type": "penalty", "side": "away", "minute": 6, "player_id": str(a1.pk), "penalty_code": "BOA", "penalty_length": "5"})
+        r = self.as_("operate", "post", url, {"type": "penalty", "side": "away", "minute": 6, "player_id": str(a1.pk), "penalty_code": "BOARD", "penalty_length": "5"})
         self.assertEqual((r.json()["player_number"], r.json()["value"]), (7, 5))
         # goalie change and timeout
         r = self.as_("operate", "post", url, {"type": "goalie_change", "side": "home", "minute": 9, "goalie_out_id": str(h3.pk), "goalie_in_id": str(h2.pk)})
