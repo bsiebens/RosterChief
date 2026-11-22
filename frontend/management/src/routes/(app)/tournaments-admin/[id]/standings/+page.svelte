@@ -27,7 +27,7 @@
 					<div class="overflow-x-auto">
 						<table class="table table-sm">
 							<thead>
-								<tr><th class="w-8">#</th><th>{t('tn.standings.team')}</th><th class="text-right">{t('tn.standings.p')}</th><th class="text-right">{t('tn.standings.w')}</th><th class="text-right">{t('tn.standings.d')}</th><th class="text-right">{t('tn.standings.l')}</th><th class="text-right">{t('tn.standings.gf')}</th><th class="text-right">{t('tn.standings.ga')}</th><th class="text-right">{t('tn.standings.gd')}</th><th class="text-right">{t('tn.standings.pts')}</th></tr>
+								<tr><th class="w-8">#</th><th>{t('tn.standings.team')}</th><th class="text-right">{t('tn.standings.p')}</th><th class="text-right">{t('tn.standings.w')}</th><th class="text-right">{t('tn.standings.d')}</th><th class="text-right">{t('tn.standings.l')}</th><th class="text-right">{t('tn.standings.gf')}</th><th class="text-right">{t('tn.standings.ga')}</th><th class="text-right">{t('tn.standings.gd')}</th><th class="text-right">{t('tn.standings.pts')}</th>{#each st.attribute_columns ?? [] as c (c.key)}<th class="text-right">{c.name}</th>{/each}</tr>
 							</thead>
 							<tbody>
 								{#each tbl.rows as r (r.team.id)}
@@ -42,6 +42,7 @@
 										<td class="text-right font-mono text-xs">{r.goals_against}</td>
 										<td class="text-right font-mono text-xs">{r.goal_diff > 0 ? '+' : ''}{r.goal_diff}</td>
 										<td class="text-right font-mono text-sm font-bold">{r.points}</td>
+										{#each st.attribute_columns ?? [] as c (c.key)}<td class="text-right font-mono text-xs">{r.attributes?.[c.key] ?? 0}</td>{/each}
 									</tr>
 								{/each}
 							</tbody>
