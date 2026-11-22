@@ -177,6 +177,29 @@ class BlockPatch(Schema):
     team_ids: list[uuid.UUID] | None = None
 
 
+class LunchSettingsIn(Schema):
+    duration_minutes: int = Field(ge=1, le=600)
+    gap_before_minutes: int = Field(ge=0, le=600)
+    gap_after_minutes: int = Field(ge=0, le=600)
+    capacity_teams: int = Field(ge=1, le=1000)
+    interval_minutes: int = Field(ge=0, le=600)
+
+
+class LunchDayIn(Schema):
+    date: datetime.date
+    lunch_start: datetime.time | None = None
+    lunch_end: datetime.time | None = None
+
+
+class LunchIn(Schema):
+    settings: LunchSettingsIn
+    days: list[LunchDayIn] = []
+
+
+class LunchGenerateIn(Schema):
+    match_duration_minutes: int | None = Field(None, ge=1, le=600)
+
+
 # --- fields, stages, break rules -----------------------------------------------------------------------------------------
 
 

@@ -24,6 +24,7 @@ from tournaments.models import Match, Tournament, TournamentField, TournamentGro
 
 BASE = "/api/v1"
 WITH = Entitlements({"tournaments": Entitlement(True)})
+LUNCH_SETTINGS = {"duration_minutes": 30, "gap_before_minutes": 15, "gap_after_minutes": 15, "capacity_teams": 2, "interval_minutes": 10}
 PERMS = {"manage": "tournaments.manage_tournaments", "operate": "tournaments.operate_tournaments"}
 
 
@@ -126,6 +127,10 @@ class TournamentApiTests(TestCase):
             ("patch", f"/teams/{i}/payment", {"payment_status": "unpaid"}, {"manage"}),
             ("post", f"/{t.pk}/fields", {"name": "F1"}, {"manage", "operate"}),
             ("post", f"/{t.pk}/schedule/clear", None, {"manage", "operate"}),
+            ("get", f"/{t.pk}/lunch", None, {"manage", "operate"}),
+            ("put", f"/{t.pk}/lunch", {"settings": LUNCH_SETTINGS, "days": []}, {"manage", "operate"}),
+            ("post", f"/{t.pk}/lunch/generate", {}, {"manage", "operate"}),
+            ("post", f"/{t.pk}/lunch/clear", None, {"manage", "operate"}),
             ("patch", f"/matches/{i}/teams", {"home_team_id": None}, {"manage", "operate"}),
             ("delete", f"/matches/{i}", None, {"manage", "operate"}),
             ("post", f"/{t.pk}/stages/{i}/matches", {}, {"manage", "operate"}),
@@ -652,6 +657,104 @@ class TournamentApiTests(TestCase):
         self.assertEqual(self.as_("operate", "post", f"/{t.pk}/break-rules", {"trigger_type": "game_count"}).status_code, 422)
         setup = self.as_("operate", "get", f"/{t.pk}/setup").json()
         self.assertEqual(len(setup["break_rules"]), 1)
+
+    # -- lunch scheduling --
+
+    def _lunch_setup(self, teams=4):
+        t = self.make(lunch_mode="optional")
+        for date in ("2026-09-19", "2026-09-20"):
+            t.days.create(date=date, starts_at="09:00", ends_at="18:00")
+        eaters = []
+        for i in range(teams):
+            team = self.foreign(t, f"Team {i}")
+            TournamentRosterEntry.objects.create(tournament_team=team, foreign_first_name="P", foreign_last_name=str(i), lunch_days=["2026-09-19"])
+            eaters.append(team)
+        return t, eaters
+
+    def test_lunch_settings_round_trip_and_validation(self):
+        t = self.make()
+        t.days.create(date="2026-09-19", starts_at="09:00", ends_at="18:00")
+        doc = self.as_("operate", "get", f"/{t.pk}/lunch").json()
+        self.assertEqual(doc["enabled"], False)
+        self.assertEqual(doc["settings"], LUNCH_SETTINGS | {"duration_minutes": 30})
+        self.assertEqual(doc["days"], [{"date": "2026-09-19", "lunch_start": None, "lunch_end": None, "day_start": "09:00", "day_end": "18:00", "teams_eating": 0, "sittings": []}])
+        self.assertFalse(doc["generated"])
+        body = {"settings": {"duration_minutes": 40, "gap_before_minutes": 0, "gap_after_minutes": 5, "capacity_teams": 3, "interval_minutes": 0}, "days": [{"date": "2026-09-19", "lunch_start": "11:30", "lunch_end": "13:00"}]}
+        r = self.as_("operate", "put", f"/{t.pk}/lunch", body)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["settings"], body["settings"])
+        self.assertEqual((r.json()["days"][0]["lunch_start"], r.json()["days"][0]["lunch_end"]), ("11:30", "13:00"))
+        self.assertEqual(self.as_("manage", "get", f"/{t.pk}/lunch").json(), r.json())
+        r = self.as_("operate", "put", f"/{t.pk}/lunch", {**body, "days": [{"date": "2026-09-19", "lunch_start": None, "lunch_end": None}]})
+        self.assertEqual(r.json()["days"][0]["lunch_start"], None)
+        for bad in (
+            {**body, "settings": {**body["settings"], "duration_minutes": 0}}, {**body, "settings": {**body["settings"], "capacity_teams": 0}},
+            {**body, "settings": {**body["settings"], "gap_before_minutes": -1}}, {**body, "settings": {k: v for k, v in body["settings"].items() if k != "interval_minutes"}},
+            {**body, "days": [{"date": "2026-09-25", "lunch_start": "11:00", "lunch_end": "12:00"}]},
+            {**body, "days": [{"date": "2026-09-19", "lunch_start": "13:00", "lunch_end": "12:00"}]},
+            {**body, "days": [{"date": "2026-09-19", "lunch_start": "12:00", "lunch_end": "12:00"}]},
+            {**body, "days": [{"date": "2026-09-19", "lunch_start": "12:00", "lunch_end": None}]},
+        ):  # fmt: skip
+            self.assertEqual(self.as_("operate", "put", f"/{t.pk}/lunch", bad).status_code, 422, bad)
+        self.assertEqual(Tournament.objects.get(pk=t.pk).lunch_duration_minutes, 40)  # a refused PUT changes nothing
+        self.assertEqual(self.as_("operate", "get", f"/{uuid.uuid4()}/lunch").status_code, 404)
+
+    def test_lunch_days_survive_editing_the_tournament_days(self):
+        t, _teams = self._lunch_setup(0)
+        self.as_("operate", "put", f"/{t.pk}/lunch", {"settings": LUNCH_SETTINGS, "days": [{"date": "2026-09-19", "lunch_start": "12:00", "lunch_end": "13:00"}]})
+        days = [{"date": "2026-09-19", "starts_at": "08:00", "ends_at": "19:00"}]
+        self.assertEqual(self.as_("manage", "patch", f"/{t.pk}", {"days": days}).status_code, 200)
+        self.assertEqual(self.as_("operate", "get", f"/{t.pk}/lunch").json()["days"][0]["lunch_start"], "12:00")
+
+    def test_lunch_generate_clear_and_problems(self):
+        t, _teams = self._lunch_setup(5)
+        window = {"settings": LUNCH_SETTINGS, "days": [{"date": "2026-09-19", "lunch_start": "12:00", "lunch_end": "12:30"}]}  # one sitting of two
+        self.as_("operate", "put", f"/{t.pk}/lunch", window)
+        doc = self.as_("operate", "get", f"/{t.pk}/lunch").json()
+        self.assertEqual([d["teams_eating"] for d in doc["days"]], [5, 0])
+        r = self.as_("operate", "post", f"/{t.pk}/lunch/generate", {})
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        self.assertEqual((body["sittings_created"], body["games_replanned"]), (1, 0))
+        self.assertIsNotNone(body["note"])
+        self.assertEqual({p["type"] for p in body["problems"]}, {"no_room"})
+        self.assertEqual(len(body["problems"]), 3)
+        self.assertEqual(set(body["problems"][0]), {"type", "date", "team", "message"})
+        self.assertEqual(body["problems"][0]["date"], "2026-09-19")
+        doc = self.as_("operate", "get", f"/{t.pk}/lunch").json()
+        self.assertTrue(doc["generated"])
+        self.assertEqual(doc["days"][0]["sittings"][0]["start"], "12:00")
+        self.assertEqual(doc["days"][0]["sittings"][0]["end"], "12:30")
+        self.assertEqual(len(doc["days"][0]["sittings"][0]["teams"]), 2)
+        self.assertEqual(set(doc["days"][0]["sittings"][0]["teams"][0]), {"id", "name"})
+        blocks = self.as_("operate", "get", f"/{t.pk}/schedule").json()["blocks"]
+        self.assertEqual([(b["kind"], b["title"], b["field"]) for b in blocks], [("lunch", "Lunch", None)])
+        self.assertEqual(len(blocks[0]["teams"]), 2)
+        self.assertNotEqual(blocks[0]["starts_at"], blocks[0]["lunch_start"])  # the block carries the padding, lunch_* the real sitting
+        manual = self.as_("operate", "post", f"/{t.pk}/schedule-blocks", {"title": "Opening", "starts_at": "2026-09-19T09:00:00Z", "ends_at": "2026-09-19T09:30:00Z"}).json()
+        self.assertEqual((manual["kind"], manual["lunch_start"]), ("block", None))
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/lunch/clear").status_code, 204)
+        self.assertEqual([b["kind"] for b in self.as_("operate", "get", f"/{t.pk}/schedule").json()["blocks"]], ["block"])
+        self.assertFalse(self.as_("operate", "get", f"/{t.pk}/lunch").json()["generated"])
+        self.as_("operate", "put", f"/{t.pk}/lunch", {"settings": LUNCH_SETTINGS, "days": [{"date": "2026-09-19", "lunch_start": None, "lunch_end": None}]})
+        body = self.as_("operate", "post", f"/{t.pk}/lunch/generate", {}).json()
+        self.assertEqual([(p["type"], p["team"]) for p in body["problems"]], [("no_window", None)])
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/lunch/generate", {"match_duration_minutes": 0}).status_code, 422)
+
+    def test_lunch_generate_replans_games_and_keeps_manual_blocks_on_schedule_generate(self):
+        t, teams = self._lunch_setup(4)
+        TournamentField.objects.create(tournament=t, name="F1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        stage = t.stages.create(name="RR", format="round_robin")
+        from tournaments.services.scheduling import generate_stage_matches
+
+        generate_stage_matches(stage, entries=teams)
+        self.as_("operate", "put", f"/{t.pk}/lunch", {"settings": LUNCH_SETTINGS, "days": [{"date": "2026-09-19", "lunch_start": "09:30", "lunch_end": "10:40"}]})
+        body = self.as_("operate", "post", f"/{t.pk}/lunch/generate", {"match_duration_minutes": 30}).json()
+        self.assertEqual((body["sittings_created"], body["games_replanned"], body["problems"], body["note"]), (2, 6, [], None))
+        before = sorted(b["id"] for b in self.as_("operate", "get", f"/{t.pk}/schedule").json()["blocks"])
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/schedule/generate", {"match_duration_minutes": 30}).status_code, 200)
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/schedule/clear").status_code, 200)
+        self.assertEqual(sorted(b["id"] for b in self.as_("operate", "get", f"/{t.pk}/schedule").json()["blocks"]), before)
 
     # -- roster, lunch, PDFs --
 

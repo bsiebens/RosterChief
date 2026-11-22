@@ -5,7 +5,8 @@ from unittest import mock
 from django.core import mail
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import IntegrityError, connection, models
+from django.db import IntegrityError, connection, models, transaction
+from django.db.models import Q
 from django.test import TestCase
 from django.utils import timezone
 from django_tenants.utils import schema_context
@@ -42,6 +43,7 @@ from .models import (
 )
 from .services.brackets import BracketError, single_elimination_placement_bracket
 from .services.dressing_rooms import DressingRoomAssignmentError, assign_dressing_room, release_dressing_room, windows_conflict
+from .services.lunch_schedule import _assign, build_sittings, clear_lunch_schedule, generate_lunch_schedule
 from .services.notifications import notify_tournament_shifts_open
 from .services.registration import RegistrationDecisionError, TeamDeletionError, TeamWithdrawalError, approve_registration, create_manual_team, delete_manual_team, ensure_home_team, reject_registration, withdraw_team
 from .services.scheduling import (
@@ -3245,3 +3247,165 @@ class ClubTeamEventTests(TournamentsTestCase):
         self.assertIsNotNone(self.home.event_id)
         self.assertNotEqual(self.home.event_id, old_tournament_event if old_tournament_event == other_event_id else None)
         self.assertEqual(list(self.home.event.teams.all()), [self.team])
+
+
+class LunchScheduleTests(TournamentsTestCase):
+    D1 = datetime.date(2026, 9, 19)
+
+    def at(self, hour, minute=0, date=None):
+        return timezone.make_aware(datetime.datetime.combine(date or self.D1, datetime.time(hour, minute)))
+
+    def setUp(self):
+        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
+        self.tournament.lunch_duration_minutes = 30
+        self.tournament.lunch_interval_minutes = 10
+        self.tournament.lunch_gap_before_minutes = 15
+        self.tournament.lunch_gap_after_minutes = 15
+        self.tournament.lunch_capacity_teams = 2
+        self.tournament.save()
+        self.day = TournamentDay.objects.create(tournament=self.tournament, date=self.D1, starts_at=datetime.time(9), ends_at=datetime.time(18), lunch_start=datetime.time(12), lunch_end=datetime.time(13, 30))
+
+    def eater(self, name, eats=True, withdrawn=False):
+        team = TournamentTeam.objects.create(tournament=self.tournament, foreign_name=name, withdrawn_at=timezone.now() if withdrawn else None)
+        TournamentRosterEntry.objects.create(tournament_team=team, foreign_first_name="P", foreign_last_name=name, lunch_days=[self.D1.isoformat()] if eats else [])
+        return team
+
+    def field(self, name="F1"):
+        return TournamentField.objects.create(tournament=self.tournament, name=name, availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+
+    def lunches(self):
+        return ScheduleBlock.objects.filter(tournament=self.tournament, kind=ScheduleBlock.Kind.LUNCH).order_by("lunch_start")
+
+    def test_sitting_maths(self):
+        def mins(n):
+            return datetime.timedelta(minutes=n)
+
+        sittings = build_sittings(self.at(11), self.at(12, 30), duration=mins(30), interval=mins(10))
+        self.assertEqual(sittings, [(self.at(11), self.at(11, 30)), (self.at(11, 40), self.at(12, 10))])  # a third would end 12:50 +
+        self.assertEqual(len(build_sittings(self.at(11), self.at(12, 50), duration=mins(30), interval=mins(10))), 3)
+        self.assertEqual(build_sittings(self.at(11), self.at(11, 20), duration=mins(30), interval=mins(10)), [])
+        self.assertEqual(len(build_sittings(self.at(11), self.at(12), duration=mins(30), interval=mins(0))), 2)
+
+    def test_creates_one_padded_block_per_sitting_with_balanced_fill(self):
+        for name in "ABCD":
+            self.eater(name)
+        result = generate_lunch_schedule(self.tournament)
+        blocks = list(self.lunches())
+        self.assertEqual((result["sittings_created"], result["problems"], result["games_replanned"]), (2, [], 0))
+        self.assertIsNotNone(result["note"])  # nothing to replan yet
+        self.assertEqual([(b.lunch_start, b.lunch_end) for b in blocks], [(self.at(12), self.at(12, 30)), (self.at(12, 40), self.at(13, 10))])
+        self.assertEqual([(b.starts_at, b.ends_at) for b in blocks], [(self.at(11, 45), self.at(12, 45)), (self.at(12, 25), self.at(13, 25))])  # padded
+        self.assertEqual([b.teams.count() for b in blocks], [2, 2])
+        self.assertTrue(all(b.field_id is None and b.title == "Lunch" for b in blocks))
+
+    def test_only_teams_that_eat_that_day_and_are_not_withdrawn(self):
+        a = self.eater("A")
+        self.eater("B", eats=False)
+        self.eater("C", withdrawn=True)
+        generate_lunch_schedule(self.tournament)
+        self.assertEqual([list(b.teams.all()) for b in self.lunches()], [[a]])
+
+    def test_no_room_is_reported_not_dropped(self):
+        self.day.lunch_end = datetime.time(12, 30)  # one sitting of two
+        self.day.save()
+        teams = [self.eater(n) for n in "ABC"]
+        result = generate_lunch_schedule(self.tournament)
+        self.assertEqual([p["type"] for p in result["problems"]], ["no_room"])
+        self.assertEqual(result["problems"][0]["team"], {"id": teams[2].pk, "name": "C"})
+        self.assertEqual(result["problems"][0]["date"], self.D1)
+        self.assertEqual(sum(b.teams.count() for b in self.lunches()), 2)
+
+    def test_no_window_problem(self):
+        self.day.lunch_start = self.day.lunch_end = None
+        self.day.save()
+        self.eater("A")
+        result = generate_lunch_schedule(self.tournament)
+        self.assertEqual([(p["type"], p["team"]) for p in result["problems"]], [("no_window", None)])
+        self.assertEqual(result["sittings_created"], 0)
+
+    def test_teams_go_to_the_sitting_that_conflicts_least(self):
+        self.day.lunch_start, self.day.lunch_end = datetime.time(11, 30), datetime.time(12, 50)
+        self.day.save()
+        self.tournament.lunch_capacity_teams = 1
+        self.tournament.save()
+        a, b = self.eater("A"), self.eater("B")
+        field = self.field()
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="C", format=TournamentStage.Format.CUSTOM)
+        other = self.eater("X", eats=False)
+        Match.objects.create(stage=stage, home_team=a, away_team=other, field=field, scheduled_start=self.at(11, 20))  # hand-placed 11:20-11:50
+        generate_lunch_schedule(self.tournament, datetime.timedelta(minutes=30))
+        first, second = list(self.lunches())
+        self.assertEqual((list(first.teams.all()), list(second.teams.all())), ([b], [a]))  # A's 11:20 game is inside the first sitting's padding
+
+    def test_assign_ties_go_to_least_filled_then_earliest(self):
+        teams = [self.eater(n) for n in "ABC"]
+        sittings = build_sittings(self.at(12), self.at(13, 30), duration=datetime.timedelta(minutes=30), interval=datetime.timedelta(minutes=10))
+        filled, unplaced = _assign(teams, sittings, 2, {}, datetime.timedelta(minutes=15), datetime.timedelta(minutes=15))
+        self.assertEqual(([[t.display_name for t in f] for f in filled], unplaced), ([["A", "C"], ["B"]], []))
+
+    def test_games_are_replanned_around_the_padding(self):
+        self.field()
+        self.field("F2")
+        teams = [self.eater(f"T{i}") for i in range(1, 9)]
+        self.tournament.lunch_capacity_teams = 4
+        self.tournament.save()
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+        allocate_schedule(self.tournament, match_duration=datetime.timedelta(minutes=30))
+
+        result = generate_lunch_schedule(self.tournament, datetime.timedelta(minutes=30))
+
+        self.assertEqual(result["problems"], [])
+        self.assertEqual((result["sittings_created"], result["games_replanned"]), (2, 28))
+        self.assertIsNone(result["note"])
+        for block in self.lunches():
+            for team in block.teams.all():
+                for match in Match.objects.filter(Q(home_team=team) | Q(away_team=team)):
+                    end = match.scheduled_start + datetime.timedelta(minutes=30)
+                    self.assertFalse(match.scheduled_start < block.ends_at and block.starts_at < end, (team, match.scheduled_start))
+        self.assertEqual(Match.objects.filter(scheduled_start__isnull=True).count(), 0)
+
+    def test_game_close_is_reported_for_played_and_hand_moved_games_which_stay_put(self):
+        field = self.field()
+        a = self.eater("A")
+        other = self.eater("X", eats=False)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="C", format=TournamentStage.Format.CUSTOM)
+        played = Match.objects.create(stage=stage, home_team=a, away_team=other, field=field, scheduled_start=self.at(12), status=Match.Status.COMPLETE, score_home=1, score_away=0)
+        moved = Match.objects.create(stage=stage, home_team=other, away_team=a, field=field, scheduled_start=self.at(12, 20), auto_scheduled=False)
+        result = generate_lunch_schedule(self.tournament, datetime.timedelta(minutes=30))
+        self.assertEqual({p["type"] for p in result["problems"]}, {"game_close"})
+        self.assertEqual(len(result["problems"]), 2)
+        self.assertEqual(result["problems"][0]["team"], {"id": a.pk, "name": "A"})
+        self.assertIn("A", result["problems"][0]["message"])
+        played.refresh_from_db()
+        moved.refresh_from_db()
+        self.assertEqual((played.scheduled_start, moved.scheduled_start), (self.at(12), self.at(12, 20)))
+
+    def test_regenerating_replaces_lunch_blocks_and_clear_keeps_manual_ones(self):
+        self.eater("A")
+        manual = ScheduleBlock.objects.create(tournament=self.tournament, title="Opening", starts_at=self.at(9), ends_at=self.at(9, 30))
+        generate_lunch_schedule(self.tournament)
+        first = set(self.lunches().values_list("pk", flat=True))
+        generate_lunch_schedule(self.tournament)
+        self.assertEqual(self.lunches().count(), 1)
+        self.assertFalse(first & set(self.lunches().values_list("pk", flat=True)))
+        self.assertEqual(clear_lunch_schedule(self.tournament), 1)
+        self.assertEqual(list(ScheduleBlock.objects.filter(tournament=self.tournament)), [manual])
+        self.assertEqual(manual.kind, ScheduleBlock.Kind.BLOCK)
+
+    def test_generate_and_clear_schedule_of_games_keep_lunch_blocks(self):
+        self.field()
+        teams = [self.eater(f"T{i}") for i in range(1, 5)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+        generate_lunch_schedule(self.tournament)
+        before = set(self.lunches().values_list("pk", flat=True))
+        allocate_schedule(self.tournament, reset=True)
+        clear_schedule(self.tournament)
+        self.assertEqual(set(self.lunches().values_list("pk", flat=True)), before)
+        self.assertTrue(before)
+
+    def test_a_day_needs_both_lunch_times_with_the_end_after_the_start(self):
+        for start, end in ((datetime.time(12), None), (datetime.time(13), datetime.time(12)), (datetime.time(12), datetime.time(12))):
+            with self.assertRaises(IntegrityError), transaction.atomic():
+                TournamentDay.objects.filter(pk=self.day.pk).update(lunch_start=start, lunch_end=end)
