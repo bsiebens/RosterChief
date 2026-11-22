@@ -3,7 +3,7 @@
 	import { MapPin } from '@lucide/svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
-	import { fmtDay, fmtTime, fromLocalInput, type MatchDoc, type ScheduleBlock } from '#lib/tournaments.svelte.ts';
+	import { blockEnd, blockStart, fmtDay, fmtTime, fromLocalInput, type MatchDoc, type ScheduleBlock } from '#lib/tournaments.svelte.ts';
 	import type { BoardData } from '../../../routes/(app)/tournaments-admin/[id]/schedule/+page.server.ts';
 
 	/**
@@ -53,7 +53,7 @@
 	};
 	/** The blocks of a day that touch this field (a block with no field holds every field), side by side where they overlap. */
 	function dayBlocks(fieldId: string, date: string) {
-		const own = blocks.filter((b) => localDate(b.starts_at) === date && (!b.field || b.field.id === fieldId)).map((b) => ({ b, from: minuteOfDay(b.starts_at), to: Math.max(minuteOfDay(b.ends_at), minuteOfDay(b.starts_at) + 5) })).sort((x, y) => x.from - y.from);
+		const own = blocks.filter((b) => localDate(blockStart(b)) === date && (!b.field || b.field.id === fieldId)).map((b) => ({ b, from: minuteOfDay(blockStart(b)), to: Math.max(minuteOfDay(blockEnd(b)), minuteOfDay(blockStart(b)) + 5) })).sort((x, y) => x.from - y.from);
 		const lanesEnd: number[] = [];
 		const placed = own.map((x) => {
 			let lane = lanesEnd.findIndex((end) => end <= x.from);

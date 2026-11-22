@@ -175,12 +175,17 @@ export type BreakRule = {
 	priority: number | null;
 	summary: string;
 };
-export type ScheduleBlock = { id: string; kind?: 'block' | 'lunch'; title: string; starts_at: string; ends_at: string; field: { id: string; name: string } | null; teams: TTeamRef[] };
+/** `starts_at`/`ends_at` are the whole reserved window (a lunch includes its padding, a planning constraint); a lunch's real sitting is `lunch_start`/`lunch_end`. */
+export type ScheduleBlock = { id: string; kind?: 'block' | 'lunch'; title: string; starts_at: string; ends_at: string; lunch_start?: string | null; lunch_end?: string | null; field: { id: string; name: string } | null; teams: TTeamRef[] };
 
 export const STATUSES = ['draft', 'published', 'in_progress', 'completed', 'cancelled'] as const;
 export const statusBadge = (s: string) => ({ draft: 'badge-ghost', published: 'badge-info', in_progress: 'badge-success', completed: 'badge-neutral', cancelled: 'badge-error' })[s] ?? 'badge-ghost';
 export const FORMATS = ['single_elim', 'double_elim', 'round_robin', 'groups', 'swiss', 'custom'] as const;
 export const TIEBREAKERS = ['goal_diff', 'goals_for', 'goals_against', 'wins', 'head_to_head'] as const;
+
+/** What a block shows on the schedule: a lunch is just its sitting, the padding around it only constrains the planning. */
+export const blockStart = (b: ScheduleBlock) => b.lunch_start ?? b.starts_at;
+export const blockEnd = (b: ScheduleBlock) => b.lunch_end ?? b.ends_at;
 
 /** Formats an ISO date (YYYY-MM-DD) in the user's language, without a time-zone shift. */
 export function fmtDate(iso: string | null | undefined, opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' }): string {
