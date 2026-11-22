@@ -18,53 +18,112 @@
 	const H = $derived(twoLegged ? 92 : 58);
 	const STEP = $derived(H + SPACE);
 
-	type Node = { m: MatchDoc; col: number; y: number };
+	type Node = { m: MatchDoc; col: number; y: number; lane: number };
+	const LANE_HEAD = 26; // label of a lower lane
+	const LANE_GAP = 28;
+	/**
+	 * Games are stacked in lanes: the main bracket on top, and every step down into the "loser of" games one lane lower, so a placement
+	 * ladder runs underneath the final instead of crossing it. Within a lane a game sits between the games that feed it.
+	 */
 	const layout = $derived.by(() => {
-		const nodes = new Map<string, Node>();
-		rounds.forEach((r, col) => {
-			const items = (r.matches ?? []).filter((m) => m.leg !== 1); // a first leg lives inside its tie's box
-			const wanted = items.map((m) => {
-				const ys = [m.home_source, m.away_source].flatMap((s) => (s?.type === 'match' && nodes.has(s.match_id) ? [nodes.get(s.match_id)!.y] : []));
-				return ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : null;
-			});
-			let order = items.map((m, i) => ({ m, y: wanted[i] as number | null, i }));
-			// games without a source column go below the previous one; the rest sit between their feeders
-			let cursor = -STEP;
-			order = order.map((o) => {
-				if (o.y === null) {
-					cursor += STEP;
-					return { ...o, y: cursor };
-				}
-				cursor = Math.max(cursor, o.y);
-				return o;
-			});
-			order.sort((a, b) => (a.y as number) - (b.y as number) || a.i - b.i);
-			let last = -Infinity;
-			for (const o of order) {
-				const y = Math.max(o.y as number, last + STEP);
-				last = y;
-				nodes.set(o.m.id, { m: o.m, col, y });
+		const items: { m: MatchDoc; col: number }[] = [];
+		rounds.forEach((r, col) => (r.matches ?? []).filter((m) => m.leg !== 1).forEach((m) => items.push({ m, col })));
+		const lane = new Map<string, number>();
+		for (const { m } of items) {
+			let l = 0;
+			for (const s of [m.home_source, m.away_source]) {
+				if (s?.type === 'match' && lane.has(s.match_id)) l = Math.max(l, lane.get(s.match_id)! + (s.is_winner ? 0 : 1));
 			}
-		});
-		return nodes;
+			lane.set(m.id, l);
+		}
+		const lanes = Math.max(0, ...lane.values()) + 1;
+		const nodes = new Map<string, Node>();
+		let top = 0;
+		for (let l = 0; l < lanes; l++) {
+			const offset = top + (l > 0 ? LANE_HEAD : 0);
+			let bottom = 0;
+			rounds.forEach((_r, col) => {
+				const mine = items.filter((i) => i.col === col && lane.get(i.m.id) === l);
+				const wanted = mine.map(({ m }) => {
+					const ys = [m.home_source, m.away_source].flatMap((s) => (s?.type === 'match' && nodes.has(s.match_id) && nodes.get(s.match_id)!.lane === l ? [nodes.get(s.match_id)!.y - offset] : []));
+					return ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : null;
+				});
+				let cursor = -STEP;
+				let order = mine.map((o, i) => ({ m: o.m, y: wanted[i] as number | null, i }));
+				order = order.map((o) => {
+					if (o.y === null) {
+						cursor += STEP;
+						return { ...o, y: cursor };
+					}
+					cursor = Math.max(cursor, o.y);
+					return o;
+				});
+				order.sort((a, b) => (a.y as number) - (b.y as number) || a.i - b.i);
+				let last = -Infinity;
+				for (const o of order) {
+					const y = Math.max(o.y as number, last + STEP);
+					last = y;
+					nodes.set(o.m.id, { m: o.m, col, y: offset + y, lane: l });
+					bottom = Math.max(bottom, offset + y + H);
+				}
+			});
+			top = bottom + LANE_GAP;
+		}
+		return { nodes, lanes, laneTops: Array.from({ length: lanes }, (_, l) => Math.min(Infinity, ...[...nodes.values()].filter((n) => n.lane === l).map((n) => n.y)) - (l > 0 ? LANE_HEAD : 0)) };
 	});
-	const height = $derived(Math.max(0, ...[...layout.values()].map((n) => n.y + H)));
+	const nodes = $derived(layout.nodes);
+	const height = $derived(Math.max(0, ...[...nodes.values()].map((n) => n.y + H)));
 	const width = $derived(rounds.length * (W + GAP) - GAP);
 
-	type Link = { d: string; loser: boolean };
+	let hover = $state<string | null>(null);
+	/** What feeds a game (every earlier game its teams come from, winners and losers alike) and what it feeds. */
+	const parents = $derived.by(() => {
+		const out = new Map<string, string[]>();
+		for (const n of nodes.values()) out.set(n.m.id, [n.m.home_source, n.m.away_source].flatMap((s) => (s?.type === 'match' && nodes.has(s.match_id) ? [s.match_id] : [])));
+		return out;
+	});
+	const children = $derived.by(() => {
+		const out = new Map<string, string[]>();
+		for (const [id, ps] of parents) for (const p of ps) out.set(p, [...(out.get(p) ?? []), id]);
+		return out;
+	});
+	/** Hovering a game: the full chain of games before it, and the games that follow it directly. */
+	const focus = $derived.by(() => {
+		if (!hover) return null;
+		const before = new Set<string>();
+		const queue = [...(parents.get(hover) ?? [])];
+		while (queue.length) {
+			const id = queue.pop()!;
+			if (before.has(id)) continue;
+			before.add(id);
+			queue.push(...(parents.get(id) ?? []));
+		}
+		return { before, next: new Set(children.get(hover) ?? []) };
+	});
+	const role = (id: string) => (!hover ? '' : id === hover ? 'self' : focus?.before.has(id) ? 'before' : focus?.next.has(id) ? 'next' : 'other');
+	/** Without a hover only the winner lines of a lane are drawn; hovering shows the chain before the game and the lines to what follows. */
+	function linkOpacity(l: { from: string; to: string; loser: boolean; sameLane: boolean }) {
+		if (!hover) return l.loser || !l.sameLane ? 0 : 0.7;
+		const inChain = (l.to === hover || focus?.before.has(l.to)) && (focus?.before.has(l.from) ?? false);
+		return inChain || l.from === hover ? 1 : 0.06;
+	}
+	type Link = { d: string; loser: boolean; from: string; to: string; sameLane: boolean };
 	const links = $derived.by(() => {
 		const out: Link[] = [];
-		for (const n of layout.values()) {
+		for (const n of nodes.values()) {
 			for (const side of ['home_source', 'away_source'] as const) {
 				const s = n.m[side];
-				const from = s?.type === 'match' ? layout.get(s.match_id) : undefined;
+				const from = s?.type === 'match' ? nodes.get(s.match_id) : undefined;
 				if (!s || s.type !== 'match' || !from) continue;
 				const x1 = from.col * (W + GAP) + W;
 				const x2 = n.col * (W + GAP);
 				const y1 = from.y + H / 2;
-				const y2 = n.y + H / 2 + (side === 'home_source' ? -6 : 6);
-				const mid = x1 + (x2 - x1) / 2;
-				out.push({ d: `M${x1} ${y1} H${mid} V${y2} H${x2}`, loser: !s.is_winner });
+				const y2 = n.y + H / 2 + (side === 'home_source' ? -7 : 7);
+				// the vertical part runs in the gap right after the source column; the rest is straight, so nothing is hidden behind a box
+				// every game gets its own vertical track in the gap, so lines of different games never run on top of each other
+				const track = (Math.round(from.y / STEP) % 5) * 8;
+				const bend = x1 + 10 + track + (s.is_winner ? 0 : 4);
+				out.push({ d: `M${x1} ${y1} H${bend} V${y2} H${x2 - 1}`, loser: !s.is_winner, from: s.match_id, to: n.m.id, sameLane: from.lane === n.lane });
 			}
 		}
 		return out;
@@ -87,18 +146,41 @@
 </script>
 
 {#if rounds.length}
+	<p class="mb-1 flex flex-wrap items-center gap-4 text-xs text-muted">
+		<span>{t('tn.bracket.hover_hint')}</span>
+		<span class="flex items-center gap-1.5"><span class="inline-block size-3 rounded border border-sky-500 bg-sky-50"></span>{t('tn.bracket.before')}</span>
+		<span class="flex items-center gap-1.5"><span class="inline-block size-3 rounded border border-emerald-500 bg-emerald-50"></span>{t('tn.bracket.next')}</span>
+	</p>
 	<div class="max-h-[75vh] overflow-auto rounded-lg border border-line bg-paper/40 p-3">
 		<div class="relative" style:width="{width}px" style:height="{height + HEAD}px">
 			{#each rounds as r, col (col)}
 				<h3 class="absolute truncate text-xs font-bold text-muted" style:left="{col * (W + GAP)}px" style:width="{W}px" style:top="0">{r.label ?? t('tn.standings.round', { n: r.round_number ?? col + 1 })}</h3>
 			{/each}
+			{#each layout.laneTops as top, l (l)}
+				{#if l > 0}
+					<div class="absolute right-0 left-0 border-t border-dashed border-line" style:top="{HEAD + top - LANE_GAP / 2}px"></div>
+					<p class="absolute text-[11px] font-bold tracking-wide text-muted uppercase" style:left="0" style:top="{HEAD + top + 2}px">{t('tn.bracket.placement')}</p>
+				{/if}
+			{/each}
 			<svg class="pointer-events-none absolute left-0" style:top="{HEAD}px" {width} {height} aria-hidden="true">
+				<defs>
+					<marker id="bk-win" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L6 3 L0 6 z" fill="currentColor" class="text-ink/60" /></marker>
+					<marker id="bk-lose" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L6 3 L0 6 z" fill="currentColor" class="text-amber-600" /></marker>
+				</defs>
 				{#each links as l, i (i)}
-					<path d={l.d} fill="none" stroke="currentColor" class="text-ink/35" stroke-width="1.5" stroke-dasharray={l.loser ? '4 3' : undefined} />
+					<path
+						d={l.d}
+						fill="none"
+						stroke="currentColor"
+						class="{l.loser ? 'text-amber-600' : 'text-ink/55'} transition-opacity"
+						stroke-width={hover && linkOpacity(l) === 1 ? 2.25 : 1.5}
+						opacity={linkOpacity(l)}
+						marker-end="url(#{l.loser ? 'bk-lose' : 'bk-win'})" />
 				{/each}
 			</svg>
-			{#each layout.values() as n (n.m.id)}
-				<div class="absolute overflow-hidden rounded-lg border border-line bg-white text-xs shadow-sm" style:left="{n.col * (W + GAP)}px" style:top="{HEAD + n.y}px" style:width="{W}px" style:height="{H}px">
+			{#each nodes.values() as n (n.m.id)}
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div class="absolute overflow-hidden rounded-lg border text-xs shadow-sm transition-opacity {role(n.m.id) === 'self' ? 'border-ink bg-white ring-2 ring-ink' : role(n.m.id) === 'before' ? 'border-sky-500 bg-sky-50 ring-1 ring-sky-400' : role(n.m.id) === 'next' ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-400' : 'border-line bg-white'} {role(n.m.id) === 'other' ? 'opacity-35' : ''}" onmouseenter={() => (hover = n.m.id)} onmouseleave={() => (hover = null)} style:left="{n.col * (W + GAP)}px" style:top="{HEAD + n.y}px" style:width="{W}px" style:height="{H}px">
 					{#if n.m.leg}
 						<div class="flex items-center justify-end gap-2 border-b border-line bg-subhead px-2 py-0.5 font-mono text-[10px] text-muted"><span>{t('tn.leg', { n: 1 })}</span><span>{t('tn.leg', { n: 2 })}</span><span class="w-5 text-right">Σ</span></div>
 					{/if}
