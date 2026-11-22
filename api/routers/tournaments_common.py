@@ -12,7 +12,7 @@ from ninja.errors import HttpError
 
 from members.services import access
 from members.services.errors import Invalid
-from tournaments.models import Match, MatchAttribute, MatchAttributeValue, MatchEvent, Tournament, TournamentField, TournamentRosterRole, TournamentStage, TournamentTeam
+from tournaments.models import Match, MatchAttribute, MatchAttributeValue, MatchEvent, Tournament, TournamentField, TournamentGroup, TournamentRosterRole, TournamentStage, TournamentTeam
 from tournaments.services.scheduling import ATTR_PREFIX, stage_tiebreakers
 
 
@@ -103,7 +103,7 @@ def ref(obj):
     """``{id, name}`` of a field or stage: its own name, not the "<tournament> - <name>" of ``str()``."""
     if obj is None:
         return None
-    return {"id": obj.pk, "name": obj.name if isinstance(obj, (TournamentField, TournamentStage)) else str(obj)}
+    return {"id": obj.pk, "name": obj.name if isinstance(obj, (TournamentField, TournamentGroup, TournamentStage)) else str(obj)}
 
 
 def count_label(items, key):

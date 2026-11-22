@@ -49,7 +49,7 @@
 
 <svelte:head><title>{pageTitle(t('tn.next.title'))}</title></svelte:head>
 
-<div class="grid max-w-4xl gap-4">
+<div class="grid gap-4">
 	<a class="link inline-flex w-fit items-center gap-1 text-sm" href="{TBASE}/{tn.id}/setup"><ArrowLeft size={14} /> {t('tn.seed.back')}</a>
 	{#if data.error}
 		<Alert kind={data.error.code === 'not_ready' ? 'warning' : 'error'}>{data.error.code === 'not_ready' ? t('tn.next.not_ready') : data.error.message || t('common.error.generic')}</Alert>
@@ -61,6 +61,7 @@
 			</Alert>
 		{/if}
 		<p class="text-sm text-muted">{t('tn.next.help')}</p>
+		<div class="grid items-start gap-4 xl:grid-cols-2">
 		{#each data.phase.groups as g, gi (key(gi))}
 			<section class="card card-body gap-3">
 				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ListOrdered size={16} class="shrink-0" aria-hidden="true" /> {g.group?.name ?? data.phase.stage.name}</h2>
@@ -89,6 +90,7 @@
 				</ol>
 			</section>
 		{/each}
+		</div>
 		<div class="flex justify-end"><button class="btn btn-primary" type="button" disabled={run.busy || done} onclick={confirm}>{t('tn.next.confirm')}</button></div>
 	{/if}
 </div>
