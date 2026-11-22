@@ -470,13 +470,19 @@ def _skip_to_available_window(field, candidate_start: datetime.datetime, match_d
     return candidate_start
 
 
-@transaction.atomic
 def _duration_of(match: Match, fallback: datetime.timedelta) -> datetime.timedelta:
     """A game's length: its stage's own setting when it has one, else the run's default."""
     own = (match.stage.config or {}).get("match_duration_minutes")
     return datetime.timedelta(minutes=int(own)) if own else fallback
 
 
+def _fits_availability(field, start: datetime.datetime, duration: datetime.timedelta, fallback_date: datetime.date) -> bool:
+    """Whether a game starting at ``start`` is over before its window closes. A field without any availability is unbounded."""
+    windows = _field_availability_windows(field, fallback_date)
+    return not windows or any(window_start <= start and start + duration <= window_end for window_start, window_end in windows)
+
+
+@transaction.atomic
 def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAULT_MATCH_DURATION, reset: bool = False) -> list[Match]:
     """First-draft field/time assignment for every not-yet-scheduled match
     across every stage, in stage-sequence then round order -- a still-TBD
@@ -553,6 +559,7 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
     team_clock: dict = {}
 
     scheduled: list[Match] = []
+    overflow: list[tuple[Match, datetime.datetime]] = []  # games that end up outside the time their field is available
     for stage in tournament.stages.order_by("sequence"):
         matches = list(stage.matches.filter(scheduled_start__isnull=True).select_related("stage").order_by("round_number", "sequence"))
         stage_duration = _duration_of(matches[0], run_duration) if matches else run_duration
@@ -603,6 +610,8 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
                     if candidate_start == before:
                         break
 
+                if not _fits_availability(field, candidate_start, match_duration, tournament.start_date):
+                    overflow.append((match, candidate_start + match_duration))
                 match.field = field
                 match.scheduled_start = candidate_start
                 match.auto_scheduled = True
@@ -637,6 +646,14 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
                 field_has_game[field.id] = True
                 team_clock[match.home_team_id] = field_end
                 team_clock[match.away_team_id] = field_end
+
+    if overflow:
+        # Raised inside the transaction, so nothing of this run is kept: a schedule with games outside the opening hours is not a schedule.
+        last_end = max(end for _match, end in overflow)
+        raise SchedulingError(
+            _("%(count)d of %(total)d games do not fit in the time the fields are available (the last would end %(end)s). Add field time or another field, shorten the games or the breaks, or remove games.")
+            % {"count": len(overflow), "total": len(scheduled), "end": timezone.localtime(last_end).strftime("%a %d %b %H:%M")}
+        )
 
     Tournament.objects.filter(pk=tournament.pk, schedule_needs_regeneration=True).update(schedule_needs_regeneration=False)
     return scheduled
