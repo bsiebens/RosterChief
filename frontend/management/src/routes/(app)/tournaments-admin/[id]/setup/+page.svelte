@@ -426,7 +426,7 @@
 							{@const Icon = FORMAT_ICONS[s.format]}
 							{@const isSel = selectedId === s.id}
 							{@const canGenerate = canOperate && (isKnockout(s) || s.needs_seed_choice || s.format !== 'custom')}
-							<div class="flex flex-col items-stretch md:flex-row md:items-start">
+							<div class="flex flex-col items-stretch md:flex-row">
 								<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
 								<div
 									class="flex w-full flex-col gap-2 rounded-lg border p-3 transition-colors md:w-72 {isSel ? 'border-ink bg-row-sel' : 'border-line bg-white hover:bg-surface'} {overStageId === s.id && dragStageId !== s.id ? 'outline outline-2 -outline-offset-2 outline-club' : ''} {dragStageId === s.id ? 'opacity-50' : ''}"
@@ -448,7 +448,7 @@
 										dropStage(s.id);
 									}}
 									ondragend={() => (dragStageId = overStageId = null)}>
-									<div class="flex items-start gap-2">
+									<div class="flex flex-1 items-start gap-2 self-stretch">
 										<span class="flex size-9 shrink-0 items-center justify-center rounded-md {isSel ? 'bg-ink text-white' : 'bg-subhead text-muted'}"><Icon size={18} aria-hidden="true" /></span>
 										<button class="min-w-0 flex-1 cursor-pointer text-left" type="button" aria-pressed={isSel} onclick={() => selectStage(s.id)}>
 											<strong class="block truncate text-ink"><span class="font-mono text-xs text-muted">{i + 1}.</span> {s.name}</strong>
