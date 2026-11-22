@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { CalendarClock, Eraser, Pencil, Plus, Save, Trash2, UtensilsCrossed, Wand2, X } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import NoticeAlert from '#lib/components/NoticeAlert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import ScheduleBoard from '#lib/components/tournaments/ScheduleBoard.svelte';
@@ -119,7 +120,7 @@
 	{#if needsRegen}
 		<Alert kind="warning" title={t('tn.sched.regen_title')}>{t('tn.sched.regen_body')}</Alert>
 	{/if}
-	{#if run.notice}<Alert kind="success">{run.notice}</Alert>{/if}
+	<NoticeAlert message={run.notice} onhide={() => (run.notice = '')} />
 	{#if run.error && !moveOpen && !blockOpen && !delOpen && !clearOpen}<Alert kind="error">{run.error}</Alert>{/if}
 
 	{#if data.error || !sched}
@@ -172,7 +173,7 @@
 				<p class="text-sm text-muted">{t('tn.lunch.disabled')} <a class="link font-semibold" href="{TBASE}/{tn.id}">{t('tn.lunch.disabled_link')}</a>.</p>
 			{:else}
 				<p class="text-xs text-muted">{t('tn.lunch.help')}</p>
-				{#if lrun.notice}<Alert kind="success">{lrun.notice}</Alert>{/if}
+				<NoticeAlert message={lrun.notice} onhide={() => (lrun.notice = '')} />
 				{#if lrun.error}<Alert kind="error">{lrun.error}{#each lerrOther as m (m)} {m}{/each}</Alert>{/if}
 				<div class="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
 					<Field label={t('tn.lunch.duration')} type="number" min="1" bind:value={lset.duration_minutes} error={lerr('duration_minutes')} help={t('tn.lunch.duration_help')} disabled={!canOperate} />
@@ -218,7 +219,7 @@
 				<p class="text-xs text-muted">{t('tn.lunch.days_help')}</p>
 				{#if canOperate}
 					<div class="flex flex-wrap items-center justify-end gap-3">
-						{#if lunchDirty}<span class="mr-auto text-xs text-muted">{t('tn.lunch.unsaved')}</span>{/if}
+						{#if lunchDirty}<span class="mr-auto rounded-md border border-warn-border bg-warn-bg px-3 py-1.5 text-sm font-semibold text-warn-text">{t('tn.lunch.unsaved')}</span>{/if}
 						<button class="btn btn-primary gap-2" type="button" disabled={lrun.busy || !lunchDirty} onclick={saveLunch}><Save size={16} /> {t('tn.lunch.save')}</button>
 						<button class="btn btn-outline gap-2" type="button" disabled={lrun.busy || lunchDirty} onclick={() => { lrun.clear(); lgenOpen = true; }}><Wand2 size={16} /> {t('tn.lunch.generate')}</button>
 						<button class="btn btn-outline btn-error gap-2" type="button" disabled={lrun.busy} onclick={() => { lrun.clear(); lclearOpen = true; }}><Eraser size={16} /> {t('tn.lunch.clear')}</button>

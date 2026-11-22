@@ -2,6 +2,7 @@
 	import { Check, ClipboardPen, ListOrdered, Pencil, Plus, Trash2 } from '@lucide/svelte';
 	import { api, type ApiCall } from '#lib/management-api.ts';
 	import Alert from '#lib/components/Alert.svelte';
+	import NoticeAlert from '#lib/components/NoticeAlert.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
@@ -93,7 +94,7 @@
 <svelte:head><title>{pageTitle(t('tn.tab.scores'))}</title></svelte:head>
 
 <div class="grid gap-4">
-	{#if run.notice}<Alert kind="success">{run.notice}</Alert>{/if}
+	<NoticeAlert message={run.notice} onhide={() => (run.notice = '')} />
 	{#if run.error && !open}<Alert kind="error">{run.error}</Alert>{/if}
 	{#if data.error || !data.scores}
 		<Alert kind="error">{t('common.error.generic')}</Alert>

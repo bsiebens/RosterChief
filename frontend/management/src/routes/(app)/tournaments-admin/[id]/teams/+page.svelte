@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { FileDown, Plus, Trash2, Users } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import NoticeAlert from '#lib/components/NoticeAlert.svelte';
 	import TeamLogo from '#lib/components/tournaments/TeamLogo.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
@@ -65,7 +66,7 @@
 <svelte:head><title>{pageTitle(t('tn.tab.teams'))}</title></svelte:head>
 
 <div class="grid gap-4">
-	{#if run.notice}<Alert kind="success">{run.notice}</Alert>{/if}
+	<NoticeAlert message={run.notice} onhide={() => (run.notice = '')} />
 	{#if run.error && !addOpen && !withdrawOpen && !deleteOpen}<Alert kind="error">{run.error}</Alert>{/if}
 	{#if data.error}
 		<Alert kind="error">{t('common.error.generic')}</Alert>

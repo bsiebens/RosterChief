@@ -5,6 +5,7 @@
 	import ActionList from '#lib/components/actions/ActionList.svelte';
 	import ActionRow from '#lib/components/actions/ActionRow.svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import NoticeAlert from '#lib/components/NoticeAlert.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import TournamentFields from '#lib/components/tournaments/TournamentFields.svelte';
 	import TournamentSummary from '#lib/components/tournaments/TournamentSummary.svelte';
@@ -47,7 +48,7 @@
 	<div class="grid content-start gap-5 xl:col-span-2">
 		<section class="card card-body card-hl gap-3">
 			<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Trophy size={16} aria-hidden="true" />{t('tn.card.details')}</h2>
-			{#if run.notice}<Alert kind="success">{run.notice}</Alert>{/if}
+			<NoticeAlert message={run.notice} onhide={() => (run.notice = '')} />
 			{#if run.error && !Object.keys(run.fields).length}<Alert kind="error">{run.error}</Alert>{/if}
 			<TournamentFields bind:v errors={run.fields} teams={data.teams} part="basics" />
 		</section>

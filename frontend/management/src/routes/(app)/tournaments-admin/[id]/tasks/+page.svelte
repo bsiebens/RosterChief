@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { HandHelping, Pencil, Plus, Printer, Trash2, UserPlus, Wand2, X } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import NoticeAlert from '#lib/components/NoticeAlert.svelte';
 	import EntityPicker from '#lib/components/EntityPicker.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
@@ -75,7 +76,7 @@
 <svelte:head><title>{pageTitle(t('tn.tab.tasks'))}</title></svelte:head>
 
 <div class="grid gap-3">
-	{#if run.notice}<Alert kind="success">{run.notice}</Alert>{/if}
+	<NoticeAlert message={run.notice} onhide={() => (run.notice = '')} />
 	{#if run.error && !open && !genOpen && !assignOpen && !delOpen}<Alert kind="error">{run.error}</Alert>{/if}
 	{#if data.error}
 		<Alert kind="error">{t('common.error.generic')}</Alert>

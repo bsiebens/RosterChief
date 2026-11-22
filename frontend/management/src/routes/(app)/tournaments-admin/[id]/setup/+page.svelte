@@ -3,6 +3,7 @@
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import Alert from '#lib/components/Alert.svelte';
+	import NoticeAlert from '#lib/components/NoticeAlert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
@@ -355,7 +356,7 @@
 <svelte:head><title>{pageTitle(t('tn.tab.setup'))}</title></svelte:head>
 
 {#snippet err()}
-	{#if run.notice}<Alert kind="success">{run.notice}</Alert>{/if}
+	<NoticeAlert message={run.notice} onhide={() => (run.notice = '')} />
 	{#if run.error && !Object.keys(run.fields).length}<Alert kind="error">{run.error}</Alert>{/if}
 {/snippet}
 
