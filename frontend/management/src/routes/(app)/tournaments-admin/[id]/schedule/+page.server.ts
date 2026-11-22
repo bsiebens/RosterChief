@@ -13,6 +13,7 @@ export type ScheduleData = {
 export type BoardSlot = { type: 'match' | 'gap'; start: string; end: string; minutes: number; height_px: number; top_px: number; match?: MatchDoc; rule?: { id: string; summary: string } };
 export type BoardData = {
 	px_per_minute: number;
+	sport: { slug: string; name: string } | null;
 	fields: { field: { id: string; name: string }; rules: { id: string; summary: string }[]; days: { date: string; start: string; end: string; height_px: number; hour_marks: unknown[]; slots: BoardSlot[] }[] }[];
 };
 

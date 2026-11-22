@@ -444,6 +444,25 @@ class TournamentApiTests(TestCase):
         rows = {r["team"]["name"]: r for r in self.as_("operate", "get", f"/{t.pk}/standings").json()["standings"][0]["tables"][0]["rows"]}
         self.assertEqual((rows["B"]["won"], rows["B"]["points"], rows["A"]["lost"], rows["A"]["drawn"]), (1, 3, 1, 0))
 
+    def test_reorder_hands_the_times_to_the_new_order(self):
+        t = self.make(status="in_progress")
+        [self.foreign(t, n) for n in ("A", "B", "C", "D")]
+        self.as_("operate", "post", f"/{t.pk}/fields", {"name": "Field 1", "availability": [{"date": "2026-09-19", "start": "09:00", "end": "18:00"}]})
+        stage = self.as_("operate", "post", f"/{t.pk}/stages", {"name": "RR", "format": "round_robin"}).json()
+        self.as_("operate", "post", f"/{t.pk}/stages/{stage['id']}/generate-matches", {})
+        self.as_("operate", "post", f"/{t.pk}/schedule/generate", {})
+        matches = list(Match.objects.filter(stage_id=stage["id"], scheduled_start__isnull=False).order_by("scheduled_start"))
+        first = matches[0]
+        other = next(m for m in matches[1:] if not {m.home_team_id, m.away_team_id} & {first.home_team_id, first.away_team_id})  # two games between four different teams swap places safely
+        before = [(first.scheduled_start, first.field_id), (other.scheduled_start, other.field_id)]
+        new_order = [other.pk, first.pk]
+        r = self.as_("operate", "post", f"/{t.pk}/schedule/reorder", {"match_ids": [str(i) for i in new_order]})
+        self.assertEqual(r.status_code, 200, r.content)
+        for position, pk in enumerate(new_order):
+            m = Match.objects.get(pk=pk)
+            self.assertEqual((m.scheduled_start, m.field_id), before[position])
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/schedule/reorder", {"match_ids": [str(new_order[0])]}).status_code, 422)  # needs two or more
+
     def test_delete_only_a_draft_tournament(self):
         body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}
         tid = self.as_("manage", "post", "", body).json()["id"]

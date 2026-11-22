@@ -137,6 +137,10 @@ class RescheduleIn(Schema):
     scheduled_start: datetime.datetime
 
 
+class ReorderIn(Schema):
+    match_ids: list[uuid.UUID] = Field(min_length=2, max_length=200)
+
+
 class MatchTeamsPatch(Schema):
     """Only the keys that are sent change; ``null`` clears the slot back to TBD."""
 

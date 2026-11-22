@@ -6,14 +6,14 @@ import datetime
 import itertools
 import uuid
 
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import Max, Q
 from django.utils import timezone
 from ninja import Router
 
 from api.auth import AUTHENTICATORS
 from api.routers import tournaments_common as c
-from api.schemas_tournaments import BlockIn, BlockPatch, GenerateScheduleIn, MatchCreateIn, MatchTeamsPatch, RescheduleIn, ResultIn
+from api.schemas_tournaments import BlockIn, BlockPatch, GenerateScheduleIn, MatchCreateIn, MatchTeamsPatch, ReorderIn, RescheduleIn, ResultIn
 from formbuilder.services.management import Conflict
 from members.services.errors import Invalid
 from tournaments.models import Match, MatchAttribute, MatchAttributeValue, ScheduleBlock, Tournament, TournamentGroup, TournamentStage, TournamentTeam
@@ -141,7 +141,8 @@ def board(request, tournament_id: uuid.UUID):
             days.append({"date": day["date"], "start": day["start"], "end": day["end"], "height_px": day["height_px"], "hour_marks": day["hour_marks"], "slots": slots})
         rules = [{"id": r.pk, "summary": r.display_summary} for r in entry["rules"]]
         fields.append({"field": c.ref(entry["field"]), "rules": rules, "days": days})
-    return {"tournament": _head(t), "px_per_minute": svc.PX_PER_MINUTE, "fields": fields}
+    sport = getattr(connection.tenant, "sport", None)  # the club's sport decides how the playing surface is drawn (a full rink for ice hockey)
+    return {"tournament": _head(t), "px_per_minute": svc.PX_PER_MINUTE, "sport": {"slug": sport.slug, "name": sport.name} if sport else None, "fields": fields}
 
 
 @router.post("/{tournament_id}/schedule/generate", summary="Generate (re-plan) the schedule of every unplayed match", operation_id="tournaments_schedule_generate")
@@ -192,6 +193,29 @@ def reschedule(request, match_id: uuid.UUID, payload: RescheduleIn):
         start = timezone.make_aware(start)
     _scheduling(svc.reschedule_match, match, field=field, scheduled_start=start)
     return c.match_out(_match(match_id))
+
+
+@router.post("/{tournament_id}/schedule/reorder", summary="Hand the same times and fields to the matches in a new order", operation_id="tournaments_schedule_reorder")
+def reorder(request, tournament_id: uuid.UUID, payload: ReorderIn):
+    """The scheduled matches listed keep the set of (field, start) slots they occupy now; the slots are dealt out again in the order
+    given (earliest slot to the first match). Unscheduled matches in the list are left alone. All or nothing: a placement that breaks a
+    rule rolls everything back."""
+    c.gate_operate(request)
+    t = c.get_tournament(tournament_id)
+    found = {m.pk: m for m in Match.objects.select_related("field", "stage__tournament").filter(stage__tournament=t, pk__in=payload.match_ids)}
+    if len(found) != len(set(payload.match_ids)):
+        raise Invalid("Unknown match.", {"match_ids": ["Unknown match."]})
+    ordered = [found[i] for i in payload.match_ids]
+    if any(m.status == Match.Status.COMPLETE for m in ordered):
+        raise Invalid("A played match cannot be moved.", {"detail": ["A played match cannot be moved."]}, code="match_played")
+    scheduled = [m for m in ordered if m.scheduled_start is not None and m.field_id is not None]
+    slots = sorted(((m.scheduled_start, m.field) for m in scheduled), key=lambda slot: (slot[0], slot[1].name))
+    with transaction.atomic():
+        Match.objects.filter(pk__in=[m.pk for m in scheduled]).update(scheduled_start=None, field=None)  # free the slots first, so swapping two matches never clashes with itself
+        for match, (start, field) in zip(scheduled, slots, strict=True):
+            match.refresh_from_db()
+            _scheduling(svc.reschedule_match, match, field=field, scheduled_start=start)
+    return {"matches": [c.match_out(_match(m.pk)) for m in ordered]}
 
 
 def _manual_values(tournament, submitted) -> list:

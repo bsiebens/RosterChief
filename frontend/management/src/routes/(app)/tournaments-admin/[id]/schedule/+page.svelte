@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { CalendarClock, Eraser, Pencil, Plus, Save, Trash2, UtensilsCrossed, Wand2, X } from '@lucide/svelte';
+	import { ArrowDown, ArrowUp, CalendarClock, Eraser, GripVertical, Pencil, Plus, Save, Trash2, UtensilsCrossed, Wand2, X } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import NoticeAlert from '#lib/components/NoticeAlert.svelte';
 	import Field from '#lib/components/Field.svelte';
@@ -43,6 +43,28 @@
 	async function saveMove(e: SubmitEvent) {
 		e.preventDefault();
 		if (moving && (await run.post(`/tournaments/matches/${moving.id}/reschedule`, { field_id: moveField, scheduled_start: fromLocalInput(moveStart) }))) moveOpen = false;
+	}
+	// --- list view: the times of a round stay where they are, the games change places
+	let dragMatch = $state<string | null>(null);
+	let overMatch = $state<string | null>(null);
+	/** A round in time order; games without a time go last. */
+	const sortedRound = (ms: MatchDoc[]) => [...ms].sort((x, y) => (x.scheduled_start ?? '9').localeCompare(y.scheduled_start ?? '9') || x.id.localeCompare(y.id));
+	const reorder = (ids: string[]) => run.post(`${base}/schedule/reorder`, { match_ids: ids });
+	function moveRow(rows: MatchDoc[], fromId: string, toId: string) {
+		dragMatch = overMatch = null;
+		const ids = rows.filter((x) => x.scheduled_start).map((x) => x.id);
+		const from = ids.indexOf(fromId);
+		const to = ids.indexOf(toId);
+		if (from < 0 || to < 0 || from === to) return;
+		ids.splice(to, 0, ids.splice(from, 1)[0]);
+		return reorder(ids);
+	}
+	function stepRow(rows: MatchDoc[], index: number, by: -1 | 1) {
+		const ids = rows.filter((x) => x.scheduled_start).map((x) => x.id);
+		const to = index + by;
+		if (to < 0 || to >= ids.length) return;
+		[ids[index], ids[to]] = [ids[to], ids[index]];
+		return reorder(ids);
 	}
 	const drop = (m: MatchDoc, field_id: string, scheduled_start: string) => run.post(`/tournaments/matches/${m.id}/reschedule`, { field_id, scheduled_start });
 
@@ -262,28 +284,68 @@
 			{#each sched.stages as st (st.stage.id)}
 				<section class="grid gap-3 border-t border-line pt-4">
 					<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{st.stage.name}</h2>
-					{#each st.rounds as r (r.round_number)}
-						<div class="grid gap-1">
-							<h3 class="text-xs font-bold text-muted">{r.label}</h3>
-							<div class="overflow-x-auto">
-								<table class="table table-sm">
-									<tbody>
-										{#each r.matches as m (m.id)}
-											<tr class="hover:bg-paper">
-												<td class="w-40 font-mono text-xs whitespace-nowrap">{m.scheduled_start ? fmtDateTime(m.scheduled_start) : t('tn.sched.unscheduled')}</td>
-												<td class="w-32 text-xs">{m.field?.name ?? '—'}</td>
-												<td class="w-24">{#if m.group}<span class="badge badge-sm badge-ghost">{m.group.name}</span>{/if}</td>
-												<td class="text-sm">{m.home_display} – {m.away_display}</td>
-												<td class="w-10 text-right"><div class="flex items-center justify-end gap-1">{#if canOperate}<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.sched.reschedule')} onclick={() => openMove(m)}><Pencil size={13} /></button>{/if}</div></td>
+					{#if st.rounds.length}
+						<div class="overflow-x-auto rounded-lg border border-line">
+							<table class="table table-sm w-full">
+								<thead>
+									<tr>
+										<th class="w-8"></th>
+										<th class="w-44">{t('tn.sched.col_start')}</th>
+										<th class="w-48">{t('tn.sched.col_field')}</th>
+										<th class="w-24">{t('tn.sched.col_group')}</th>
+										<th>{t('tn.sched.col_match')}</th>
+										<th class="w-28"></th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each st.rounds as r (r.round_number)}
+										{@const rows = sortedRound(r.matches)}
+										<tr class="bg-subhead"><th colspan="6" class="text-left font-display text-xs font-bold tracking-[.08em] text-muted uppercase">{r.label}</th></tr>
+										{#each rows as m, i (m.id)}
+											{@const movable = canOperate && !!m.scheduled_start && m.status !== 'completed'}
+											{#if m.scheduled_start && (i === 0 || !rows[i - 1].scheduled_start || fmtDay(rows[i - 1].scheduled_start!) !== fmtDay(m.scheduled_start))}
+												<tr><td colspan="6" class="bg-paper py-1 font-mono text-[11px] font-semibold text-muted">{fmtDay(m.scheduled_start)}</td></tr>
+											{/if}
+											<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+											<tr
+												class="hover:bg-paper {dragMatch === m.id ? 'opacity-40' : ''} {overMatch === m.id && dragMatch !== m.id ? 'outline outline-2 -outline-offset-2 outline-primary' : ''}"
+												draggable={movable}
+												ondragstart={() => (dragMatch = m.id)}
+												ondragover={(e) => {
+													if (dragMatch && dragMatch !== m.id && movable && rows.some((x) => x.id === dragMatch)) {
+														e.preventDefault();
+														overMatch = m.id;
+													}
+												}}
+												ondrop={(e) => {
+													e.preventDefault();
+													if (dragMatch) moveRow(rows, dragMatch, m.id);
+												}}
+												ondragend={() => (dragMatch = overMatch = null)}>
+												<td class="text-muted">{#if movable}<GripVertical size={14} class="cursor-grab" aria-hidden="true" />{/if}</td>
+												<td class="font-mono text-xs whitespace-nowrap">{m.scheduled_start ? fmtTime(m.scheduled_start) : t('tn.sched.unscheduled')}</td>
+												<td class="text-xs">{m.field?.name ?? '—'}</td>
+												<td>{#if m.group}<span class="badge badge-sm badge-ghost">{m.group.name}</span>{/if}</td>
+												<td class="text-sm font-medium text-ink">{m.home_display} – {m.away_display}</td>
+												<td>
+													<div class="flex items-center justify-end gap-1">
+														{#if movable}
+															<button class="btn btn-ghost btn-xs btn-square" type="button" disabled={run.busy || i === 0 || !rows[i - 1].scheduled_start} aria-label={t('tn.sched.move_up')} title={t('tn.sched.move_up')} onclick={() => stepRow(rows, i, -1)}><ArrowUp size={14} /></button>
+															<button class="btn btn-ghost btn-xs btn-square" type="button" disabled={run.busy || i === rows.length - 1 || !rows[i + 1].scheduled_start} aria-label={t('tn.sched.move_down')} title={t('tn.sched.move_down')} onclick={() => stepRow(rows, i, 1)}><ArrowDown size={14} /></button>
+														{/if}
+														{#if canOperate}<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.sched.reschedule')} title={t('tn.sched.reschedule')} onclick={() => openMove(m)}><Pencil size={13} /></button>{/if}
+													</div>
+												</td>
 											</tr>
 										{/each}
-									</tbody>
-								</table>
-							</div>
+									{/each}
+								</tbody>
+							</table>
 						</div>
+						{#if canOperate}<p class="text-xs text-muted">{t('tn.sched.reorder_help')}</p>{/if}
 					{:else}
 						<p class="text-sm text-muted">{t('tn.sched.no_matches')}</p>
-					{/each}
+					{/if}
 				</section>
 			{:else}
 				<p class="text-sm text-muted">{t('tn.sched.no_matches')}</p>
