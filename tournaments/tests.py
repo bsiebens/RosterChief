@@ -2511,8 +2511,8 @@ class FieldTimelineTests(TournamentsTestCase):
 
         marks = timeline[0]["days"][0]["hour_marks"]
         self.assertEqual([mark["label"] for mark in marks], ["10:00", "11:00"])
-        self.assertEqual(marks[0]["top_px"], 30 * PX_PER_MINUTE)
-        self.assertEqual(marks[1]["top_px"], 90 * PX_PER_MINUTE)
+        self.assertEqual(marks[0]["top_px"], round(30 * PX_PER_MINUTE))
+        self.assertEqual(marks[1]["top_px"], round(90 * PX_PER_MINUTE))
 
     def test_a_blackout_gap_is_attributed_to_its_rule(self):
         field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "13:00"}])

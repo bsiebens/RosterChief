@@ -51,7 +51,7 @@
 <div class="grid gap-8">
 	{#each board.fields as f (f.field.id)}
 		<section class="grid gap-3">
-			<h3 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{#if branding}<ClubCrest name={branding.name ?? ''} logoUrl={branding.logo_url ?? null} size={22} />{/if}{f.field.name}</h3>
+			<h3 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{f.field.name}</h3>
 			{#if f.rules.length}<p class="text-xs text-muted">{f.rules.map((r) => r.summary).join(' · ')}</p>{/if}
 			<div class="grid gap-x-4 gap-y-5 overflow-x-auto pb-2 [grid-template-columns:repeat(auto-fit,minmax(15rem,1fr))]">
 				{#each f.days as day (day.date)}

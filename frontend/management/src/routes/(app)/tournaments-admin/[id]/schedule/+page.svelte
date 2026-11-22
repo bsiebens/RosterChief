@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ArrowDown, ArrowUp, CalendarClock, Eraser, GripVertical, Pencil, Plus, Save, Trash2, UtensilsCrossed, Wand2, X } from '@lucide/svelte';
+	import { ArrowDown, ArrowUp, CalendarClock, Eraser, GripVertical, Pencil, Plus, Save, Trash2, Trophy, UtensilsCrossed, Wand2, X } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import NoticeAlert from '#lib/components/NoticeAlert.svelte';
 	import Field from '#lib/components/Field.svelte';
@@ -49,6 +49,17 @@
 	let overMatch = $state<string | null>(null);
 	/** A round in time order; games without a time go last. */
 	const sortedRound = (ms: MatchDoc[]) => [...ms].sort((x, y) => (x.scheduled_start ?? '9').localeCompare(y.scheduled_start ?? '9') || x.id.localeCompare(y.id));
+	/** The idle minutes on the same field before this game: the time since the previous game of the stage ended (games run the tournament's default length). */
+	const matchMinutes = $derived(sched?.tournament.default_match_duration_minutes ?? 0);
+	function breakBefore(rows: MatchDoc[], i: number, st: { rounds: { matches: MatchDoc[] }[] }): number {
+		const m = rows[i];
+		if (!m.scheduled_start || !matchMinutes) return 0;
+		const all = st.rounds.flatMap((r) => r.matches).filter((x) => x.scheduled_start && x.field?.id === m.field?.id && x.scheduled_start < m.scheduled_start!);
+		if (!all.length) return 0;
+		const prev = all.reduce((a, b) => (a.scheduled_start! > b.scheduled_start! ? a : b));
+		const minutes = Math.round((new Date(m.scheduled_start).getTime() - new Date(prev.scheduled_start!).getTime()) / 60000) - matchMinutes;
+		return minutes > 0 && fmtDay(prev.scheduled_start!) === fmtDay(m.scheduled_start) ? minutes : 0;
+	}
 	const reorder = (ids: string[]) => run.post(`${base}/schedule/reorder`, { match_ids: ids });
 	function moveRow(rows: MatchDoc[], fromId: string, toId: string) {
 		dragMatch = overMatch = null;
@@ -269,7 +280,7 @@
 
 		<section class="card card-body gap-4">
 		<div class="flex flex-wrap items-center justify-between gap-2">
-			<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('tn.sched.games_title')}</h2>
+			<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Trophy size={16} class="shrink-0" aria-hidden="true" /> {t('tn.sched.games_title')}</h2>
 				<div class="flex w-fit items-center gap-1" role="group" aria-label={t('tn.sched.view')}>
 					{#each ['board', 'list'] as v (v)}
 						<button type="button" aria-pressed={view === v} onclick={() => (view = v as 'board' | 'list')} class="rounded-md px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {view === v ? 'border border-ink bg-ink text-white' : 'border border-line text-muted hover:text-ink'}">{t(`tn.sched.view_${v}`)}</button>
@@ -300,11 +311,15 @@
 								<tbody>
 									{#each st.rounds as r (r.round_number)}
 										{@const rows = sortedRound(r.matches)}
-										<tr class="bg-subhead"><th colspan="6" class="text-left font-display text-xs font-bold tracking-[.08em] text-muted uppercase">{r.label}</th></tr>
+										<tr class="bg-subhead"><th colspan="6" class="px-4 py-2 text-left font-display text-xs font-bold tracking-[.08em] text-ink uppercase">{r.label}</th></tr>
 										{#each rows as m, i (m.id)}
 											{@const movable = canOperate && !!m.scheduled_start && m.status !== 'completed'}
 											{#if m.scheduled_start && (i === 0 || !rows[i - 1].scheduled_start || fmtDay(rows[i - 1].scheduled_start!) !== fmtDay(m.scheduled_start))}
-												<tr><td colspan="6" class="bg-paper py-1 font-mono text-[11px] font-semibold text-muted">{fmtDay(m.scheduled_start)}</td></tr>
+												<tr><td colspan="6" class="bg-paper px-4 py-1.5 font-mono text-[11px] font-semibold text-muted">{fmtDay(m.scheduled_start)}</td></tr>
+											{/if}
+											{@const gap = breakBefore(rows, i, st)}
+											{#if gap}
+												<tr><td colspan="6" class="bg-ink/5 px-4 py-1 text-center text-xs font-medium text-ink/70">{t('tn.sched.gap', { n: gap })}</td></tr>
 											{/if}
 											<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 											<tr
