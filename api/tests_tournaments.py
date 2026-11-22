@@ -20,7 +20,7 @@ from events.models import Attendance, Event, Season
 from features.entitlements import Entitlement, Entitlements
 from members.models import Member
 from teams.models import Position, StaffAssignment, Team, TeamMembership
-from tournaments.models import Match, Tournament, TournamentField, TournamentGroup, TournamentRosterEntry, TournamentStage, TournamentTask, TournamentTeam
+from tournaments.models import Match, MatchAttribute, MatchAttributeValue, MatchEvent, Tournament, TournamentField, TournamentGroup, TournamentRosterEntry, TournamentStage, TournamentTask, TournamentTeam
 
 BASE = "/api/v1"
 WITH = Entitlements({"tournaments": Entitlement(True)})
@@ -718,3 +718,215 @@ class TournamentApiTests(TestCase):
         doc = self.as_("operate", "get", f"/{t.pk}/dressing-rooms").json()
         self.assertEqual(len(doc["teams"][0]["assignments"]), 1)
         self.assertEqual(self.as_("operate", "delete", f"/{t.pk}/dressing-rooms/assignments/{r.json()['id']}").status_code, 204)
+
+    # -- match attributes, tie-breaker chains, timeline --
+
+    def _attr(self, t, **body):
+        return self.as_("operate", "post", f"/{t.pk}/attributes", {"name": "PIM", **body})
+
+    def test_attribute_crud_and_validation(self):
+        t = self.make()
+        r = self._attr(t)
+        self.assertEqual(r.status_code, 201, r.content)
+        pim = r.json()
+        self.assertEqual((pim["key"], pim["source"], pim["event_type"], pim["aggregate"], pim["position"]), ("pim", "manual", None, None, 0))
+        self.assertEqual(self._attr(t, name="Pim").status_code, 422)  # same key
+        self.assertEqual(self._attr(t, name="!!!").status_code, 422)
+        self.assertEqual(self._attr(t, name="X", source="timeline").status_code, 422)  # needs event_type + aggregate
+        self.assertEqual(self._attr(t, name="X", source="timeline", event_type="goal").status_code, 422)
+        self.assertEqual(self._attr(t, name="X", event_type="goal").status_code, 422)  # manual takes neither
+        self.assertEqual(self._attr(t, name="X", source="timeline", event_type="bogus", aggregate="sum").status_code, 422)
+        mins = self._attr(t, name="Penalty minutes", source="timeline", event_type="penalty", aggregate="sum").json()
+        self.assertEqual((mins["key"], mins["position"], mins["event_type"], mins["aggregate"]), ("penalty_minutes", 1, "penalty", "sum"))
+        doc = self.as_("operate", "get", f"/{t.pk}/attributes").json()
+        self.assertEqual(doc["event_types"], ["goal", "penalty", "goalie_change", "timeout", "other"])
+        self.assertEqual([a["key"] for a in doc["results"]], ["pim", "penalty_minutes"])
+        # rename and reorder; key and source stay
+        r = self.as_("operate", "patch", f"/{t.pk}/attributes/{mins['id']}", {"name": "PIM total", "position": 0, "aggregate": "count"})
+        self.assertEqual((r.json()["name"], r.json()["key"], r.json()["aggregate"], r.json()["source"]), ("PIM total", "penalty_minutes", "count", "timeline"))
+        self.assertEqual(self.as_("operate", "patch", f"/{t.pk}/attributes/{pim['id']}", {"aggregate": "sum"}).status_code, 422)
+        self.assertEqual(self.as_("operate", "patch", f"/{t.pk}/attributes/{uuid.uuid4()}", {"name": "Z"}).status_code, 404)
+        self.assertEqual(self.as_("operate", "delete", f"/{t.pk}/attributes/{pim['id']}").status_code, 204)
+        self.assertEqual(MatchAttribute.objects.filter(tournament=t).count(), 1)
+
+    def test_attribute_delete_is_refused_while_a_stage_tiebreaker_uses_it(self):
+        t = self.make()
+        pim = self._attr(t).json()
+        r = self.as_("operate", "post", f"/{t.pk}/stages", {"name": "League", "format": "round_robin", "tiebreakers": [{"criterion": "attr:pim", "direction": "least"}]})
+        self.assertEqual(r.status_code, 201, r.content)
+        stage = r.json()
+        r = self.as_("operate", "delete", f"/{t.pk}/attributes/{pim['id']}")
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "in_use"), r.content)
+        self.assertIn("League", r.json()["detail"])
+        self.as_("operate", "patch", f"/{t.pk}/stages/{stage['id']}", {"tiebreakers": []})
+        self.assertEqual(self.as_("operate", "delete", f"/{t.pk}/attributes/{pim['id']}").status_code, 204)
+
+    def test_stage_tiebreakers_new_shape_old_fields_and_validation(self):
+        t = self.make()
+        self._attr(t)
+        url = f"/{t.pk}/stages"
+        default = self.as_("operate", "post", url, {"name": "A", "format": "round_robin"}).json()
+        self.assertEqual([x["criterion"] for x in default["tiebreakers"]], ["goal_diff", "goals_for"])
+        self.assertEqual((default["tiebreaker_1"], default["tiebreaker_2"]), ("goal_diff", "goals_for"))
+        chain = [{"criterion": "wins"}, {"criterion": "goals_against", "direction": "most"}, {"criterion": "attr:pim", "direction": "least"}, {"criterion": "head_to_head"}]
+        r = self.as_("operate", "post", url, {"name": "B", "format": "round_robin", "tiebreakers": chain})
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(
+            r.json()["tiebreakers"],
+            [{"criterion": "wins", "direction": "most"}, {"criterion": "goals_against", "direction": "most"}, {"criterion": "attr:pim", "direction": "least"}, {"criterion": "head_to_head", "direction": "most"}],
+        )
+        self.assertEqual((r.json()["tiebreaker_1"], r.json()["tiebreaker_2"]), ("won", "goals_against"))
+        stored = TournamentStage.objects.get(pk=r.json()["id"]).standings_config["tiebreakers"]
+        self.assertEqual(stored[2], {"criterion": "attr:pim", "direction": "least"})
+        # old fields only apply when "tiebreakers" is absent; patching one keeps the other
+        r = self.as_("operate", "post", url, {"name": "C", "format": "round_robin", "tiebreaker_1": "goals_for", "tiebreaker_2": None})
+        self.assertEqual([x["criterion"] for x in r.json()["tiebreakers"]], ["goals_for"])
+        r = self.as_("operate", "patch", f"{url}/{r.json()['id']}", {"tiebreaker_2": "won"})
+        self.assertEqual([x["criterion"] for x in r.json()["tiebreakers"]], ["goals_for", "wins"])
+        r = self.as_("operate", "patch", f"{url}/{r.json()['id']}", {"name": "C2"})
+        self.assertEqual([x["criterion"] for x in r.json()["tiebreakers"]], ["goals_for", "wins"])  # untouched
+        for bad in ([{"criterion": "bogus"}], [{"criterion": "attr:nope"}], [{"criterion": "wins"}, {"criterion": "wins"}], [{"criterion": "wins", "direction": "up"}]):
+            self.assertEqual(self.as_("operate", "post", url, {"name": "D", "format": "round_robin", "tiebreakers": bad}).status_code, 422, bad)
+        self.assertEqual(self.as_("operate", "post", url, {"name": "E", "format": "round_robin", "tiebreakers": []}).json()["tiebreakers"], [])
+        # a stage saved in the old string format reads and ranks as before
+        old = TournamentStage.objects.create(tournament=t, name="Old", format="round_robin", standings_config={"points": {"win": 3, "draw": 1, "loss": 0}, "tiebreakers": ["goal_diff", "won"]})
+        doc = next(s for s in self.as_("operate", "get", f"/{t.pk}/setup").json()["stages"] if s["id"] == str(old.pk))
+        self.assertEqual(doc["tiebreakers"], [{"criterion": "goal_diff", "direction": "most"}, {"criterion": "wins", "direction": "most"}])
+
+    def _league(self):
+        t = self.make(status="in_progress")
+        self._attr(t)
+        stage = self.as_("operate", "post", f"/{t.pk}/stages", {"name": "League", "format": "round_robin", "tiebreakers": [{"criterion": "attr:pim", "direction": "least"}]}).json()
+        a, b, c = (self.foreign(t, n) for n in ("Alpha", "Bravo", "Charlie"))
+        stage_obj = TournamentStage.objects.get(pk=stage["id"])
+        return t, stage_obj, (a, b, c), [Match.objects.create(stage=stage_obj, home_team=x, away_team=c) for x in (a, b)]
+
+    def test_manual_attribute_values_come_with_the_result_and_feed_standings(self):
+        t, _stage, (a, b, c), (m1, m2) = self._league()
+        timeline_attr = self._attr(t, name="Goals", source="timeline", event_type="goal", aggregate="count").json()
+        r = self.as_("operate", "post", f"/matches/{m1.pk}/result", {"score_home": 1, "score_away": 0, "attributes": {"pim": {"home": 10, "away": 2}}})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["match"]["attributes"], {"pim": {"home": 10, "away": 2}, "goals": {"home": 0, "away": 0}})
+        self.assertEqual(r.json()["match"]["event_count"], 0)
+        self.as_("operate", "post", f"/matches/{m2.pk}/result", {"score_home": 1, "score_away": 0, "attributes": {"pim": {"home": 4, "away": 6}}})
+        self.as_("operate", "post", f"/matches/{m1.pk}/result", {"score_home": 1, "score_away": 0, "attributes": {"pim": {"home": 12, "away": 2}}})  # an edit replaces the value
+        self.assertEqual(MatchAttributeValue.objects.filter(match=m1, attribute__key="pim").get().home_value, 12)
+        for bad in ({"nope": {"home": 1, "away": 1}}, {timeline_attr["key"]: {"home": 1, "away": 1}}, {"pim": {"home": -1, "away": 1}}):
+            self.assertEqual(self.as_("operate", "post", f"/matches/{m2.pk}/result", {"score_home": 1, "score_away": 0, "attributes": bad}).status_code, 422, bad)
+        doc = self.as_("operate", "get", f"/{t.pk}/standings").json()
+        entry = doc["standings"][0]
+        self.assertEqual(entry["attribute_columns"], [{"key": "pim", "name": "PIM"}])
+        self.assertEqual(entry["stage"]["tiebreakers"], [{"criterion": "attr:pim", "direction": "least"}])
+        rows = {r["team"]["id"]: r for r in entry["tables"][0]["rows"]}
+        self.assertEqual((rows[str(a.pk)]["attributes"]["pim"], rows[str(b.pk)]["attributes"]["pim"], rows[str(c.pk)]["attributes"]["pim"]), (12, 4, 8))
+        self.assertEqual([r["team"]["name"] for r in entry["tables"][0]["rows"]][:2], ["Bravo", "Alpha"])  # level on everything else: fewer penalty minutes first
+        schedule = self.as_("operate", "get", f"/{t.pk}/schedule").json()
+        self.assertIn("pim", schedule["stages"][0]["rounds"][0]["matches"][0]["attributes"])
+        # public standings use the same builder
+        t.status = "published"
+        t.save()
+        public = self.call("get", f"/{t.slug}/standings", None, prefix="/public/tournaments")
+        self.assertEqual(public.status_code, 200, public.content)
+        self.assertEqual(public.json()["standings"][0]["attribute_columns"][0]["key"], "pim")
+
+    def test_timeline_crud_goals_fill_the_score_and_attributes_follow(self):
+        t, _stage, _teams, (m1, _m2) = self._league()
+        mins = self._attr(t, name="Penalty minutes", source="timeline", event_type="penalty", aggregate="sum").json()
+        url = f"/matches/{m1.pk}/events"
+        self.assertEqual(self.as_("operate", "get", url).json(), {"match": mock.ANY, "events": []})
+        r = self.as_("operate", "post", url, {"type": "goal", "side": "home", "minute": 12, "player": "Ann"})
+        self.assertEqual(r.status_code, 201, r.content)
+        goal = r.json()
+        self.assertEqual((goal["type"], goal["side"], goal["minute"], goal["player"], goal["note"], goal["value"]), ("goal", "home", 12, "Ann", "", None))
+        self.assertEqual((goal["match"]["score_home"], goal["match"]["score_away"], goal["match"]["event_count"], goal["match"]["status"]), (1, 0, 1, "scheduled"))
+        self.as_("operate", "post", url, {"type": "goal", "side": "away", "minute": 5})
+        r = self.as_("operate", "post", url, {"type": "penalty", "side": "away", "minute": 20, "value": 2})
+        self.assertEqual(r.json()["match"]["attributes"][mins["key"]], {"home": 0, "away": 2})
+        self.as_("operate", "post", url, {"type": "penalty", "side": "away", "minute": 30, "value": 5})
+        r = self.as_("operate", "post", url, {"type": "other", "note": "End of period 1", "minute": 25})
+        self.assertEqual((r.status_code, r.json()["side"]), (201, None))
+        listed = self.as_("operate", "get", url).json()
+        self.assertEqual([(e["type"], e["minute"]) for e in listed["events"]], [("goal", 5), ("goal", 12), ("penalty", 20), ("other", 25), ("penalty", 30)])
+        self.assertEqual((listed["match"]["score_home"], listed["match"]["score_away"], listed["match"]["attributes"][mins["key"]]), (1, 1, {"home": 0, "away": 7}))
+        # edit: flip the first goal to the other side, change penalty minutes
+        first = listed["events"][0]
+        r = self.as_("operate", "patch", f"/matches/events/{first['id']}", {"side": "home"})
+        self.assertEqual((r.status_code, r.json()["match"]["score_home"], r.json()["match"]["score_away"]), (200, 2, 0))
+        pen = listed["events"][4]
+        r = self.as_("operate", "patch", f"/matches/events/{pen['id']}", {"value": 10, "note": "Slashing"})
+        self.assertEqual((r.json()["value"], r.json()["note"], r.json()["match"]["attributes"][mins["key"]]), (10, "Slashing", {"home": 0, "away": 12}))
+        # delete: 200 with the match; removing every goal leaves the score
+        for event in self.as_("operate", "get", url).json()["events"]:
+            if event["type"] == "goal":
+                r = self.as_("operate", "delete", f"/matches/events/{event['id']}")
+                self.assertEqual(r.status_code, 200)
+        self.assertEqual((r.json()["match"]["score_home"], r.json()["match"]["score_away"], r.json()["match"]["event_count"]), (1, 0, 3))  # the last synced score stays
+        self.assertEqual(self.as_("operate", "delete", f"/matches/events/{uuid.uuid4()}").status_code, 404)
+        # a timeline attribute added later is backfilled from the existing events
+        late = self._attr(t, name="Penalties", source="timeline", event_type="penalty", aggregate="count").json()
+        self.assertEqual(self.as_("operate", "get", url).json()["match"]["attributes"][late["key"]], {"home": 0, "away": 2})
+
+    def test_event_validation(self):
+        t, _stage, _teams, (m1, _m2) = self._league()
+        url = f"/matches/{m1.pk}/events"
+        for body in ({"type": "goal"}, {"type": "penalty"}, {"type": "timeout"}, {"type": "goalie_change"}, {"type": "bogus", "side": "home"}, {"type": "goal", "side": "left"},
+                     {"type": "goal", "side": "home", "minute": 1000}, {"type": "goal", "side": "home", "player": "x" * 101}, {"type": "goal", "side": "home", "note": "x" * 256}):
+            self.assertEqual(self.as_("operate", "post", url, body).status_code, 422, body)
+        self.assertEqual(self.as_("operate", "post", url, {"type": "other"}).status_code, 201)  # neutral is fine for "other"
+        self.assertEqual(self.as_("operate", "post", f"/matches/{uuid.uuid4()}/events", {"type": "other"}).status_code, 404)
+        goal = self.as_("operate", "post", url, {"type": "goal", "side": "home"}).json()
+        self.assertEqual(self.as_("operate", "patch", f"/matches/events/{goal['id']}", {"side": None}).status_code, 422)  # a goal needs a side
+        self.assertEqual(Match.objects.get(pk=m1.pk).score_home, 1)
+        self.assertEqual(t.match_attributes.count(), 1)
+
+    def test_goal_changes_on_a_completed_match_follow_the_bracket_or_are_refused(self):
+        t = self.make(status="in_progress")
+        stage = t.stages.create(name="Cup", format="single_elim")
+        a, b, c = (self.foreign(t, n) for n in ("Alpha", "Bravo", "Charlie"))
+        semi = Match.objects.create(stage=stage, home_team=a, away_team=b)
+        final = Match.objects.create(stage=stage, round_number=2, home_source_match=semi, away_team=c)
+        self.as_("operate", "post", f"/matches/{semi.pk}/result", {"score_home": 1, "score_away": 0})
+        self.assertEqual(Match.objects.get(pk=final.pk).home_team_id, a.pk)
+        url = f"/matches/{semi.pk}/events"
+        # Bravo scores twice: the completed result flips to 0-2 and Bravo moves into the final
+        self.as_("operate", "post", url, {"type": "goal", "side": "away"})
+        r = self.as_("operate", "post", url, {"type": "goal", "side": "away"})
+        self.assertEqual((r.status_code, r.json()["match"]["status"], r.json()["match"]["score_away"]), (201, "complete", 2))
+        self.assertEqual(Match.objects.get(pk=final.pk).home_team_id, b.pk)
+        # once the final is played, a change that would alter its feeder's winner is refused and nothing is saved
+        self.as_("operate", "post", f"/matches/{final.pk}/result", {"score_home": 3, "score_away": 0})
+        before = MatchEvent.objects.filter(match=semi).count()
+        r = self.as_("operate", "post", url, {"type": "goal", "side": "home"})
+        self.assertEqual(r.status_code, 201)  # 1-2: Bravo still wins
+        r = self.as_("operate", "post", url, {"type": "goal", "side": "home"})  # 2-2: no winner left to feed the played final
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "match_complete"), r.content)
+        semi.refresh_from_db()
+        self.assertEqual((semi.score_home, semi.score_away, MatchEvent.objects.filter(match=semi).count()), (1, 2, before + 1))
+        self.assertEqual(Match.objects.get(pk=final.pk).home_team_id, b.pk)
+        self.assertEqual(self.as_("operate", "post", url, {"type": "other"}).status_code, 201)  # events that don't touch the score are always fine
+
+    def test_timeline_and_attribute_permissions(self):
+        t, _stage, _teams, (m1, _m2) = self._league()
+        event = self.as_("operate", "post", f"/matches/{m1.pk}/events", {"type": "other"}).json()
+        pim = t.match_attributes.get()
+        i = uuid.uuid4()
+        endpoints = [
+            ("get", f"/{t.pk}/attributes", None, {"manage", "operate"}),
+            ("post", f"/{t.pk}/attributes", {"name": "Shots"}, {"manage", "operate"}),
+            ("patch", f"/{t.pk}/attributes/{pim.pk}", {"name": "PIM2"}, {"manage", "operate"}),
+            ("delete", f"/{t.pk}/attributes/{i}", None, {"manage", "operate"}),
+            ("get", f"/matches/{m1.pk}/events", None, {"manage", "operate"}),
+            ("post", f"/matches/{m1.pk}/events", {"type": "other"}, {"manage", "operate"}),
+            ("patch", f"/matches/events/{event['id']}", {"note": "x"}, {"manage", "operate"}),
+            ("delete", f"/matches/events/{i}", None, {"manage", "operate"}),
+        ]
+        for method, path, body, allowed in endpoints:
+            for key in ("plain", "manage", "operate"):
+                response = self.as_(key, method, path, body)
+                if key in allowed:
+                    self.assertNotEqual(response.status_code, 403, (key, method, path))
+                else:
+                    self.assertEqual(response.status_code, 403, (key, method, path))
+            self.assertEqual(self.call(method, path, None, body).status_code, 401, (method, path))
+        self.features = Entitlements({})
+        self.assertEqual(self.as_("owner", "get", f"/{t.pk}/attributes").status_code, 404)

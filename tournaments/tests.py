@@ -24,6 +24,9 @@ from .models import (
     DressingRoom,
     DressingRoomAssignment,
     Match,
+    MatchAttribute,
+    MatchAttributeValue,
+    MatchEvent,
     MatchOfficial,
     MatchReferee,
     ScheduleBlock,
@@ -50,6 +53,7 @@ from .services.scheduling import (
     PX_PER_MINUTE,
     GroupRankSeed,
     SchedulingError,
+    _ranked,
     allocate_schedule,
     clear_schedule,
     compute_standings,
@@ -58,15 +62,18 @@ from .services.scheduling import (
     generate_next_swiss_round,
     generate_stage_matches,
     group_standings_preview,
+    normalise_tiebreakers,
     record_result,
     reschedule_match,
     resolve_group_slots,
     resolve_match_slots,
     round_robin_pairings,
     snake_seed_groups,
+    stage_tiebreakers,
     validate_placement,
 )
 from .services.tasks import TaskClaimError, claim_task, generate_task_shifts, unclaim_task
+from .services.timeline import MatchLocked, sync_match
 
 
 class TournamentsTestCase(TestCase):
@@ -3245,3 +3252,134 @@ class ClubTeamEventTests(TournamentsTestCase):
         self.assertIsNotNone(self.home.event_id)
         self.assertNotEqual(self.home.event_id, old_tournament_event if old_tournament_event == other_event_id else None)
         self.assertEqual(list(self.home.event.teams.all()), [self.team])
+
+
+class TiebreakerChainTests(TournamentsTestCase):
+    """The ordered ``{criterion, direction}`` tie-break chain, the old plain-string shape, and the attribute totals on standings rows."""
+
+    def make_two_beat_one(self, tiebreakers=None):
+        """A and B each beat C 1-0: equal on points, goal difference and goals for."""
+        a, b, c = (TournamentTeam.objects.create(tournament=self.tournament, foreign_name=n) for n in ("A", "B", "C"))
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN, standings_config={"tiebreakers": tiebreakers or []})
+        for winner in (a, b):
+            Match.objects.create(stage=stage, home_team=winner, away_team=c, score_home=1, score_away=0, status=Match.Status.COMPLETE)
+        return stage, (a, b, c)
+
+    def test_normalise_reads_the_old_string_list_and_the_new_shape(self):
+        self.assertEqual(
+            normalise_tiebreakers(["goal_diff", "won", "goals_against", "goals_for", "goals_for"]),
+            [
+                {"criterion": "goal_diff", "direction": "most"},
+                {"criterion": "wins", "direction": "most"},
+                {"criterion": "goals_against", "direction": "least"},
+                {"criterion": "goals_for", "direction": "most"},
+            ],
+        )
+        self.assertEqual(
+            normalise_tiebreakers([{"criterion": "attr:pim", "direction": "least"}, {"criterion": "goal_diff"}, {"criterion": "wins", "direction": "sideways"}]),
+            [{"criterion": "attr:pim", "direction": "least"}, {"criterion": "goal_diff", "direction": "most"}, {"criterion": "wins", "direction": "most"}],
+        )
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Old", format=TournamentStage.Format.ROUND_ROBIN)
+        self.assertEqual([t["criterion"] for t in stage_tiebreakers(stage)], ["goal_diff", "goals_for"])  # never stored: the default
+        stage.standings_config = {"tiebreakers": []}
+        self.assertEqual(stage_tiebreakers(stage), [])  # an explicit empty chain stays empty
+
+    def test_a_chain_of_four_mixes_least_and_most_and_an_attribute_and_only_breaks_what_is_still_level(self):
+        def row(name, goals_against, pim, goal_diff, wins):
+            return {"team": mock.Mock(id=name), "points": 3, "won": wins, "goals_for": 0, "goals_against": goals_against, "goal_diff": goal_diff, "attributes": {"pim": pim}}
+
+        rows = [row("A", 2, 10, 1, 1), row("B", 2, 4, 0, 1), row("C", 5, 1, 9, 1), row("D", 2, 4, 3, 1), row("E", 2, 4, 3, 0)]
+        chain = [
+            {"criterion": "goals_against", "direction": "least"},
+            {"criterion": "attr:pim", "direction": "least"},
+            {"criterion": "goal_diff", "direction": "most"},
+            {"criterion": "wins", "direction": "most"},
+        ]
+        ranked = _ranked(rows, chain)
+        # goals against 2 first (A,B,D,E; C last), then fewest pim (B,D,E before A), then goal diff (D,E before B), then wins (D before E)
+        self.assertEqual([r["team"].id for r in ranked], ["D", "E", "B", "A", "C"])
+        self.assertEqual([r["rank"] for r in ranked], [1, 2, 3, 4, 5])
+        flipped = _ranked(rows, [{"criterion": "goals_against", "direction": "most"}])
+        self.assertEqual(flipped[0]["team"].id, "C")
+
+    def test_attribute_totals_on_rows_and_as_tiebreaker(self):
+        pim = MatchAttribute.objects.create(tournament=self.tournament, name="PIM", key="pim")
+        stage, (a, b, c) = self.make_two_beat_one([{"criterion": "attr:pim", "direction": "least"}])
+        for match in stage.matches.all():
+            MatchAttributeValue.objects.create(match=match, attribute=pim, home_value=10 if match.home_team_id == a.id else 4, away_value=2)
+        rows = {r["team"].id: r for r in compute_standings(stage)}
+        self.assertEqual((rows[a.id]["attributes"], rows[b.id]["attributes"], rows[c.id]["attributes"]), ({"pim": 10}, {"pim": 4}, {"pim": 4}))
+        self.assertEqual([r["team"].id for r in compute_standings(stage)][:2], [b.id, a.id])  # fewest penalty minutes first
+        stage.standings_config = {"tiebreakers": [{"criterion": "attr:pim", "direction": "most"}]}
+        self.assertEqual([r["team"].id for r in compute_standings(stage)][:2], [a.id, b.id])
+
+    def test_an_old_string_chain_still_ranks_the_same_way(self):
+        stage, (a, b, _c) = self.make_two_beat_one(["goal_diff", "goals_for"])
+        self.assertEqual({r["team"].id for r in compute_standings(stage)[:2]}, {a.id, b.id})
+        self.assertEqual(compute_standings(stage)[0]["attributes"], {})
+
+
+class TimelineServiceTests(TournamentsTestCase):
+    def setUp(self):
+        self.stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
+        self.a, self.b, self.c = (TournamentTeam.objects.create(tournament=self.tournament, foreign_name=n) for n in ("A", "B", "C"))
+        self.semi = Match.objects.create(stage=self.stage, home_team=self.a, away_team=self.b)
+        self.final = Match.objects.create(stage=self.stage, round_number=2, home_source_match=self.semi, away_team=self.c)
+
+    def goal(self, side):
+        return MatchEvent.objects.create(match=self.semi, type=MatchEvent.Type.GOAL, side=side)
+
+    def test_goals_fill_the_score_and_deleting_all_of_them_leaves_it(self):
+        self.goal("home")
+        self.goal("home")
+        self.goal("away")
+        sync_match(self.semi)
+        self.semi.refresh_from_db()
+        self.assertEqual((self.semi.score_home, self.semi.score_away, self.semi.status), (2, 1, Match.Status.SCHEDULED))
+        self.semi.events.all().delete()
+        sync_match(self.semi)
+        self.semi.refresh_from_db()
+        self.assertEqual((self.semi.score_home, self.semi.score_away), (2, 1))
+
+    def test_a_completed_match_pushes_a_new_score_through_the_bracket(self):
+        record_result(self.semi, score_home=1, score_away=0)
+        self.final.refresh_from_db()
+        self.assertEqual(self.final.home_team_id, self.a.pk)
+        for _ in range(2):
+            self.goal("away")
+        sync_match(self.semi)
+        self.final.refresh_from_db()
+        self.assertEqual((self.semi.score_home, self.semi.score_away, self.final.home_team_id), (0, 2, self.b.pk))
+
+    def test_a_change_under_a_played_final_or_to_a_draw_is_locked(self):
+        record_result(self.semi, score_home=1, score_away=0)
+        record_result(Match.objects.get(pk=self.final.pk), score_home=1, score_away=0)
+        for _ in range(2):
+            self.goal("away")
+        with self.assertRaises(MatchLocked):
+            sync_match(self.semi)
+        self.semi.events.all().delete()
+        Match.objects.filter(pk=self.final.pk).update(status=Match.Status.SCHEDULED)
+        self.goal("home")
+        self.goal("away")
+        self.semi.refresh_from_db()
+        with self.assertRaises(MatchLocked):  # a draw has no winner to feed forward
+            sync_match(self.semi)
+
+    def test_timeline_attributes_are_recomputed_from_the_events(self):
+        pim = MatchAttribute.objects.create(tournament=self.tournament, name="PIM", key="pim", source="timeline", event_type="penalty", aggregate="sum")
+        penalties = MatchAttribute.objects.create(tournament=self.tournament, name="Penalties", key="penalties", source="timeline", event_type="penalty", aggregate="count")
+        MatchEvent.objects.create(match=self.semi, type="penalty", side="home", value=2)
+        MatchEvent.objects.create(match=self.semi, type="penalty", side="home", value=5)
+        MatchEvent.objects.create(match=self.semi, type="penalty", side="away", value=2)
+        MatchEvent.objects.create(match=self.semi, type="penalty", side="", value=9)  # neutral: counted for nobody
+        MatchEvent.objects.create(match=self.semi, type="timeout", side="away", value=1)
+        sync_match(self.semi)
+
+        def value(attribute):
+            return MatchAttributeValue.objects.filter(match=self.semi, attribute=attribute).values_list("home_value", "away_value").get()
+
+        self.assertEqual((value(pim), value(penalties)), ((7, 2), (2, 1)))
+        self.semi.events.filter(value=5).delete()
+        sync_match(self.semi)
+        self.assertEqual(value(pim), (2, 2))

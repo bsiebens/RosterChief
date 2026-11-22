@@ -61,6 +61,8 @@ def _upcoming_matches(t, limit=5):
         .select_related("stage", "field", "home_team__team", "away_team__team", "home_source_match", "away_source_match", "home_source_group", "away_source_group")
         .order_by("scheduled_start")[:limit]
     )  # fmt: skip
+    qs = list(qs)
+    c.prime_matches(qs)
     return [c.match_out(m) for m in qs]
 
 
@@ -113,6 +115,8 @@ def team(request, slug: str, team_slug: str):
         .select_related("stage", "group", "field", "home_team__team", "away_team__team", "home_source_match", "away_source_match", "home_source_group", "away_source_group")
         .order_by("stage__sequence", "round_number", "sequence")
     )  # fmt: skip
+    matches = list(matches)
+    c.prime_matches(matches)
     return {
         "tournament": item(t), "team": {**c.team_ref(team), "withdrawn": team.withdrawn_at is not None},
         "roster": [{"name": e.display_name, "role": e.role, "position_label": e.position_label, "jersey_number": e.jersey_number} for e in entries],

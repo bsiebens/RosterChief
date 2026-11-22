@@ -1105,3 +1105,88 @@ class TournamentTaskClaim(UUIDModel):
 
     def __str__(self):
         return f"{self.task} - {self.member}"
+
+
+class MatchEventType(models.TextChoices):
+    GOAL = "goal", _("goal")
+    PENALTY = "penalty", _("penalty")
+    GOALIE_CHANGE = "goalie_change", _("goalie change")
+    TIMEOUT = "timeout", _("timeout")
+    OTHER = "other", _("other")
+
+
+class MatchAttribute(UUIDModel):
+    """A per-match number a tournament tracks for every game besides the score (shots, penalty minutes ...), defined once per tournament.
+    ``manual`` attributes are entered with the result; ``timeline`` ones are derived from the match timeline (``MatchEvent``): the number
+    of events of ``event_type`` per side (``count``) or the sum of their ``value`` (``sum``). Standings can use the per-team totals as a
+    tie-breaker (``attr:<key>``). Not itself club-scoped -- its club is reached through ``tournament``."""
+
+    class Source(models.TextChoices):
+        MANUAL = "manual", _("manual")
+        TIMELINE = "timeline", _("timeline")
+
+    class Aggregate(models.TextChoices):
+        COUNT = "count", _("count")
+        SUM = "sum", _("sum")
+
+    tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE, related_name="match_attributes", verbose_name=_("tournament"))
+    name = models.CharField(_("name"), max_length=100)
+    key = models.SlugField(_("key"), max_length=50, allow_unicode=False)
+    source = models.CharField(_("source"), max_length=10, choices=Source.choices, default=Source.MANUAL)
+    event_type = models.CharField(_("event type"), max_length=20, choices=MatchEventType.choices, blank=True)
+    aggregate = models.CharField(_("aggregate"), max_length=5, choices=Aggregate.choices, blank=True)
+    position = models.PositiveSmallIntegerField(_("position"), default=0)
+
+    class Meta:
+        verbose_name = _("match attribute")
+        verbose_name_plural = _("match attributes")
+        ordering = ["tournament", "position", "created"]
+        constraints = [models.UniqueConstraint(fields=["tournament", "key"], name="unique_match_attribute_key_per_tournament")]
+
+    def __str__(self):
+        return self.name
+
+
+class MatchAttributeValue(UUIDModel):
+    """One match's value of one attribute, per side. Manual ones are entered with the result, timeline ones are recomputed from the events."""
+
+    match = models.ForeignKey(Match, on_delete=models.CASCADE, related_name="attribute_values", verbose_name=_("match"))
+    attribute = models.ForeignKey(MatchAttribute, on_delete=models.CASCADE, related_name="values", verbose_name=_("attribute"))
+    home_value = models.PositiveIntegerField(_("home value"), default=0)
+    away_value = models.PositiveIntegerField(_("away value"), default=0)
+
+    class Meta:
+        verbose_name = _("match attribute value")
+        verbose_name_plural = _("match attribute values")
+        constraints = [models.UniqueConstraint(fields=["match", "attribute"], name="unique_attribute_value_per_match")]
+
+    def __str__(self):
+        return f"{self.attribute}: {self.home_value}-{self.away_value}"
+
+
+class MatchEvent(UUIDModel):
+    """One entry of a match's timeline (a goal, a penalty ...). Goal events fill in the match score and the timeline attributes are
+    recomputed from them (``tournaments.services.timeline``). ``side`` is null for a neutral event (a period end). Not itself
+    club-scoped -- its club is reached through ``match``."""
+
+    class Side(models.TextChoices):
+        HOME = "home", _("home")
+        AWAY = "away", _("away")
+
+    Type = MatchEventType
+
+    match = models.ForeignKey(Match, on_delete=models.CASCADE, related_name="events", verbose_name=_("match"))
+    type = models.CharField(_("type"), max_length=20, choices=MatchEventType.choices)
+    side = models.CharField(_("side"), max_length=4, choices=Side.choices, blank=True, help_text=_("Empty for a neutral event, e.g. the end of a period."))
+    minute = models.PositiveSmallIntegerField(_("minute"), null=True, blank=True)
+    player = models.CharField(_("player"), max_length=100, blank=True)
+    note = models.CharField(_("note"), max_length=255, blank=True)
+    value = models.IntegerField(_("value"), null=True, blank=True, help_text=_("A number that belongs to the event, e.g. penalty minutes."))
+
+    class Meta:
+        verbose_name = _("match event")
+        verbose_name_plural = _("match events")
+        ordering = [models.F("minute").asc(nulls_last=True), "created"]
+
+    def __str__(self):
+        return f"{self.type} ({self.side or '-'}) {self.match_id}"

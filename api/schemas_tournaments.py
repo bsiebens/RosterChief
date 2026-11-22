@@ -15,7 +15,8 @@ Status = Literal["draft", "published", "in_progress", "completed", "cancelled"]
 LunchMode = Literal["none", "optional", "mandatory"]
 PaymentStatus = Literal["unpaid", "deposit_received", "fully_paid"]
 StageFormat = Literal["single_elim", "double_elim", "round_robin", "groups", "swiss", "custom"]
-Tiebreaker = Literal["goal_diff", "goals_for", "goals_against", "won", "head_to_head"]
+EventType = Literal["goal", "penalty", "goalie_change", "timeout", "other"]
+Side = Literal["home", "away"]
 Trigger = Literal["game_count", "elapsed_time", "round_boundary", "clock_window"]
 
 
@@ -153,7 +154,13 @@ class MatchCreateIn(Schema):
     scheduled_start: datetime.datetime | None = None
 
 
+class AttributeValueIn(Schema):
+    home: int = Field(ge=0, le=100000)
+    away: int = Field(ge=0, le=100000)
+
+
 class ResultIn(Schema):
+    attributes: dict[str, AttributeValueIn] | None = None  # values of the MANUAL match attributes, by key
     score_home: int = Field(ge=0, le=999)
     score_away: int = Field(ge=0, le=999)
     went_to_overtime: bool = False
@@ -196,6 +203,11 @@ class FieldPatch(Schema):
     availability: list[AvailabilityWindow] | None = None
 
 
+class TiebreakerIn(Schema):
+    criterion: str = Field(min_length=1, max_length=100)  # goal_diff | goals_for | goals_against | wins | head_to_head | attr:<key>
+    direction: Literal["most", "least"] | None = None  # which end ranks first; the criterion's usual direction when left out
+
+
 class StageIn(Schema):
     name: str = Field(min_length=1, max_length=255)
     sequence: int | None = Field(None, ge=0, le=32767)
@@ -206,8 +218,9 @@ class StageIn(Schema):
     points_win: int = Field(3, ge=0, le=1000)
     points_draw: int = Field(1, ge=0, le=1000)
     points_loss: int = Field(0, ge=0, le=1000)
-    tiebreaker_1: Tiebreaker = "goal_diff"
-    tiebreaker_2: Tiebreaker | None = "goals_for"
+    tiebreakers: list[TiebreakerIn] | None = None  # the tie-break chain, in order; replaces tiebreaker_1/2
+    tiebreaker_1: str | None = None  # old fields, used only when tiebreakers is absent
+    tiebreaker_2: str | None = None
 
 
 class StagePatch(Schema):
@@ -220,9 +233,41 @@ class StagePatch(Schema):
     points_win: int | None = Field(None, ge=0, le=1000)
     points_draw: int | None = Field(None, ge=0, le=1000)
     points_loss: int | None = Field(None, ge=0, le=1000)
-    tiebreaker_1: Tiebreaker | None = None
-    tiebreaker_2: Tiebreaker | None = None
+    tiebreakers: list[TiebreakerIn] | None = None
+    tiebreaker_1: str | None = None
+    tiebreaker_2: str | None = None
 
+
+class AttributeIn(Schema):
+    name: str = Field(min_length=1, max_length=100)
+    source: Literal["manual", "timeline"] = "manual"
+    event_type: EventType | None = None  # timeline only
+    aggregate: Literal["count", "sum"] | None = None  # timeline only
+
+
+class AttributePatch(Schema):
+    name: str | None = Field(None, min_length=1, max_length=100)
+    event_type: EventType | None = None
+    aggregate: Literal["count", "sum"] | None = None
+    position: int | None = Field(None, ge=0, le=32767)
+
+
+class EventIn(Schema):
+    type: EventType
+    side: Side | None = None
+    minute: int | None = Field(None, ge=0, le=999)
+    player: str = Field("", max_length=100)
+    note: str = Field("", max_length=255)
+    value: int | None = Field(None, ge=0, le=100000)
+
+
+class EventPatch(Schema):
+    type: EventType | None = None
+    side: Side | None = None
+    minute: int | None = Field(None, ge=0, le=999)
+    player: str | None = Field(None, max_length=100)
+    note: str | None = Field(None, max_length=255)
+    value: int | None = Field(None, ge=0, le=100000)
 
 class GenerateMatchesIn(Schema):
     with_placement: bool = False

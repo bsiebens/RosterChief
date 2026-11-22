@@ -5,13 +5,15 @@ import datetime
 import itertools
 
 from django.core.exceptions import ValidationError
+from django.db.models import Count
 from django.utils.translation import gettext as _
 from django_tenants.utils import get_public_schema_name
 from ninja.errors import HttpError
 
 from members.services import access
 from members.services.errors import Invalid
-from tournaments.models import Match, Tournament, TournamentField, TournamentRosterRole, TournamentStage, TournamentTeam
+from tournaments.models import Match, MatchAttribute, MatchAttributeValue, MatchEvent, Tournament, TournamentField, TournamentRosterRole, TournamentStage, TournamentTeam
+from tournaments.services.scheduling import ATTR_PREFIX, stage_tiebreakers
 
 
 def _feature(request):
@@ -170,8 +172,33 @@ def side_source(match: Match, side: str) -> dict | None:
     return None
 
 
+def prime_matches(matches) -> None:
+    """Loads, for a whole list of matches at once, what ``match_out`` adds to every match: the attribute values (``{key: {home, away}}`` for each
+    attribute of its tournament, 0 when nothing was entered) and the timeline event count -- so a list endpoint doesn't query per match."""
+    matches = [m for m in matches if getattr(m, "_doc_extra", None) is None]
+    if not matches:
+        return
+    ids = [m.pk for m in matches]
+    tournament_of_stage = dict(Match.objects.filter(pk__in=ids).values_list("pk", "stage__tournament_id"))
+    definitions: dict = {}
+    for attribute in MatchAttribute.objects.filter(tournament_id__in=set(tournament_of_stage.values())).order_by("position", "created"):
+        definitions.setdefault(attribute.tournament_id, []).append(attribute)
+    values = {}
+    for value in MatchAttributeValue.objects.filter(match_id__in=ids):
+        values[(value.match_id, value.attribute_id)] = value
+    counts = dict(MatchEvent.objects.filter(match_id__in=ids).values_list("match_id").annotate(n=Count("pk")))
+    for match in matches:
+        attributes = {}
+        for attribute in definitions.get(tournament_of_stage[match.pk], []):
+            value = values.get((match.pk, attribute.pk))
+            attributes[attribute.key] = {"home": value.home_value if value else 0, "away": value.away_value if value else 0}
+        match._doc_extra = {"attributes": attributes, "event_count": counts.get(match.pk, 0)}
+
+
 def match_out(match: Match, *, with_field=True) -> dict:
+    prime_matches([match])
     return {
+        **match._doc_extra,
         "home_team_id": match.home_team_id, "away_team_id": match.away_team_id, "home_is_tbd": match.home_team_id is None, "away_is_tbd": match.away_team_id is None,
         "home_source": side_source(match, "home"), "away_source": side_source(match, "away"), "group_id": match.group_id,
         "id": match.pk, "stage_id": match.stage_id, "group": group_ref(match.group), "round_number": match.round_number, "round_label": match.round_label, "sequence": match.sequence,
@@ -189,6 +216,7 @@ def round_groups(matches) -> list[dict]:
     rounds = []
     for number, group in itertools.groupby(matches, key=lambda m: m.round_number):
         group = list(group)
+        prime_matches(group)
         rounds.append({"round_number": number, "label": round_label(number, group), "all_complete": all(m.status == Match.Status.COMPLETE for m in group), "matches": [match_out(m) for m in group]})
     return rounds
 
@@ -203,12 +231,13 @@ def stage_matches(tournament) -> list:
 
 def stage_summary(stage: TournamentStage) -> dict:
     config, standings = stage.config or {}, stage.standings_config or {}
-    points, tiebreakers = standings.get("points", {}), standings.get("tiebreakers", [])
+    points, tiebreakers = standings.get("points", {}), stage_tiebreakers(stage)
+    legacy = [("won" if t["criterion"] == "wins" else t["criterion"]) for t in tiebreakers]  # the old tiebreaker_1/2 fields, without a direction
     return {
         "id": stage.pk, "name": stage.name, "sequence": stage.sequence, "format": stage.format, "status": stage.status,
         "rounds": config.get("rounds"), "num_groups": config.get("num_groups"), "placement": bool(config.get("placement")),
         "points_win": points.get("win", 3), "points_draw": points.get("draw", 1), "points_loss": points.get("loss", 0),
-        "tiebreaker_1": tiebreakers[0] if tiebreakers else "goal_diff", "tiebreaker_2": tiebreakers[1] if len(tiebreakers) > 1 else None,
+        "tiebreakers": tiebreakers, "tiebreaker_1": legacy[0] if legacy else None, "tiebreaker_2": legacy[1] if len(legacy) > 1 else None,
     }
 
 
@@ -218,3 +247,10 @@ def date_window(value: datetime.time) -> str:
 
 def days_out(t: Tournament) -> list[dict]:
     return [{"date": d.date, "starts_at": f"{d.starts_at:%H:%M}", "ends_at": f"{d.ends_at:%H:%M}"} for d in t.days.order_by("date")]
+
+
+def stage_attribute_columns(stage: TournamentStage) -> list[dict]:
+    """The match attributes the stage's tie-breakers use, as ``[{key, name}]`` in tie-break order -- the extra columns its table can show."""
+    keys = [t["criterion"][len(ATTR_PREFIX) :] for t in stage_tiebreakers(stage) if t["criterion"].startswith(ATTR_PREFIX)]
+    names = dict(MatchAttribute.objects.filter(tournament_id=stage.tournament_id, key__in=keys).values_list("key", "name"))
+    return [{"key": key, "name": names[key]} for key in keys if key in names]
