@@ -147,10 +147,20 @@ def single_elimination_placement_bracket(entries: list) -> list[list[dict]]:
 
     size = len(entries)
     seeded = [entries[position - 1] for position in _seed_order(size)]
+    return _placement_ladder(seeded, 1, size, 0)
 
+
+def _placement_ladder(frontier: list, hi: int, lo: int, flat_index: int) -> list[list[dict]]:
+    """The rounds of one placement ladder deciding ranks ``hi``-``lo`` among
+    ``frontier`` (a power-of-two list of entries: concrete teams, or
+    ``{"ref_index": i, "is_winner": bool}`` references to a match that is
+    already in the flat list). ``flat_index`` is how many matches come before
+    this ladder in the flat list, so the ``*_source_index`` values it emits are
+    absolute. Shared by the single-elimination ladder (the whole bracket) and
+    the double-elimination one (one ladder per group of equally-ranked
+    teams); see ``single_elimination_placement_bracket`` for how it works."""
     rounds: list[list[dict]] = []
-    flat_index = 0
-    queue = [{"frontier": seeded, "hi": 1, "lo": size}]
+    queue = [{"frontier": frontier, "hi": hi, "lo": lo}]
 
     while queue:
         bracket = queue.pop(0)
@@ -193,11 +203,11 @@ def single_elimination_placement_bracket(entries: list) -> list[list[dict]]:
     # feeds (allocate_schedule places round_number in order) plays the minor
     # placement games early and saves the Final for last, the way a real
     # tournament actually runs. Every round in this run is a terminal,
-    # single-entry FIFO leaf -- see this function's own docstring on why
-    # `len(frontier) == 2` never spawns a further child -- so nothing else
-    # in the bracket sources from one of these matches; permuting them
-    # among themselves can't invalidate any earlier *_source_index, which
-    # only ever points at a strictly earlier, untouched position.
+    # single-entry FIFO leaf -- a 2-entry sub-bracket never spawns a further
+    # child -- so nothing else in the ladder sources from one of these
+    # matches; permuting them among themselves can't invalidate any earlier
+    # *_source_index, which only ever points at a strictly earlier, untouched
+    # position.
     tail_start = len(rounds)
     while tail_start > 0 and len(rounds[tail_start - 1]) == 1:
         tail_start -= 1
@@ -251,10 +261,14 @@ def double_elimination_bracket(entries: list) -> list[list[dict]]:
 
     next_winners_round_to_consume = 1
     losers_round_number = 2
+    last_round_consumed_winners = False  # round 1 pairs up winners-round-1 losers, so the next round consumes a winners round
     while len(losers_rounds[-1]) > 1 or next_winners_round_to_consume < total_winners_rounds - 1:
         previous_start, previous_size = losers_round_start[-2], len(losers_rounds[-1])
 
-        if next_winners_round_to_consume < total_winners_rounds - 1:
+        # Rounds alternate: one that takes in a winners round's losers, then one where the survivors play each other
+        # (16+ teams need more than one of each; consuming twice in a row would reference matches that aren't theirs).
+        if next_winners_round_to_consume < total_winners_rounds - 1 and not last_round_consumed_winners:
+            last_round_consumed_winners = True
             winners_start = winners_round_start[next_winners_round_to_consume]
             this_round = [
                 {
@@ -268,6 +282,7 @@ def double_elimination_bracket(entries: list) -> list[list[dict]]:
             ]
             next_winners_round_to_consume += 1
         else:
+            last_round_consumed_winners = False
             this_round = [
                 {
                     "home_source_index": previous_start + i,
@@ -294,3 +309,58 @@ def double_elimination_bracket(entries: list) -> list[list[dict]]:
     ]
 
     return [*winners_rounds, *losers_rounds, grand_final]
+
+
+def double_elimination_placement_bracket(entries: list) -> list[list[dict]]:
+    """``double_elimination_bracket`` plus classification matches, so every
+    rank 1..N is decided by a real match instead of several teams sharing "out
+    in losers round X". The plain bracket is left untouched; the teams that
+    leave it in the same round are made to play each other, recursively, with
+    the same ladder the single-elimination option uses
+    (``_placement_ladder``):
+
+    - the champion (grand-final winner) is 1st and the grand-final loser 2nd;
+    - the loser of the winners-bracket final (who has no losers-bracket life
+      in this bracket shape) and the loser of the losers-bracket final play
+      for 3rd place;
+    - the losers of each earlier losers-bracket round play for the next ranks
+      (a lone pair for "5th place", four teams for "Ranks 9-12 · Semifinal"
+      and on, ...), every round's own group being a power of two.
+
+    The classification matches sit between the losers bracket and the grand
+    final (worst ranks first); the grand final stays the last match. Same
+    power-of-two restriction as the plain bracket, and at least 4 teams."""
+    if len(entries) < 4:
+        raise BracketError(_("A full placement bracket needs at least 4 teams."))
+    plain = double_elimination_bracket(entries)
+
+    winners_round_count = int(math.log2(len(entries)))
+    losers_rounds = plain[winners_round_count:-1]
+    grand_final = plain[-1]
+    flat_matches = sum(len(round_) for round_ in plain[:-1])
+    winners_final_index = sum(len(round_) for round_ in plain[:winners_round_count]) - 1
+
+    # Equal-rank groups, best first: the last losers round is joined by the
+    # winners-final loser; every earlier losers round is a group on its own.
+    groups: list[list[dict]] = []
+    round_start = winners_final_index + 1
+    for position, round_ in enumerate(losers_rounds):
+        group = [{"ref_index": round_start + i, "is_winner": False} for i in range(len(round_))]
+        if position == len(losers_rounds) - 1:
+            group.insert(0, {"ref_index": winners_final_index, "is_winner": False})
+        groups.append(group)
+        round_start += len(round_)
+    groups.reverse()
+
+    ranges, hi = [], 3
+    for group in groups:
+        ranges.append((hi, hi + len(group) - 1))
+        hi += len(group)
+
+    placement_rounds: list[list[dict]] = []
+    for group, (group_hi, group_lo) in zip(reversed(groups), reversed(ranges), strict=True):  # worst ranks play first
+        ladder = _placement_ladder(group, group_hi, group_lo, flat_matches)
+        placement_rounds.extend(ladder)
+        flat_matches += sum(len(round_) for round_ in ladder)
+
+    return [*plain[:-1], *placement_rounds, grand_final]

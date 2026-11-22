@@ -22,7 +22,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from ..models import BreakRule, Match, ScheduleBlock, Tournament, TournamentGroup, TournamentStage, TournamentTeam
-from .brackets import BracketError, double_elimination_bracket, single_elimination_bracket, single_elimination_placement_bracket
+from .brackets import BracketError, double_elimination_bracket, double_elimination_placement_bracket, single_elimination_bracket, single_elimination_placement_bracket
 
 #: The one thing every tournament falls back to when no BreakRule fires --
 #: see BreakRule's own docstring for why this isn't itself a stored row.
@@ -118,20 +118,23 @@ def generate_stage_matches(stage: TournamentStage, *, entries: list | None = Non
     ``GroupRankSeed`` in place of a concrete team, for a slot that isn't
     decided until an earlier group stage finishes.
 
-    ``with_placement=True`` (``SINGLE_ELIM`` only -- raises ``SchedulingError``
-    for any other format) builds a full placement ladder instead of the
-    plain knockout bracket: every loser keeps playing consolation matches
-    until every rank, 1st through last, is decided by a real result, not
-    just "eliminated in round X" -- see
-    ``tournaments.services.brackets.single_elimination_placement_bracket``.
+    ``with_placement=True`` (``SINGLE_ELIM``/``DOUBLE_ELIM`` only -- raises
+    ``SchedulingError`` for any other format; a stage whose own
+    ``config["placement"]`` is set behaves the same) builds a full placement
+    ladder instead of the plain knockout bracket: teams that would share a
+    rank keep playing classification matches until every rank, 1st through
+    last, is decided by a real result, not just "eliminated in round X" -- see
+    ``tournaments.services.brackets.single_elimination_placement_bracket`` and
+    ``double_elimination_placement_bracket``.
     """
     if stage.matches.exists():
         raise SchedulingError(_("This stage already has matches -- delete them first to regenerate."))
     if stage.format == TournamentStage.Format.CUSTOM:
         raise SchedulingError(_("A custom-format stage has no automatic generator -- build its matches directly."))
-    with_placement = with_placement or (stage.format == TournamentStage.Format.SINGLE_ELIM and bool((stage.config or {}).get("placement")))  # the stage's own setting
-    if with_placement and stage.format != TournamentStage.Format.SINGLE_ELIM:
-        raise SchedulingError(_("A full placement bracket is only available for single elimination."))
+    knockout = stage.format in (TournamentStage.Format.SINGLE_ELIM, TournamentStage.Format.DOUBLE_ELIM)
+    with_placement = with_placement or (knockout and bool((stage.config or {}).get("placement")))  # the stage's own setting
+    if with_placement and not knockout:
+        raise SchedulingError(_("A full placement bracket is only available for single or double elimination."))
 
     entries = list(TournamentTeam.objects.filter(tournament_id=stage.tournament_id, withdrawn_at__isnull=True).order_by("seed")) if entries is None else entries
     if len(entries) < 2:
@@ -144,7 +147,7 @@ def generate_stage_matches(stage: TournamentStage, *, entries: list | None = Non
     if stage.format == TournamentStage.Format.SINGLE_ELIM:
         return _generate_single_elim(stage, entries, with_placement=with_placement)
     if stage.format == TournamentStage.Format.DOUBLE_ELIM:
-        return _generate_double_elim(stage, entries)
+        return _generate_double_elim(stage, entries, with_placement=with_placement)
     if stage.format == TournamentStage.Format.SWISS:
         return generate_next_swiss_round(stage, entries=entries)
     raise SchedulingError(_("Unknown format: %(format)s") % {"format": stage.format})
@@ -180,9 +183,10 @@ def _generate_single_elim(stage, entries, *, with_placement=False):
     return _persist_bracket(stage, bracket)
 
 
-def _generate_double_elim(stage, entries):
+def _generate_double_elim(stage, entries, *, with_placement=False):
+    builder = double_elimination_placement_bracket if with_placement else double_elimination_bracket
     try:
-        bracket = double_elimination_bracket(entries)
+        bracket = builder(entries)
     except BracketError as error:
         raise SchedulingError(str(error)) from error
     return _persist_bracket(stage, bracket)

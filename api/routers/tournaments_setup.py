@@ -57,7 +57,7 @@ def _stage_doc(stage: TournamentStage, stage_count: int) -> dict:
     return {
         **c.stage_summary(stage), "match_count": stage.matches.count(), "groups": [c.group_ref(g) for g in stage.groups.filter(matches__isnull=False).distinct().order_by("sequence")],  # a group is only real once it has matches
         # single/double elimination can be seeded by hand ("Nth place of a group"); only worth asking when there is another stage to seed from
-        "needs_seed_choice": seedable and stage_count > 1, "supports_placement": stage.format == TournamentStage.Format.SINGLE_ELIM,
+        "needs_seed_choice": seedable and stage_count > 1, "supports_placement": stage.format in SEEDABLE,
     }  # fmt: skip
 
 
@@ -72,7 +72,7 @@ def _stage_values(stage: TournamentStage, payload: dict):
     stage.name, stage.format = merged["name"], merged["format"]
     stage.sequence = merged["sequence"] if merged.get("sequence") is not None else stage.sequence
     stage.config = {k: merged[k] for k in ("rounds", "num_groups") if merged.get(k)}
-    if merged.get("placement") and merged["format"] == TournamentStage.Format.SINGLE_ELIM:
+    if merged.get("placement") and merged["format"] in SEEDABLE:
         stage.config["placement"] = True  # a full ranking: the losers play on until every place is decided
     stage.standings_config = {
         "points": {"win": merged.get("points_win", 3), "draw": merged.get("points_draw", 1), "loss": merged.get("points_loss", 0)},
