@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUp, CalendarClock, Coffee, GripVertical, Layers, ListChecks, LayoutGrid, MapPin, Network, Pencil, Plus, Repeat, Shuffle, Swords, Trash2, Users, Wrench, X, GitFork } from '@lucide/svelte';
+	import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUp, CalendarClock, Coffee, GripVertical, Layers, LayoutGrid, MapPin, Network, Pencil, Plus, Repeat, Shuffle, Trash2, Users, Wrench, X, GitFork } from '@lucide/svelte';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import Alert from '#lib/components/Alert.svelte';
@@ -314,22 +314,45 @@
 				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><MapPin size={16} class="shrink-0" aria-hidden="true" /> {t('tn.setup.fields')}</h2>
 				{#if canOperate}<button class="btn btn-outline btn-sm gap-1" type="button" onclick={() => openField(null)}><Plus size={14} /> {t('tn.setup.add_field')}</button>{/if}
 			</div>
-			{#each setup.fields as f (f.id)}
-				<div class="flex flex-wrap items-start gap-3 rounded-lg border border-line p-3">
-					<div class="min-w-0 flex-1">
-						<strong class="text-ink">{f.name}</strong>
-						<ul class="mt-1 grid gap-0.5 font-mono text-xs text-muted">
-							{#each f.availability as w, i (i)}<li>{fmtDay(w.date)} · {w.start}–{w.end}</li>{:else}<li>{t('tn.setup.no_windows')}</li>{/each}
-						</ul>
-					</div>
-					{#if canOperate}
-						<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.setup.edit_named', { name: f.name })} onclick={() => openField(f)}><Pencil size={13} /></button>
-						<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.setup.delete_named', { name: f.name })} onclick={() => { delField = f; run.clear(); delFieldOpen = true; }}><Trash2 size={13} /></button>
-					{/if}
-				</div>
-			{:else}
+			{#if !setup.fields.length}
 				<p class="text-sm text-muted">{t('tn.setup.no_fields')}</p>
-			{/each}
+			{:else}
+				<div class="overflow-x-auto rounded-lg border border-line">
+					<table class="table">
+						<thead>
+							<tr>
+								<th class="w-64">{t('tn.setup.col.name')}</th>
+								<th>{t('tn.setup.col.availability')}</th>
+								{#if canOperate}<th></th>{/if}
+							</tr>
+						</thead>
+						<tbody>
+							{#each setup.fields as f (f.id)}
+								<tr class="hover:bg-paper">
+									<td class="font-semibold text-ink">{f.name}</td>
+									<td>
+										<div class="flex flex-wrap gap-1.5">
+											{#each f.availability as w, i (i)}
+												<span class="badge badge-ghost gap-1 font-normal"><span class="font-semibold">{fmtDay(w.date)}</span><span class="font-mono text-xs">{w.start}–{w.end}</span></span>
+											{:else}
+												<span class="text-sm text-muted">{t('tn.setup.no_windows')}</span>
+											{/each}
+										</div>
+									</td>
+									{#if canOperate}
+										<td class="text-right whitespace-nowrap">
+											<div class="flex items-center justify-end gap-1">
+												<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.setup.edit_named', { name: f.name })} title={t('tn.setup.edit_named', { name: f.name })} onclick={() => openField(f)}><Pencil size={13} /></button>
+												<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.setup.delete_named', { name: f.name })} title={t('tn.setup.delete_named', { name: f.name })} onclick={() => { delField = f; run.clear(); delFieldOpen = true; }}><Trash2 size={13} /></button>
+											</div>
+										</td>
+									{/if}
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
 		</section>
 
 		<section class="card card-body card-hl gap-3">
@@ -397,12 +420,11 @@
 									</dl>
 									<div class="grid grid-cols-2 gap-2">
 										<button class="btn btn-outline btn-xs w-full gap-1 {canGenerate ? '' : 'col-span-2'}" type="button" aria-pressed={isSel} onclick={() => toggleStage(s.id)}>
-											<ListChecks size={13} aria-hidden="true" />
 											{isSel ? t('tn.setup.hide_matches') : t('tn.setup.view_matches', { n: s.match_count })}
 										</button>
 										{#if canGenerate}
 											{#if isKnockout(s) || s.needs_seed_choice}
-												<a class="btn btn-primary btn-xs w-full gap-1" href="{TBASE}/{tn.id}/stages/{s.id}/seed"><Swords size={13} /> {t('tn.setup.seed')}</a>
+												<a class="btn btn-primary btn-xs w-full" href="{TBASE}/{tn.id}/stages/{s.id}/seed">{t('tn.setup.seed')}</a>
 											{:else}
 												<button class="btn btn-primary btn-xs w-full" type="button" disabled={run.busy} onclick={() => generate(s)}>{s.match_count ? t('tn.setup.regenerate') : t('tn.setup.generate')}</button>
 											{/if}
@@ -425,10 +447,11 @@
 									<div class="flex flex-col items-center justify-center gap-1.5 px-2 py-1 text-muted md:w-28">
 										<ArrowRight size={20} class="rotate-90 md:rotate-0" aria-hidden="true" />
 										{#if s.format === 'groups' && isKnockout(stageList[i + 1])}<span class="text-center text-[11px] leading-tight">{t('tn.setup.feeds_advance')}</span>{/if}
+										{#if canOperate && s.format === 'groups'}
+											<a class="btn btn-outline btn-xs mt-1 w-full whitespace-nowrap" href="{TBASE}/{tn.id}/stages/{s.id}/next-phase">{t('tn.setup.next_phase')}</a>
+										{/if}
 									</div>
-									{#if canOperate && s.format === 'groups'}
-										<a class="btn btn-outline btn-xs self-center whitespace-nowrap" href="{TBASE}/{tn.id}/stages/{s.id}/next-phase">{t('tn.setup.next_phase')}</a>
-									{/if}
+
 								{/if}
 							</div>
 						{/each}

@@ -82,23 +82,48 @@
 	{#if data.error || !sched}
 		<Alert kind="error">{t('common.error.generic')}</Alert>
 	{:else}
-		{#if canOperate}
+		<div class="grid items-start gap-4 lg:grid-cols-2">
 			<section class="card card-body card-hl gap-3">
-				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Wand2 size={16} class="shrink-0" aria-hidden="true" /> {t('tn.sched.generate_title')}</h2>
-				<div class="flex flex-wrap items-end gap-3">
-					<div class="w-48">
-						<Field label={t('tn.sched.duration')} type="number" min="1" bind:value={duration} placeholder={String(sched.tournament.default_match_duration_minutes ?? '')} help={t('tn.sched.duration_help')} />
-					</div>
-					<button class="btn btn-primary gap-2" type="button" disabled={run.busy} onclick={generate}><Wand2 size={16} /> {t('tn.sched.generate')}</button>
-					<button class="btn btn-outline btn-error gap-2" type="button" disabled={run.busy} onclick={() => { run.clear(); clearOpen = true; }}><Eraser size={16} /> {t('tn.sched.clear')}</button>
+				<div class="flex flex-wrap items-center justify-between gap-2">
+					<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Wand2 size={16} class="shrink-0" aria-hidden="true" /> {t('tn.sched.generate_title')}</h2>
+				<div class="flex w-fit items-center gap-1" role="group" aria-label={t('tn.sched.view')}>
+					{#each ['board', 'list'] as v (v)}
+						<button type="button" aria-pressed={view === v} onclick={() => (view = v as 'board' | 'list')} class="rounded-md px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {view === v ? 'border border-ink bg-ink text-white' : 'border border-line text-muted hover:text-ink'}">{t(`tn.sched.view_${v}`)}</button>
+					{/each}
 				</div>
+				</div>
+{#if canOperate}
+							<div class="flex flex-wrap items-end gap-3">
+								<div class="w-48">
+									<Field label={t('tn.sched.duration')} type="number" min="1" bind:value={duration} placeholder={String(sched.tournament.default_match_duration_minutes ?? '')} help={t('tn.sched.duration_help')} />
+								</div>
+								<button class="btn btn-primary gap-2" type="button" disabled={run.busy} onclick={generate}><Wand2 size={16} /> {t('tn.sched.generate')}</button>
+								<button class="btn btn-outline btn-error gap-2" type="button" disabled={run.busy} onclick={() => { run.clear(); clearOpen = true; }}><Eraser size={16} /> {t('tn.sched.clear')}</button>
+							</div>
+			{/if}
+			
 			</section>
-		{/if}
-
-		<div class="flex w-fit items-center gap-1" role="group" aria-label={t('tn.sched.view')}>
-			{#each ['board', 'list'] as v (v)}
-				<button type="button" aria-pressed={view === v} onclick={() => (view = v as 'board' | 'list')} class="rounded-md px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {view === v ? 'border border-ink bg-ink text-white' : 'border border-line text-muted hover:text-ink'}">{t(`tn.sched.view_${v}`)}</button>
-			{/each}
+			<section class="card card-body card-hl gap-3">
+				<div class="flex flex-wrap items-center justify-between gap-2">
+					<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><CalendarClock size={16} class="shrink-0" aria-hidden="true" /> {t('tn.sched.blocks')}</h2>
+					{#if canOperate}<button class="btn btn-outline btn-sm gap-1" type="button" onclick={() => openBlock(null)}><Plus size={14} /> {t('tn.sched.add_block')}</button>{/if}
+				</div>
+				<p class="text-xs text-muted">{t('tn.sched.blocks_help')}</p>
+				{#each sched.blocks as b (b.id)}
+					<div class="flex flex-wrap items-center gap-3 rounded-lg border border-line p-3">
+						<div class="min-w-0 flex-1">
+							<strong class="text-ink">{b.title}</strong>
+							<p class="font-mono text-xs text-muted">{fmtDateTime(b.starts_at)} – {fmtTime(b.ends_at)} · {b.field?.name ?? t('tn.sched.all_fields')}{b.teams.length ? ` · ${b.teams.map((x) => x.name).join(', ')}` : ''}</p>
+						</div>
+						{#if canOperate}
+							<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.sched.edit_block')} onclick={() => openBlock(b)}><Pencil size={13} /></button>
+							<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.sched.delete_block')} onclick={() => { delBlock = b; run.clear(); delOpen = true; }}><Trash2 size={13} /></button>
+						{/if}
+					</div>
+				{:else}
+					<p class="text-sm text-muted">{t('tn.sched.no_blocks')}</p>
+				{/each}
+			</section>
 		</div>
 
 		{#if view === 'board'}
@@ -118,7 +143,8 @@
 											<tr class="hover:bg-paper">
 												<td class="w-40 font-mono text-xs whitespace-nowrap">{m.scheduled_start ? fmtDateTime(m.scheduled_start) : t('tn.sched.unscheduled')}</td>
 												<td class="w-32 text-xs">{m.field?.name ?? '—'}</td>
-												<td class="text-sm">{m.home_display} – {m.away_display}{#if m.group} <span class="badge badge-ghost badge-xs">{m.group.name}</span>{/if}</td>
+												<td class="w-24">{#if m.group}<span class="badge badge-sm badge-ghost">{m.group.name}</span>{/if}</td>
+												<td class="text-sm">{m.home_display} – {m.away_display}</td>
 												<td class="w-10 text-right"><div class="flex items-center justify-end gap-1">{#if canOperate}<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.sched.reschedule')} onclick={() => openMove(m)}><Pencil size={13} /></button>{/if}</div></td>
 											</tr>
 										{/each}
@@ -135,27 +161,6 @@
 			{/each}
 		{/if}
 
-		<section class="card card-body card-hl gap-3">
-			<div class="flex flex-wrap items-center justify-between gap-2">
-				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><CalendarClock size={16} class="shrink-0" aria-hidden="true" /> {t('tn.sched.blocks')}</h2>
-				{#if canOperate}<button class="btn btn-outline btn-sm gap-1" type="button" onclick={() => openBlock(null)}><Plus size={14} /> {t('tn.sched.add_block')}</button>{/if}
-			</div>
-			<p class="text-xs text-muted">{t('tn.sched.blocks_help')}</p>
-			{#each sched.blocks as b (b.id)}
-				<div class="flex flex-wrap items-center gap-3 rounded-lg border border-line p-3">
-					<div class="min-w-0 flex-1">
-						<strong class="text-ink">{b.title}</strong>
-						<p class="font-mono text-xs text-muted">{fmtDateTime(b.starts_at)} – {fmtTime(b.ends_at)} · {b.field?.name ?? t('tn.sched.all_fields')}{b.teams.length ? ` · ${b.teams.map((x) => x.name).join(', ')}` : ''}</p>
-					</div>
-					{#if canOperate}
-						<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.sched.edit_block')} onclick={() => openBlock(b)}><Pencil size={13} /></button>
-						<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.sched.delete_block')} onclick={() => { delBlock = b; run.clear(); delOpen = true; }}><Trash2 size={13} /></button>
-					{/if}
-				</div>
-			{:else}
-				<p class="text-sm text-muted">{t('tn.sched.no_blocks')}</p>
-			{/each}
-		</section>
 	{/if}
 </div>
 

@@ -656,7 +656,7 @@ def _skip_occupied_windows(candidate_start: datetime.datetime, match_duration: d
 #: no reason a club would ever want a different scale) shared between the
 #: server-computed slot heights below and the board's own JS, which reads it
 #: back from a data attribute to convert a drop position back into a time.
-PX_PER_MINUTE = 4
+PX_PER_MINUTE = 1.5  # 90px per hour: a 20 minute match is still tall enough for two lines of text
 
 
 def _slot_height_px(minutes: float) -> int:

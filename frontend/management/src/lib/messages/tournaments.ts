@@ -287,6 +287,8 @@ const rows: [string, string, string, string][] = [
 	['tn.setup.win_start', 'Window starts', 'Venster begint', 'Début de la plage'],
 	['tn.setup.win_end', 'Window ends', 'Venster eindigt', 'Fin de la plage'],
 	['tn.setup.gap_minutes', 'Break (minutes)', 'Pauze (minuten)', 'Pause (minutes)'],
+	['tn.setup.col.name', 'Name', 'Naam', 'Nom'],
+	['tn.setup.col.availability', 'Available', 'Beschikbaar', 'Disponible'],
 	['tn.setup.col.move', 'Order', 'Volgorde', 'Ordre'],
 	['tn.setup.col.rule', 'Rule', 'Regel', 'Règle'],
 	['tn.setup.col.field', 'Field', 'Veld', 'Terrain'],
