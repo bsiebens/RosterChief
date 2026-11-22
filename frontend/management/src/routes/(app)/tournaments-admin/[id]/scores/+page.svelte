@@ -147,12 +147,15 @@
 									{#each r.matches.filter((y) => y.leg !== 1) as x (x.id)}
 										{@const first = byId(x.first_leg_id)}
 										{@const act = activeLeg(x)}
+										{@const tHome = first ? (first.score_home ?? 0) + (x.score_home ?? 0) : x.score_home}
+										{@const tAway = first ? (first.score_away ?? 0) + (x.score_away ?? 0) : x.score_away}
+										{@const shown = first ? done(first) || done(x) || x.status === 'in_progress' || first.status === 'in_progress' : done(x) || x.status === 'in_progress'}
 										<tr class="hover:bg-paper">
 											<td class="w-36 font-mono text-xs whitespace-nowrap">{#if first}<div>{first.scheduled_start ? fmtDateTime(first.scheduled_start) : '—'}</div><div class="text-muted">{x.scheduled_start ? fmtDateTime(x.scheduled_start) : '—'}</div>{:else}{x.scheduled_start ? fmtDateTime(x.scheduled_start) : '—'}{/if}</td>
 											<td class="hidden text-xs whitespace-nowrap sm:table-cell">{x.field?.name ?? ''}</td>
 											<td class="text-right text-sm">{x.home_display}</td>
 											<td class="w-28 text-center font-mono text-sm font-bold whitespace-nowrap">
-												{#if x.status === 'in_progress'}<div class="mb-0.5"><LiveBadge /></div>{/if}{#if done(x) || x.status === 'in_progress'}{x.score_home ?? 0} – {x.score_away ?? 0}{#if x.went_to_overtime} <span class="text-xs font-normal text-muted">{t('tn.scores.ot')}</span>{/if}{#if x.penalty_home !== null} <span class="text-xs font-normal text-muted">({x.penalty_home}–{x.penalty_away})</span>{/if}{:else}<span class="text-muted">vs</span>{/if}{#if first}<div class="text-[10px] font-normal text-muted">{t('tn.legs_line', { a: `${first.score_home ?? '–'}:${first.score_away ?? '–'}`, b: `${x.score_home ?? '–'}:${x.score_away ?? '–'}` })}{#if x.aggregate} · {t('tn.aggregate', { h: x.aggregate[0], a: x.aggregate[1] })}{/if}</div>{/if}{#each attrs as a (a.key)}{#if x.attributes?.[a.key] && (x.attributes[a.key].home || x.attributes[a.key].away)}<div class="text-xs font-normal text-muted" title={a.name}>{a.name} {x.attributes[a.key].home}–{x.attributes[a.key].away}</div>{/if}{/each}
+												{#if x.status === 'in_progress' || first?.status === 'in_progress'}<div class="mb-0.5"><LiveBadge /></div>{/if}{#if shown}{tHome ?? 0} – {tAway ?? 0}{#if x.went_to_overtime} <span class="text-xs font-normal text-muted">{t('tn.scores.ot')}</span>{/if}{#if x.penalty_home !== null} <span class="text-xs font-normal text-muted">({x.penalty_home}–{x.penalty_away})</span>{/if}{:else}<span class="text-muted">vs</span>{/if}{#if first}<div class="text-[10px] font-normal text-muted">{t('tn.legs_line', { a: `${first.score_home ?? '–'}:${first.score_away ?? '–'}`, b: `${x.score_home ?? '–'}:${x.score_away ?? '–'}` })}</div>{/if}{#each attrs as a (a.key)}{#if x.attributes?.[a.key] && (x.attributes[a.key].home || x.attributes[a.key].away)}<div class="text-xs font-normal text-muted" title={a.name}>{a.name} {x.attributes[a.key].home}–{x.attributes[a.key].away}</div>{/if}{/each}
 											</td>
 											<td class="text-sm">{x.away_display}</td>
 											<td class="text-right"><div class="flex items-center justify-end gap-1">
