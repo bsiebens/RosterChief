@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { CalendarClock, Eraser, Pencil, Plus, Trash2, Wand2 } from '@lucide/svelte';
+	import { CalendarClock, Eraser, Pencil, Plus, Save, Trash2, UtensilsCrossed, Wand2, X } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
@@ -9,7 +9,7 @@
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
-	import { fmtDateTime, fmtTime, fromLocalInput, numOrNull, Runner, strOrNull, toLocalInput, type MatchDoc, type ScheduleBlock } from '#lib/tournaments.svelte.ts';
+	import { fmtDay, fmtDateTime, fmtTime, fromLocalInput, numOrNull, Runner, strOrNull, toLocalInput, TBASE, type LunchDoc, type LunchResult, type MatchDoc, type ScheduleBlock } from '#lib/tournaments.svelte.ts';
 
 	let { data } = $props();
 	const tn = $derived(data.tournament);
@@ -68,6 +68,41 @@
 		if (delBlock && (await run.del(`${base}/schedule-blocks/${delBlock.id}`))) delOpen = false;
 	}
 
+	// --- lunch (its own runner, so its errors show in the Lunch card only)
+	const lrun = new Runner();
+	const lunch = $derived(data.lunch as LunchDoc | null);
+	const SETTING_KEYS = ['duration_minutes', 'gap_before_minutes', 'gap_after_minutes', 'capacity_teams', 'interval_minutes'] as const;
+	let lset = $state<Record<string, string>>({});
+	let ldays = $state<Record<string, { from: string; to: string }>>({});
+	let lresult = $state<LunchResult | null>(null);
+	let lgenOpen = $state(false);
+	let lclearOpen = $state(false);
+	$effect(() => {
+		const l = lunch;
+		if (!l) return;
+		lset = Object.fromEntries(SETTING_KEYS.map((k) => [k, String(l.settings[k] ?? '')]));
+		ldays = Object.fromEntries(l.days.map((d) => [d.date, { from: d.lunch_start ?? '', to: d.lunch_end ?? '' }]));
+	});
+	const lunchDirty = $derived(
+		!!lunch && (SETTING_KEYS.some((k) => lset[k] !== String(lunch.settings[k] ?? '')) || lunch.days.some((d) => (ldays[d.date]?.from ?? '') !== (d.lunch_start ?? '') || (ldays[d.date]?.to ?? '') !== (d.lunch_end ?? '')))
+	);
+	const lerr = (k: string) => lrun.fields[`settings.${k}`] ?? lrun.fields[k];
+	const lerrOther = $derived(Object.entries(lrun.fields).filter(([k]) => !SETTING_KEYS.some((s) => k === s || k === `settings.${s}`)).map(([, v]) => v));
+	function saveLunch() {
+		lresult = null;
+		return lrun.put(`${base}/lunch`, { settings: Object.fromEntries(SETTING_KEYS.map((k) => [k, Number(lset[k])])), days: (lunch?.days ?? []).map((d) => ({ date: d.date, lunch_start: strOrNull(ldays[d.date]?.from), lunch_end: strOrNull(ldays[d.date]?.to) })) }, () => void (lrun.notice = t('tn.lunch.saved')), { notice: '' });
+	}
+	async function generateLunch() {
+		lgenOpen = false;
+		lresult = null;
+		await lrun.post<LunchResult>(`${base}/lunch/generate`, duration ? { match_duration_minutes: numOrNull(duration) } : {}, (d) => void (lresult = d ?? null), { notice: '' });
+	}
+	async function clearLunch() {
+		lclearOpen = false;
+		lresult = null;
+		await lrun.post(`${base}/lunch/clear`, {}, () => void (lrun.notice = t('tn.lunch.cleared')), { notice: '' });
+	}
+
 	usePageHeader(() => ({ badge: statusPill, title: tn.name, context: t('tn.tab.schedule') }));
 </script>
 
@@ -112,10 +147,10 @@
 				{#each sched.blocks as b (b.id)}
 					<div class="flex flex-wrap items-center gap-3 rounded-lg border border-line p-3">
 						<div class="min-w-0 flex-1">
-							<strong class="text-ink">{b.title}</strong>
+							<strong class="text-ink">{b.title}</strong>{#if b.kind === 'lunch'} <span class="badge badge-sm badge-info">{t('tn.lunch.kind')}</span>{/if}
 							<p class="font-mono text-xs text-muted">{fmtDateTime(b.starts_at)} – {fmtTime(b.ends_at)} · {b.field?.name ?? t('tn.sched.all_fields')}{b.teams.length ? ` · ${b.teams.map((x) => x.name).join(', ')}` : ''}</p>
 						</div>
-						{#if canOperate}
+						{#if canOperate && b.kind !== 'lunch'}
 							<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.sched.edit_block')} onclick={() => openBlock(b)}><Pencil size={13} /></button>
 							<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.sched.delete_block')} onclick={() => { delBlock = b; run.clear(); delOpen = true; }}><Trash2 size={13} /></button>
 						{/if}
@@ -125,6 +160,85 @@
 				{/each}
 			</section>
 		</div>
+
+		<section class="card card-body gap-3" aria-labelledby="lunch-h">
+			<h2 id="lunch-h" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><UtensilsCrossed size={16} class="shrink-0" aria-hidden="true" /> {t('tn.lunch.title')}</h2>
+			{#if !lunch}
+				<Alert kind="error">{t('tn.lunch.load_error')}{data.lunchError && data.lunchError !== 'error' ? ` (${data.lunchError})` : ''}</Alert>
+			{:else if !lunch.enabled}
+				<p class="text-sm text-muted">{t('tn.lunch.disabled')} <a class="link font-semibold" href="{TBASE}/{tn.id}">{t('tn.lunch.disabled_link')}</a>.</p>
+			{:else}
+				<p class="text-xs text-muted">{t('tn.lunch.help')}</p>
+				{#if lrun.error}<Alert kind="error">{lrun.error}{#each lerrOther as m (m)} {m}{/each}</Alert>{/if}
+				<div class="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+					<Field label={t('tn.lunch.duration')} type="number" min="1" bind:value={lset.duration_minutes} error={lerr('duration_minutes')} help={t('tn.lunch.duration_help')} disabled={!canOperate} />
+					<Field label={t('tn.lunch.gap_before')} type="number" min="0" bind:value={lset.gap_before_minutes} error={lerr('gap_before_minutes')} help={t('tn.lunch.gap_before_help')} disabled={!canOperate} />
+					<Field label={t('tn.lunch.gap_after')} type="number" min="0" bind:value={lset.gap_after_minutes} error={lerr('gap_after_minutes')} help={t('tn.lunch.gap_after_help')} disabled={!canOperate} />
+					<Field label={t('tn.lunch.capacity')} type="number" min="1" bind:value={lset.capacity_teams} error={lerr('capacity_teams')} help={t('tn.lunch.capacity_help')} disabled={!canOperate} />
+					<Field label={t('tn.lunch.interval')} type="number" min="0" bind:value={lset.interval_minutes} error={lerr('interval_minutes')} help={t('tn.lunch.interval_help')} disabled={!canOperate} />
+				</div>
+				<div class="overflow-x-auto rounded-lg border border-line">
+					<table class="table">
+						<thead>
+							<tr>
+								<th>{t('tn.lunch.col.day')}</th>
+								<th class="hidden sm:table-cell">{t('tn.lunch.col.hours')}</th>
+								<th>{t('tn.lunch.col.from')}</th>
+								<th>{t('tn.lunch.col.to')}</th>
+								<th class="hidden sm:table-cell">{t('tn.lunch.col.teams')}</th>
+								<th>{t('tn.lunch.col.sittings')}</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each lunch.days as d (d.date)}
+								<tr class="hover:bg-paper">
+									<td class="font-semibold whitespace-nowrap text-ink">{fmtDay(d.date)}</td>
+									<td class="hidden font-mono text-xs whitespace-nowrap sm:table-cell">{d.day_start}–{d.day_end}</td>
+									<td><input class="input input-bordered input-sm w-28" type="time" aria-label="{t('tn.lunch.col.from')} {fmtDay(d.date)}" bind:value={ldays[d.date].from} disabled={!canOperate} /></td>
+									<td><input class="input input-bordered input-sm w-28" type="time" aria-label="{t('tn.lunch.col.to')} {fmtDay(d.date)}" bind:value={ldays[d.date].to} disabled={!canOperate} /></td>
+									<td class="hidden sm:table-cell">{d.teams_eating}</td>
+									<td>
+										<div class="flex flex-wrap gap-1.5">
+											{#each d.sittings as s (s.start)}
+												<span class="badge badge-ghost h-auto gap-1 py-1 font-normal whitespace-normal"><span class="font-mono text-xs">{s.start}-{s.end}</span> · {s.teams.map((x) => x.name).join(', ')}</span>
+											{:else}
+												<span class="text-sm text-muted">{t('tn.lunch.no_sittings')}</span>
+											{/each}
+										</div>
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+				<p class="text-xs text-muted">{t('tn.lunch.days_help')}</p>
+				{#if canOperate}
+					<div class="flex flex-wrap items-center gap-3">
+						<button class="btn btn-primary gap-2" type="button" disabled={lrun.busy || !lunchDirty} onclick={saveLunch}><Save size={16} /> {t('tn.lunch.save')}</button>
+						<button class="btn btn-outline gap-2" type="button" disabled={lrun.busy || lunchDirty} onclick={() => { lrun.clear(); lgenOpen = true; }}><Wand2 size={16} /> {t('tn.lunch.generate')}</button>
+						<button class="btn btn-outline btn-error gap-2" type="button" disabled={lrun.busy} onclick={() => { lrun.clear(); lclearOpen = true; }}><Eraser size={16} /> {t('tn.lunch.clear')}</button>
+						{#if lunchDirty}<span class="text-xs text-muted">{t('tn.lunch.unsaved')}</span>{/if}
+					</div>
+				{/if}
+				{#if lresult}
+					<div class="grid gap-2 rounded-lg border border-line p-3">
+						<div class="flex items-start justify-between gap-2">
+							<p class="text-sm font-semibold text-ink">{t('tn.lunch.result', { sittings: lresult.sittings_created, games: lresult.games_replanned })}</p>
+							<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.lunch.dismiss')} title={t('tn.lunch.dismiss')} onclick={() => (lresult = null)}><X size={13} /></button>
+						</div>
+						{#if lresult.note}<p class="text-sm text-muted">{lresult.note}</p>{/if}
+						{#if lresult.problems.length}
+							<h3 class="text-xs font-bold text-muted">{t('tn.lunch.problems')} ({lresult.problems.length})</h3>
+							{#each lresult.problems as p, i (i)}
+								<Alert kind="warning" title={t(`tn.lunch.problem.${p.type}`)}>{fmtDay(p.date)}{p.team ? ` · ${p.team.name}` : ''}: {p.message}</Alert>
+							{/each}
+						{:else}
+							<p class="text-sm text-muted">{t('tn.lunch.no_problems')}</p>
+						{/if}
+					</div>
+				{/if}
+			{/if}
+		</section>
 
 		{#if view === 'board'}
 			{#if data.board}<ScheduleBoard board={data.board} {canOperate} busy={run.busy} onmove={drop} onedit={openMove} />{/if}
@@ -234,4 +348,24 @@
 		</div>
 	</div>
 </Modal>
+<Modal bind:open={lgenOpen} title={t('tn.lunch.generate')}>
+	<div class="grid gap-3">
+		<p>{t('tn.lunch.generate_body')}</p>
+		<div class="modal-action mt-2 flex justify-end gap-2">
+			<button class="btn btn-outline" type="button" onclick={() => (lgenOpen = false)}>{t('common.cancel')}</button>
+			<button class="btn btn-primary" type="button" disabled={lrun.busy} onclick={generateLunch}>{t('tn.lunch.generate')}</button>
+		</div>
+	</div>
+</Modal>
+
+<Modal bind:open={lclearOpen} title={t('tn.lunch.clear')}>
+	<div class="grid gap-3">
+		<p>{t('tn.lunch.clear_body')}</p>
+		<div class="modal-action mt-2 flex justify-end gap-2">
+			<button class="btn btn-outline" type="button" onclick={() => (lclearOpen = false)}>{t('common.cancel')}</button>
+			<button class="btn btn-error" type="button" disabled={lrun.busy} onclick={clearLunch}>{t('tn.lunch.clear')}</button>
+		</div>
+	</div>
+</Modal>
+<Toast message={lrun.notice} onhide={() => (lrun.notice = '')} />
 <Toast message={run.notice} onhide={() => (run.notice = '')} />

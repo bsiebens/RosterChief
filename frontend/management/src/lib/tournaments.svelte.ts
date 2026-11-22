@@ -157,7 +157,7 @@ export type BreakRule = {
 	priority: number | null;
 	summary: string;
 };
-export type ScheduleBlock = { id: string; title: string; starts_at: string; ends_at: string; field: { id: string; name: string } | null; teams: TTeamRef[] };
+export type ScheduleBlock = { id: string; kind?: 'block' | 'lunch'; title: string; starts_at: string; ends_at: string; field: { id: string; name: string } | null; teams: TTeamRef[] };
 
 export const STATUSES = ['draft', 'published', 'in_progress', 'completed', 'cancelled'] as const;
 export const statusBadge = (s: string) => ({ draft: 'badge-ghost', published: 'badge-info', in_progress: 'badge-success', completed: 'badge-neutral', cancelled: 'badge-error' })[s] ?? 'badge-ghost';
@@ -263,3 +263,10 @@ export function headerSnapshot<T extends object>(get: () => T): T {
 	});
 	return snap;
 }
+
+export type LunchSettings = { duration_minutes: number; gap_before_minutes: number; gap_after_minutes: number; capacity_teams: number; interval_minutes: number };
+export type LunchSitting = { start: string; end: string; teams: { id: string; name: string }[] };
+export type LunchDay = { date: string; lunch_start: string | null; lunch_end: string | null; day_start: string; day_end: string; teams_eating: number; sittings: LunchSitting[] };
+export type LunchDoc = { enabled: boolean; settings: LunchSettings; days: LunchDay[]; generated: boolean };
+export type LunchProblem = { type: 'no_room' | 'game_close' | 'no_window'; date: string; team: { id: string; name: string } | null; message: string };
+export type LunchResult = { sittings_created: number; games_replanned: number; problems: LunchProblem[]; note: string | null };

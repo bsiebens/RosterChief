@@ -1,5 +1,6 @@
+import { api } from '#lib/management-api.ts';
 import { loadOr } from '#lib/tournaments-server.ts';
-import type { MatchDoc, ScheduleBlock, StageDoc, TeamDoc } from '#lib/tournaments.svelte.ts';
+import type { LunchDoc, MatchDoc, ScheduleBlock, StageDoc, TeamDoc } from '#lib/tournaments.svelte.ts';
 import type { PageServerLoad } from './$types';
 
 export type Round = { round_number: number; label: string; all_complete: boolean; matches: MatchDoc[] };
@@ -17,10 +18,12 @@ export type BoardData = {
 
 export const load: PageServerLoad = async ({ fetch, parent, params }) => {
 	await parent();
-	const [schedule, board, teams] = await Promise.all([
+	const [schedule, board, teams, lunch] = await Promise.all([
 		loadOr<ScheduleData>(fetch, `/tournaments/${params.id}/schedule`),
 		loadOr<BoardData>(fetch, `/tournaments/${params.id}/schedule/board`),
-		loadOr<{ results: TeamDoc[] }>(fetch, `/tournaments/${params.id}/teams`)
+		loadOr<{ results: TeamDoc[] }>(fetch, `/tournaments/${params.id}/teams`),
+		// Tolerant: a failing lunch endpoint only shows an error in the Lunch card.
+		api<LunchDoc>('GET', `/tournaments/${params.id}/lunch`, { f: fetch })
 	]);
-	return { schedule: schedule.data, board: board.data, teams: (teams.data?.results ?? []).filter((x) => !x.withdrawn_at), error: schedule.data ? null : schedule.status };
+	return { schedule: schedule.data, board: board.data, teams: (teams.data?.results ?? []).filter((x) => !x.withdrawn_at), lunch: lunch.ok ? (lunch.data ?? null) : null, lunchError: lunch.ok ? '' : lunch.message || 'error', error: schedule.data ? null : schedule.status };
 };
