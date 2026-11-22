@@ -181,20 +181,43 @@
 					{#if canOperate}<button class="btn btn-outline btn-sm gap-1" type="button" onclick={() => openBlock(null)}><Plus size={14} /> {t('tn.sched.add_block')}</button>{/if}
 				</div>
 				<p class="text-xs text-muted">{t('tn.sched.blocks_help')}</p>
-				{#each sched.blocks as b (b.id)}
-					<div class="flex flex-wrap items-center gap-3 rounded-lg border border-line p-3">
-						<div class="min-w-0 flex-1">
-							<div class="flex items-center gap-2"><strong class="leading-none text-ink">{b.title}</strong>{#if b.kind === 'lunch'}<span class="badge badge-sm badge-info">{t('tn.lunch.kind')}</span>{/if}</div>
-							<p class="mt-1.5 font-mono text-xs text-muted">{fmtDateTime(blockStart(b))} – {fmtTime(blockEnd(b))} · {b.field?.name ?? t('tn.sched.all_fields')}{b.teams.length ? ` · ${b.teams.map((x) => x.name).join(', ')}` : ''}</p>
-						</div>
-						{#if canOperate && b.kind !== 'lunch'}
-							<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.sched.edit_block')} onclick={() => openBlock(b)}><Pencil size={13} /></button>
-							<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.sched.delete_block')} onclick={() => { delBlock = b; run.clear(); delOpen = true; }}><Trash2 size={13} /></button>
-						{/if}
+				{#if sched.blocks.length}
+					<div class="overflow-x-auto rounded-lg border border-line">
+						<table class="table table-sm w-full">
+							<thead>
+								<tr>
+									<th>{t('tn.sched.block_title')}</th>
+									<th>{t('tn.sched.col_day')}</th>
+									<th>{t('tn.sched.col_time')}</th>
+									<th>{t('tn.sched.col_field')}</th>
+									<th>{t('tn.sched.col_teams')}</th>
+									<th class="w-20"></th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each sched.blocks as b (b.id)}
+									<tr class="hover:bg-paper">
+										<td><div class="flex items-center gap-2 whitespace-nowrap"><strong class="leading-none text-ink">{b.title}</strong>{#if b.kind === 'lunch'}<span class="badge badge-sm badge-info">{t('tn.lunch.kind')}</span>{/if}</div></td>
+										<td class="font-mono text-xs whitespace-nowrap">{fmtDay(blockStart(b))}</td>
+										<td class="font-mono text-xs whitespace-nowrap">{fmtTime(blockStart(b))} – {fmtTime(blockEnd(b))}</td>
+										<td class="text-xs whitespace-nowrap">{b.field?.name ?? t('tn.sched.all_fields')}</td>
+										<td class="text-xs">{b.teams.length ? b.teams.map((x) => x.name).join(', ') : '—'}</td>
+										<td>
+											<div class="flex items-center justify-end gap-1">
+												{#if canOperate && b.kind !== 'lunch'}
+													<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.sched.edit_block')} title={t('tn.sched.edit_block')} onclick={() => openBlock(b)}><Pencil size={13} /></button>
+													<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.sched.delete_block')} title={t('tn.sched.delete_block')} onclick={() => { delBlock = b; run.clear(); delOpen = true; }}><Trash2 size={13} /></button>
+												{/if}
+											</div>
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
 					</div>
 				{:else}
 					<p class="text-sm text-muted">{t('tn.sched.no_blocks')}</p>
-				{/each}
+				{/if}
 			</section>
 		</div>
 

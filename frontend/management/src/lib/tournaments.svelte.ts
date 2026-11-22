@@ -102,6 +102,7 @@ export type TeamDoc = {
 	staff_count: number;
 	has_age_flag: boolean;
 };
+export type MatchSource = { type: 'match'; match_id: string; is_winner: boolean } | { type: 'group'; group_id: string; rank: number } | null;
 export type MatchDoc = {
 	id: string;
 	stage_id: string;
@@ -122,6 +123,9 @@ export type MatchDoc = {
 	away_team: TTeamRef | null;
 	home_display: string;
 	away_display: string;
+	/** What feeds a side that has no team yet: the winner/loser of another match, the Nth of a group, or nothing. */
+	home_source?: MatchSource;
+	away_source?: MatchSource;
 	/** Back-and-forth ties: 1 or 2 for the leg; `aggregate` is both legs added up once the first leg is in (on the second leg). */
 	leg: 1 | 2 | null;
 	tie_id: string | null;

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Medal, Swords } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import BracketView from '#lib/components/tournaments/BracketView.svelte';
 	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -9,14 +10,13 @@
 	let { data } = $props();
 	const tn = $derived(data.tournament);
 	const s = $derived(data.standings);
-	const score = (m: { score_home: number | null; score_away: number | null }) => (m.score_home === null || m.score_away === null ? 'vs' : `${m.score_home} – ${m.score_away}`);
-
+	
 	usePageHeader(() => ({ badge: statusPill, title: tn.name, context: t('tn.tab.standings') }));
 </script>
 
 <svelte:head><title>{pageTitle(t('tn.tab.standings'))}</title></svelte:head>
 
-<div class="grid gap-4">
+<div class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4">
 	{#if data.error || !s}
 		<Alert kind="error">{t('common.error.generic')}</Alert>
 	{:else}
@@ -54,21 +54,11 @@
 		{#each s.brackets as b (b.stage.id)}
 			<section class="card card-body gap-3">
 				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Swords size={16} class="shrink-0" aria-hidden="true" /> {b.stage.name}</h2>
-				<div class="flex gap-4 overflow-x-auto pb-2">
-					{#each b.rounds as r, i (i)}
-						<div class="grid w-56 shrink-0 content-start gap-2">
-							<h3 class="text-xs font-bold text-muted">{r.label ?? t('tn.standings.round', { n: r.round_number ?? i + 1 })}</h3>
-							{#each r.matches ?? [] as m (m.id)}
-								<div class="rounded-lg border border-line p-2 text-xs">
-									<div class="flex justify-between gap-2"><span class="truncate">{m.home_display}</span></div>
-									<div class="flex justify-between gap-2"><span class="truncate">{m.away_display}</span><span class="font-mono font-bold">{score(m)}</span></div>
-								</div>
-							{/each}
-						</div>
-					{:else}
-						<p class="text-sm text-muted">{t('tn.standings.bracket_empty')}</p>
-					{/each}
-				</div>
+				{#if b.rounds.length}
+					<BracketView rounds={b.rounds} />
+				{:else}
+					<p class="text-sm text-muted">{t('tn.standings.bracket_empty')}</p>
+				{/if}
 			</section>
 		{/each}
 		{#if !s.standings.length && !s.brackets.length}
