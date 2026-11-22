@@ -95,8 +95,8 @@
 											</td>
 											<td class="text-sm">{x.away_display}</td>
 											<td class="text-right"><div class="flex items-center justify-end gap-1">
-												<a class="btn btn-outline btn-xs relative gap-1" href="{TBASE}/{tn.id}/matches/{x.id}" title={t('tn.scores.timeline')}><ListOrdered size={13} aria-hidden="true" /> {t('tn.scores.timeline')}{#if (x.event_count ?? 0) > 0}<span class="badge badge-neutral badge-xs absolute -top-1.5 -right-1.5">{x.event_count}</span>{/if}</a>
-												{#if canOperate}<button class="btn btn-outline btn-xs gap-1" type="button" disabled={!x.home_team || !x.away_team} onclick={() => openResult(x, st.stage)}>{#if done(x)}<Pencil size={13} aria-hidden="true" /> {t('common.edit')}{:else}<ClipboardPen size={13} aria-hidden="true" /> {t('tn.scores.enter')}{/if}</button>{/if}
+												<a class="btn btn-outline btn-xs w-28 justify-center gap-1" href="{TBASE}/{tn.id}/matches/{x.id}" title={t('tn.scores.timeline')}><ListOrdered size={13} aria-hidden="true" /> {t('tn.scores.timeline')}{#if (x.event_count ?? 0) > 0}<span class="badge badge-neutral badge-xs">{x.event_count}</span>{/if}</a>
+												{#if canOperate}<button class="btn btn-outline btn-xs w-24 justify-center gap-1" type="button" disabled={!x.home_team || !x.away_team} onclick={() => openResult(x, st.stage)}>{#if done(x)}<Pencil size={13} aria-hidden="true" /> {t('common.edit')}{:else}<ClipboardPen size={13} aria-hidden="true" /> {t('tn.scores.enter')}{/if}</button>{/if}
 											</div></td>
 										</tr>
 									{/each}
