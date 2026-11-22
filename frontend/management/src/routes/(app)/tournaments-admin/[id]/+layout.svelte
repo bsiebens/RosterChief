@@ -39,7 +39,7 @@
 				aria-current={isActive(tab.key) ? 'page' : undefined}
 				class="-mb-px flex items-center gap-2 border-b-2 px-4 py-3.5 font-display text-sm font-bold tracking-[.08em] whitespace-nowrap uppercase focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-club {isActive(tab.key) ? 'border-club text-ink' : 'border-transparent text-muted hover:text-ink'}">
 				{tab.label}
-				{#if tab.count !== undefined && (tab.count > 0 || !tab.warn)}<span class="badge badge-sm {tab.warn ? 'badge-warning' : 'badge-ghost'} min-w-5 font-mono text-xs font-semibold text-ink">{tab.count}</span>{/if}
+				{#if tab.count !== undefined && (tab.count > 0 || !tab.warn)}<span class="badge badge-sm {tab.warn ? 'badge-warning' : 'badge-ghost text-ink'} min-w-5 font-mono text-xs font-semibold">{tab.count}</span>{/if}
 			</a>
 		{/each}
 	</div>
