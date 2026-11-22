@@ -9,14 +9,14 @@ import uuid
 from django.db import connection, transaction
 from django.db.models import Max, Q
 from django.utils import timezone
-from ninja import Router
+from ninja import Router, Schema
 
 from api.auth import AUTHENTICATORS
 from api.routers import tournaments_common as c
 from api.schemas_tournaments import BlockIn, BlockPatch, GenerateScheduleIn, MatchCreateIn, MatchTeamsPatch, ReorderIn, RescheduleIn, ResultIn
 from formbuilder.services.management import Conflict
 from members.services.errors import Invalid
-from tournaments.models import Match, MatchAttribute, MatchAttributeValue, ScheduleBlock, Tournament, TournamentGroup, TournamentStage, TournamentTeam
+from tournaments.models import Match, MatchAttribute, MatchAttributeValue, ScheduleBlock, Tournament, TournamentGroup, TournamentRosterEntry, TournamentStage, TournamentTeam
 from tournaments.services import scheduling as svc
 
 router = Router(auth=AUTHENTICATORS)
@@ -277,6 +277,64 @@ def result(request, match_id: uuid.UUID, payload: ResultIn):
         for attribute, value in values:
             MatchAttributeValue.objects.update_or_create(match=match, attribute=attribute, defaults={"home_value": value.home, "away_value": value.away})
     return {"match": c.match_out(_match(match_id)), "updated_match_ids": [m.pk for m in updated]}
+
+
+class GoaliesIn(Schema):
+    home_goalie_id: uuid.UUID | None = None
+    away_goalie_id: uuid.UUID | None = None
+
+
+def _set_goalies(match, payload: GoaliesIn) -> None:
+    """The goalies in goal at the start: players of the two teams (None clears)."""
+    for side in ("home", "away"):
+        entry_id = getattr(payload, f"{side}_goalie_id")
+        if entry_id is None:
+            setattr(match, f"{side}_goalie", None)
+            continue
+        team = match.home_team if side == "home" else match.away_team
+        entry = TournamentRosterEntry.objects.filter(pk=entry_id, tournament_team=team).first() if team is not None else None
+        if entry is None:
+            message = "Choose a player of this team."
+            raise Invalid(message, {f"{side}_goalie_id": [message]})
+        setattr(match, f"{side}_goalie", entry)
+
+
+@router.post("/matches/{match_id}/start", summary="Start a game: it goes live; the goalies in goal can be marked", operation_id="tournaments_match_start")
+def start(request, match_id: uuid.UUID, payload: GoaliesIn | None = None):
+    c.gate_operate(request)
+    match = _match(match_id)
+    if match.status != Match.Status.SCHEDULED:
+        raise Conflict("This game has already been started.", "already_started")
+    if match.home_team_id is None or match.away_team_id is None:
+        raise Invalid("Both teams must be known before a game can start.", {"detail": ["Both teams must be known before a game can start."]}, code="teams_unknown")
+    if payload is not None:
+        _set_goalies(match, payload)
+    match.status = Match.Status.IN_PROGRESS
+    match.save(update_fields=["status", "home_goalie", "away_goalie"])
+    return c.match_out(_match(match_id))
+
+
+@router.put("/matches/{match_id}/goalies", summary="Mark the goalies in goal", operation_id="tournaments_match_goalies")
+def goalies(request, match_id: uuid.UUID, payload: GoaliesIn):
+    c.gate_operate(request)
+    match = _match(match_id)
+    _set_goalies(match, payload)
+    match.save(update_fields=["home_goalie", "away_goalie"])
+    return c.match_out(_match(match_id))
+
+
+@router.post("/matches/{match_id}/reopen", summary="Reopen a completed game so its timeline can be changed again", operation_id="tournaments_match_reopen")
+def reopen(request, match_id: uuid.UUID):
+    c.gate_operate(request)
+    match = _match(match_id)
+    if match.status != Match.Status.COMPLETE:
+        raise Conflict("This game is not completed.", "not_complete")
+    played = Match.objects.filter(Q(home_source_match=match) | Q(away_source_match=match), status__in=[Match.Status.COMPLETE, Match.Status.IN_PROGRESS, Match.Status.WALKOVER]).exists()
+    if played:
+        raise Conflict("A later game that uses this result has already been played.", "has_dependents_played")
+    match.status = Match.Status.IN_PROGRESS  # live again: the score, shots and timeline stay; completing again records the result and advances the bracket again
+    match.save(update_fields=["status"])
+    return c.match_out(_match(match_id))
 
 
 # --- editing generated matches ---------------------------------------------------------------------------------------------

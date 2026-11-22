@@ -204,6 +204,7 @@ def match_out(match: Match, *, with_field=True) -> dict:
     prime_matches([match])
     return {
         **match._doc_extra,
+        "home_goalie_id": match.home_goalie_id, "away_goalie_id": match.away_goalie_id,
         "home_team_id": match.home_team_id, "away_team_id": match.away_team_id, "home_is_tbd": match.home_team_id is None, "away_is_tbd": match.away_team_id is None,
         "home_source": side_source(match, "home"), "away_source": side_source(match, "away"), "group_id": match.group_id,
         "id": match.pk, "stage_id": match.stage_id, "group": group_ref(match.group), "round_number": match.round_number, "round_label": match.round_label, "sequence": match.sequence,

@@ -610,6 +610,24 @@ class TournamentApiTests(TestCase):
         self.assertEqual(self.as_("manage", "delete", f"/{t.pk}/sponsors/{sid}").status_code, 204)
         self.assertEqual(len(self.as_("manage", "get", f"/{t.pk}/sponsors").json()["results"]), 1)
 
+    def test_reopen_a_completed_game(self):
+        _t, _stage, _teams, (m1, _m2) = self._league()
+        self.assertEqual(self.as_("operate", "post", f"/matches/{m1.pk}/reopen", {}).status_code, 409)  # not completed yet
+        self.as_("operate", "post", f"/matches/{m1.pk}/result", {"score_home": 2, "score_away": 1})
+        r = self.as_("operate", "post", f"/matches/{m1.pk}/reopen", {})
+        self.assertEqual((r.status_code, r.json()["status"], r.json()["score_home"]), (200, "in_progress", 2), r.content)
+        self.assertEqual(self.as_("operate", "post", f"/matches/{m1.pk}/result", {"score_home": 3, "score_away": 1}).status_code, 200)  # complete again with a changed score
+
+    def test_start_a_game_with_goalies_flips_it_live_and_complete_closes_it(self):
+        _t, _stage, _teams, (m1, _m2) = self._league()
+        home = TournamentRosterEntry.objects.create(tournament_team=m1.home_team, foreign_first_name="Gil", foreign_last_name="G", jersey_number=30)
+        other = TournamentRosterEntry.objects.create(tournament_team=m1.away_team, foreign_first_name="Cy", foreign_last_name="K", jersey_number=1)
+        self.assertEqual(self.as_("operate", "put", f"/matches/{m1.pk}/goalies", {"home_goalie_id": str(other.pk)}).status_code, 422)  # not a player of the home team
+        r = self.as_("operate", "post", f"/matches/{m1.pk}/start", {"home_goalie_id": str(home.pk), "away_goalie_id": str(other.pk)})
+        self.assertEqual((r.status_code, r.json()["status"], r.json()["home_goalie_id"], r.json()["away_goalie_id"]), (200, "in_progress", str(home.pk), str(other.pk)), r.content)
+        self.assertEqual(self.as_("operate", "post", f"/matches/{m1.pk}/start", {}).status_code, 409)  # already live
+        self.assertEqual(self.as_("operate", "post", f"/matches/{m1.pk}/result", {"score_home": 1, "score_away": 0}).json()["match"]["status"], "complete")
+
     def test_delete_only_a_draft_tournament(self):
         body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}
         tid = self.as_("manage", "post", "", body).json()["id"]

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { ArrowLeft, Check, Flag, Goal, ListOrdered, Pencil, Repeat, Shield, Timer, Trash2, Zap } from '@lucide/svelte';
+	import { ArrowLeft, Check, Flag, Goal, Play, RotateCcw, ListOrdered, Pencil, Repeat, Shield, Timer, Trash2, Zap } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import NoticeAlert from '#lib/components/NoticeAlert.svelte';
@@ -112,6 +112,33 @@
 
 	// --- complete the game: the final score is checked and confirmed in a dialog, then the game is closed
 	const complete = $derived(m?.status === 'complete');
+	const live = $derived(m?.status === 'in_progress');
+	// A game that has not started shows a big Start button (and, in ice hockey, the goalies in goal) instead of the entry form.
+	// svelte-ignore state_referenced_locally
+	let sg = $state({ home: data.game?.match.home_goalie_id ?? '', away: data.game?.match.away_goalie_id ?? '' });
+	const goalieItems = (side: 'home' | 'away') => {
+		const list = game?.rosters[side] ?? [];
+		return items(list.some((p) => p.is_goalie) ? list.filter((p) => p.is_goalie) : list);
+	};
+	const startable = $derived(!!m && !!m.home_team && !!m.away_team);
+	const start = () =>
+		run.run(
+			async () => {
+				const res = await api('POST', `/tournaments/matches/${data.matchId}/start`, { body: { home_goalie_id: sg.home || null, away_goalie_id: sg.away || null } });
+				if (!res.ok && res.code === 'teams_unknown') res.message = t('tn.game.teams_unknown');
+				return res;
+			},
+			undefined,
+			{ notice: t('tn.game.started') }
+		);
+	/** The goalie in goal for a side: the one of the last goalie change, else the one the game started with. */
+	function currentGoalie(side: 'home' | 'away'): string {
+		const last = [...(game?.events ?? [])].reverse().find((e) => e.type === 'goalie_change' && e.side === side && e.goalie_in);
+		return last?.goalie_in?.id ?? (side === 'home' ? m?.home_goalie_id : m?.away_goalie_id) ?? '';
+	}
+	$effect(() => {
+		if (f.type === 'goalie_change' && !f.id && !f.goalie_out) f.goalie_out = currentGoalie(f.side);
+	});
 	let doneOpen = $state(false);
 	let rf = $state({ home: '', away: '', ot: false, ph: '', pa: '' });
 	function openComplete() {
@@ -128,6 +155,17 @@
 			await goto(`${TBASE}/${tn.id}/scores`);
 		}
 	}
+
+	const reopen = () =>
+		run.run(
+			async () => {
+				const res = await api('POST', `/tournaments/matches/${data.matchId}/reopen`, { body: {} });
+				if (!res.ok && res.code === 'has_dependents_played') res.message = t('tn.game.reopen_blocked');
+				return res;
+			},
+			undefined,
+			{ notice: t('tn.game.reopened') }
+		);
 
 	/** What an event says, in one line. */
 	function summary(e: MatchEvent): string {
@@ -156,7 +194,8 @@
 		<Alert kind="error">{t('common.error.generic')}</Alert>
 	{:else}
 		<section class="card card-body card-hl gap-2">
-			<p class="text-xs text-muted">{m.round_label} · {m.scheduled_start ? fmtDateTime(m.scheduled_start) : '—'}{m.field ? ` · ${m.field.name}` : ''}{m.leg ? ` · ${t('tn.leg', { n: m.leg })}` : ''}</p>
+			{#if live}<p class="flex items-center justify-center gap-2 text-xs font-bold tracking-[.12em] text-error uppercase"><span class="relative flex size-2.5"><span class="absolute inline-flex size-full animate-ping rounded-full bg-error opacity-60"></span><span class="relative inline-flex size-2.5 rounded-full bg-error"></span></span> {t('tn.game.live')}</p>{/if}
+			<p class="text-xs text-muted">{[m.round_label || t('tn.standings.round', { n: m.round_number }), m.scheduled_start ? fmtDateTime(m.scheduled_start) : '', m.field?.name, m.leg ? t('tn.leg', { n: m.leg }) : ''].filter(Boolean).join(' · ')}</p>
 			<div class="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
 				<div class="flex items-center justify-end gap-2 text-right font-display text-lg font-extrabold text-ink">
 					{m.home_display}
@@ -170,14 +209,35 @@
 			</div>
 			<p class="text-center text-xs text-muted">{t('tn.game.help')}</p>
 			{#if complete}
-				<p class="mx-auto flex items-center gap-2 rounded-lg bg-ok-bg px-4 py-2 text-sm font-semibold text-ok-text" role="status"><Check size={16} aria-hidden="true" /> {t('tn.game.is_complete')}</p>
-			{:else if canOperate}
+				<div class="mx-auto flex flex-wrap items-center justify-center gap-3 rounded-lg bg-ok-bg px-4 py-2 text-sm font-semibold text-ok-text" role="status">
+					<span class="flex items-center gap-2"><Check size={16} aria-hidden="true" /> {t('tn.game.is_complete')}</span>
+					{#if canOperate}<button class="btn btn-outline btn-sm gap-1 bg-white" type="button" disabled={run.busy} onclick={reopen}><RotateCcw size={14} aria-hidden="true" /> {t('tn.game.reopen')}</button>{/if}
+				</div>
+			{:else if canOperate && live}
 				<div class="flex justify-center"><button class="btn btn-primary gap-2" type="button" onclick={openComplete}><Flag size={16} aria-hidden="true" /> {t('tn.game.complete')}</button></div>
 			{/if}
 		</section>
 
 		<div class="grid items-start gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
-			{#if canOperate && !complete}
+			{#if canOperate && !complete && !live}
+				<section class="card card-body items-center gap-5 py-10 text-center">
+					<span class="flex size-16 items-center justify-center rounded-full bg-club/10 text-club"><Play size={30} aria-hidden="true" /></span>
+					<div class="grid gap-1">
+						<h2 class="font-display text-xl font-extrabold tracking-[.06em] text-ink uppercase">{t('tn.game.not_started')}</h2>
+						<p class="text-sm text-muted">{t('tn.game.not_started_help')}</p>
+					</div>
+					{#if game.ice_hockey}
+						<div class="grid w-full max-w-md gap-3 text-left">
+							<p class="text-center text-xs font-semibold tracking-[.08em] text-muted uppercase">{t('tn.game.goalies_in_goal')}</p>
+							<div class="form-control"><span class="label-text mb-1 text-sm font-medium">{m.home_display}</span><SearchSelect id="sg-home" items={goalieItems('home')} bind:value={sg.home} placeholder={t('tn.game.pick_goalie')} /></div>
+							<div class="form-control"><span class="label-text mb-1 text-sm font-medium">{m.away_display}</span><SearchSelect id="sg-away" items={goalieItems('away')} bind:value={sg.away} placeholder={t('tn.game.pick_goalie')} /></div>
+						</div>
+					{/if}
+					{#if run.error}<Alert kind="error">{run.error}</Alert>{/if}
+					<button class="btn btn-primary btn-lg gap-2 px-10" type="button" disabled={run.busy || !startable} onclick={start}><Play size={20} aria-hidden="true" /> {t('tn.game.start')}</button>
+					{#if !startable}<p class="text-xs text-muted">{t('tn.game.teams_unknown')}</p>{/if}
+				</section>
+			{:else if canOperate && live}
 				<form class="card card-body gap-4" onsubmit={save}>
 					<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ListOrdered size={16} class="shrink-0" aria-hidden="true" /> {f.id ? t('tn.scores.ev_edit') : t('tn.scores.ev_add')}</h2>
 					{#if run.error}<Alert kind="error">{run.error}</Alert>{/if}

@@ -903,6 +903,9 @@ class Match(UUIDModel):
 
     home_team = models.ForeignKey(TournamentTeam, on_delete=models.SET_NULL, null=True, blank=True, related_name="home_matches", verbose_name=_("home team"))
     away_team = models.ForeignKey(TournamentTeam, on_delete=models.SET_NULL, null=True, blank=True, related_name="away_matches", verbose_name=_("away team"))
+    #: Ice hockey: the goalies in goal when the game started (marked when the game is started on the timeline screen).
+    home_goalie = models.ForeignKey("TournamentRosterEntry", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("home goalie"))
+    away_goalie = models.ForeignKey("TournamentRosterEntry", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("away goalie"))
 
     home_source_match = models.ForeignKey("self", on_delete=models.SET_NULL, null=True, blank=True, related_name="feeds_home", verbose_name=_("home source match"))
     home_source_is_winner = models.BooleanField(_("home source is winner"), default=True)

@@ -133,6 +133,8 @@ export type MatchDoc = {
 	leg: 1 | 2 | null;
 	tie_id: string | null;
 	first_leg_id: string | null;
+	home_goalie_id?: string | null;
+	away_goalie_id?: string | null;
 	aggregate: [number, number] | null;
 	/** Per-match attribute totals (e.g. penalty minutes), keyed by attribute key. */
 	attributes?: Record<string, { home: number; away: number }>;
