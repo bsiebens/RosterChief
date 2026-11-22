@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { ArrowLeft, Check, Goal, ListOrdered, Pencil, Repeat, Shield, Timer, Trash2, Zap } from '@lucide/svelte';
+	import { ArrowLeft, Check, Flag, Goal, ListOrdered, Pencil, Repeat, Shield, Timer, Trash2, Zap } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import Modal from '#lib/components/Modal.svelte';
 	import NoticeAlert from '#lib/components/NoticeAlert.svelte';
 	import SearchSelect from '#lib/components/SearchSelect.svelte';
 	import TeamLogo from '#lib/components/tournaments/TeamLogo.svelte';
@@ -109,6 +110,25 @@
 		if (f.id === x.id) f = blank({ type: f.type, side: f.side });
 	}
 
+	// --- complete the game: the final score is checked and confirmed in a dialog, then the game is closed
+	const complete = $derived(m?.status === 'complete');
+	let doneOpen = $state(false);
+	let rf = $state({ home: '', away: '', ot: false, ph: '', pa: '' });
+	function openComplete() {
+		rf = { home: String(m?.score_home ?? 0), away: String(m?.score_away ?? 0), ot: m?.went_to_overtime ?? false, ph: '', pa: '' };
+		run.clear();
+		doneOpen = true;
+	}
+	const level = $derived(rf.home !== '' && rf.away !== '' && Number(rf.home) === Number(rf.away));
+	async function confirmComplete(e: SubmitEvent) {
+		e.preventDefault();
+		const body = { score_home: Number(rf.home), score_away: Number(rf.away), went_to_overtime: rf.ot, penalty_home: level ? numOrNull(rf.ph) : null, penalty_away: level ? numOrNull(rf.pa) : null };
+		if (await run.post(`/tournaments/matches/${data.matchId}/result`, body, undefined, { notice: t('tn.game.completed_done') })) {
+			doneOpen = false;
+			await goto(`${TBASE}/${tn.id}/scores`);
+		}
+	}
+
 	/** What an event says, in one line. */
 	function summary(e: MatchEvent): string {
 		const person = e.player_number !== null && e.player_id ? `#${e.player_number} ${e.player}` : e.player;
@@ -149,10 +169,15 @@
 				</div>
 			</div>
 			<p class="text-center text-xs text-muted">{t('tn.game.help')}</p>
+			{#if complete}
+				<p class="mx-auto flex items-center gap-2 rounded-lg bg-ok-bg px-4 py-2 text-sm font-semibold text-ok-text" role="status"><Check size={16} aria-hidden="true" /> {t('tn.game.is_complete')}</p>
+			{:else if canOperate}
+				<div class="flex justify-center"><button class="btn btn-primary gap-2" type="button" onclick={openComplete}><Flag size={16} aria-hidden="true" /> {t('tn.game.complete')}</button></div>
+			{/if}
 		</section>
 
 		<div class="grid items-start gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
-			{#if canOperate}
+			{#if canOperate && !complete}
 				<form class="card card-body gap-4" onsubmit={save}>
 					<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ListOrdered size={16} class="shrink-0" aria-hidden="true" /> {f.id ? t('tn.scores.ev_edit') : t('tn.scores.ev_add')}</h2>
 					{#if run.error}<Alert kind="error">{run.error}</Alert>{/if}
@@ -261,13 +286,13 @@
 				</form>
 			{/if}
 
-			<section class="card card-body gap-3 {canOperate ? '' : 'lg:col-span-2'}">
+			<section class="card card-body gap-3 {canOperate && !complete ? '' : 'lg:col-span-2'}">
 				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ListOrdered size={16} class="shrink-0" aria-hidden="true" /> {t('tn.game.timeline')}</h2>
 				{#if game.events.length}
 					<div class="overflow-x-auto rounded-lg border border-line">
 						<table class="table table-sm w-full">
 							<thead>
-								<tr><th class="w-16">{t('tn.game.time')}</th><th>{t('tn.scores.ev_side')}</th><th>{t('tn.scores.ev_type')}</th><th>{t('tn.game.details')}</th>{#if canOperate}<th class="w-24"></th>{/if}</tr>
+								<tr><th class="w-16">{t('tn.game.time')}</th><th>{t('tn.scores.ev_side')}</th><th>{t('tn.scores.ev_type')}</th><th>{t('tn.game.details')}</th>{#if canOperate && !complete}<th class="w-24"></th>{/if}</tr>
 							</thead>
 							<tbody>
 								{#each game.events as e (e.id)}
@@ -276,7 +301,7 @@
 										<td class="text-sm whitespace-nowrap">{teamName(e.side) || '—'}</td>
 										<td class="text-sm font-semibold whitespace-nowrap">{typeLabel(e.type)}</td>
 										<td class="text-sm">{summary(e)}</td>
-										{#if canOperate}
+										{#if canOperate && !complete}
 											<td>
 												<div class="flex items-center justify-end gap-1">
 													<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.scores.ev_edit')} title={t('tn.scores.ev_edit')} onclick={() => edit(e)}><Pencil size={13} /></button>
@@ -296,3 +321,32 @@
 		</div>
 	{/if}
 </div>
+
+<Modal bind:open={doneOpen} title={t('tn.game.complete_title')}>
+	<form class="grid gap-4" onsubmit={confirmComplete}>
+		{#if run.error}<Alert kind="error">{run.error}</Alert>{/if}
+		<p class="text-sm text-muted">{t('tn.game.complete_help')}</p>
+		<div class="grid grid-cols-[1fr_auto_1fr] items-end gap-3">
+			<label class="form-control"><span class="label-text mb-1 truncate text-sm font-medium">{m?.home_display}</span><input class="input input-bordered w-full text-center font-mono text-2xl font-bold" type="number" min="0" required bind:value={rf.home} /></label>
+			<span class="pb-2 font-mono text-2xl font-bold text-muted">:</span>
+			<label class="form-control"><span class="label-text mb-1 truncate text-sm font-medium">{m?.away_display}</span><input class="input input-bordered w-full text-center font-mono text-2xl font-bold" type="number" min="0" required bind:value={rf.away} /></label>
+		</div>
+		{#if run.fields.score_away || run.fields.score_home}<span class="text-xs text-error">{run.fields.score_away ?? run.fields.score_home}</span>{/if}
+		<label class="flex cursor-pointer items-center gap-3 rounded-lg border border-line p-3"><input type="checkbox" class="checkbox" bind:checked={rf.ot} /><span class="text-sm">{t('tn.scores.overtime')}</span></label>
+		{#if level}
+			<div class="grid gap-2 rounded-lg border border-line p-3">
+				<p class="text-sm font-semibold text-ink">{t('tn.scores.shots_title')}</p>
+				<p class="text-xs text-muted">{t('tn.game.complete_shots_help')}</p>
+				<div class="grid grid-cols-2 gap-3">
+					<label class="form-control"><span class="label-text mb-1">{t('tn.scores.pen_home')}</span><input class="input input-bordered w-full" type="number" min="0" bind:value={rf.ph} /></label>
+					<label class="form-control"><span class="label-text mb-1">{t('tn.scores.pen_away')}</span><input class="input input-bordered w-full" type="number" min="0" bind:value={rf.pa} /></label>
+				</div>
+				{#each ['penalty_home', 'penalty_away'] as k (k)}{#if run.fields[k]}<span class="text-xs text-error">{run.fields[k]}</span>{/if}{/each}
+			</div>
+		{/if}
+		<div class="modal-action mt-2 flex justify-end gap-2">
+			<button class="btn btn-outline" type="button" onclick={() => (doneOpen = false)}>{t('common.cancel')}</button>
+			<button class="btn btn-primary gap-2" type="submit" disabled={run.busy}><Check size={16} aria-hidden="true" /> {t('tn.game.complete_confirm')}</button>
+		</div>
+	</form>
+</Modal>
