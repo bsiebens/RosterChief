@@ -289,7 +289,7 @@
 		</div>
 
 		{#if view === 'board'}
-			{#if data.board}<ScheduleBoard board={data.board} {canOperate} busy={run.busy} onmove={drop} onedit={openMove} />{/if}
+			{#if data.board}<ScheduleBoard board={data.board} blocks={sched.blocks} {canOperate} busy={run.busy} onmove={drop} onedit={openMove} />{/if}
 			{#if canOperate}<p class="text-xs text-muted">{t('tn.sched.drag_help')}</p>{/if}
 		{:else}
 			{#each sched.stages as st (st.stage.id)}
