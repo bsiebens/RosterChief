@@ -6,6 +6,7 @@
 	import NoticeAlert from '#lib/components/NoticeAlert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
+	import SeedDialog from '#lib/components/tournaments/SeedDialog.svelte';
 	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -18,6 +19,8 @@
 	const canOperate = $derived(tn.can_operate);
 	const base = $derived(`/tournaments/${tn.id}`);
 	const run = new Runner();
+	let seedOpen = $state(false);
+	let seedStage = $state<{ id: string; name: string } | null>(null);
 	const dates = $derived(setup?.dates?.length ? setup.dates : tn.dates);
 	/** The tournament's own opening hours for a date: what a new field is available by default. */
 	const hoursOf = (d: string) => {
@@ -482,7 +485,7 @@
 										</button>
 										{#if canGenerate}
 											{#if isKnockout(s) || s.needs_seed_choice}
-												<a class="btn btn-primary btn-xs w-full" href="{TBASE}/{tn.id}/stages/{s.id}/seed">{t('tn.setup.seed')}</a>
+												<button class="btn btn-primary btn-xs w-full" type="button" onclick={() => { seedStage = s; seedOpen = true; }}>{t('tn.setup.seed')}</button>
 											{:else}
 												<button class="btn btn-primary btn-xs w-full" type="button" disabled={run.busy} onclick={() => generate(s)}>{s.match_count ? t('tn.setup.regenerate') : t('tn.setup.generate')}</button>
 											{/if}
@@ -683,6 +686,8 @@
 		</section>
 	{/if}
 </div>
+
+<SeedDialog bind:open={seedOpen} tournamentId={tn.id} stage={seedStage} onDone={(n) => { run.notice = t('tn.setup.generated', { n }); if (seedStage) selectStage(seedStage.id); }} />
 
 <Modal bind:open={fieldOpen} title={editField ? t('tn.setup.edit_field') : t('tn.setup.add_field')} wide>
 	<form class="grid gap-3" onsubmit={saveField}>

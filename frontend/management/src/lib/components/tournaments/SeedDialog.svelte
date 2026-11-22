@@ -1,31 +1,40 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
-	import { goto } from '$app/navigation';
-	import { ArrowLeft, Swords } from '@lucide/svelte';
+	import { Swords } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
-	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
-	import { usePageHeader } from '#lib/header.svelte.ts';
+	import Modal from '#lib/components/Modal.svelte';
+	import { api } from '#lib/management-api.ts';
 	import { t } from '#lib/i18n.svelte.ts';
-	import { pageTitle } from '#lib/title.svelte.ts';
-	import { Runner, TBASE } from '#lib/tournaments.svelte.ts';
+	import { Runner } from '#lib/tournaments.svelte.ts';
+	import type { TTeamRef } from '#lib/tournaments.svelte.ts';
 
-	let { data } = $props();
-	const tn = $derived(data.tournament);
-	const seed = $derived(data.seed);
-	const run = new Runner();
-
+	type SeedData = { already_generated: boolean; placement: boolean; slot_count: number; slots: { type: 'team'; team_id: string }[]; teams: TTeamRef[]; groups: { id: string; name: string; stage_id: string }[] };
 	type Slot = { type: 'team' | 'group' | 'skip'; team_id: string; group_id: string; rank: string };
-	const initial = (): Slot[] => {
-		const s = data.seed;
-		if (!s) return [];
-		return Array.from({ length: s.slot_count }, (_, i) => ({ type: 'team' as const, team_id: s.slots[i]?.team_id ?? '', group_id: '', rank: '1' }));
-	};
-	// svelte-ignore state_referenced_locally
-	let slots = $state<Slot[]>(initial());
+
+	/** Seeds and generates a knockout stage: every slot gets a team, the team that finishes at a rank of a group, or is left out. */
+	let { open = $bindable(false), tournamentId, stage, onDone }: { open: boolean; tournamentId: string; stage: { id: string; name: string } | null; onDone: (generated: number) => void } = $props();
+
+	const run = new Runner();
+	let seed = $state<SeedData | null>(null);
+	let loadError = $state(false);
+	let slots = $state<Slot[]>([]);
 	let withPlacement = $state(false);
+
 	$effect(() => {
-		data.seed;
-		untrack(() => (slots = initial()));
+		if (!open || !stage) return;
+		const id = stage.id;
+		seed = null;
+		loadError = false;
+		run.clear();
+		withPlacement = false;
+		api<SeedData>('GET', `/tournaments/${tournamentId}/stages/${id}/seed`).then((res) => {
+			if (!res.ok || !res.data) {
+				loadError = true;
+				return;
+			}
+			const s = res.data;
+			seed = s;
+			slots = Array.from({ length: s.slot_count }, (_, i) => ({ type: 'team' as const, team_id: s.slots[i]?.team_id ?? '', group_id: '', rank: '1' }));
+		});
 	});
 
 	const used = $derived(new Set(slots.filter((s) => s.type === 'team' && s.team_id).map((s) => s.team_id)));
@@ -35,27 +44,26 @@
 	});
 	async function submit(e: SubmitEvent) {
 		e.preventDefault();
+		if (!stage) return;
 		let n = 0;
-		if (await run.post<{ generated_count: number }>(`/tournaments/${tn.id}/stages/${data.stageId}/seed`, body(), (d) => void (n = d?.generated_count ?? 0), { reload: false })) {
-			await goto(`${TBASE}/${tn.id}/setup?generated=${n}`);
+		if (await run.post<{ generated_count: number }>(`/tournaments/${tournamentId}/stages/${stage.id}/seed`, body(), (d) => void (n = d?.generated_count ?? 0))) {
+			open = false;
+			onDone(n);
 		}
 	}
 	/** Fill the slots in the order of the entered teams (a quick start). */
-	const fillInOrder = () => seed && (slots = slots.map((s, i) => ({ ...s, type: 'team', team_id: seed.teams[i]?.id ?? '' })));
-
-	usePageHeader(() => ({ badge: statusPill, title: tn.name, context: t('tn.seed.title') }));
+	const fillInOrder = () => seed && (slots = slots.map((s, i) => ({ ...s, type: 'team', team_id: seed!.teams[i]?.id ?? '' })));
 </script>
 
-<svelte:head><title>{pageTitle(t('tn.seed.title'))}</title></svelte:head>
-
-<div class="grid max-w-3xl gap-4">
-	<a class="link inline-flex w-fit items-center gap-1 text-sm" href="{TBASE}/{tn.id}/setup"><ArrowLeft size={14} /> {t('tn.seed.back')}</a>
-	{#if !seed}
+<Modal bind:open title={t('tn.seed.title')} wide>
+	{#if loadError}
 		<Alert kind="error">{t('common.error.generic')}</Alert>
+	{:else if !seed}
+		<p class="text-sm text-muted">{t('common.loading')}</p>
 	{:else}
-		{#if seed.already_generated}<Alert kind="warning">{t('tn.seed.already')}</Alert>{/if}
-		<form class="card card-body card-hl gap-3" onsubmit={submit}>
-			<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Swords size={16} class="shrink-0" aria-hidden="true" /> {t('tn.seed.title')}</h2>
+		<form class="grid gap-3" onsubmit={submit}>
+			<p class="flex items-center gap-2 text-sm font-semibold text-ink"><Swords size={16} class="shrink-0" aria-hidden="true" /> {stage?.name}</p>
+			{#if seed.already_generated}<Alert kind="warning">{t('tn.seed.already')}</Alert>{/if}
 			<p class="text-xs text-muted">{t('tn.seed.help')}</p>
 			{#if run.error}<Alert kind="error">{run.error}</Alert>{/if}
 			<div><button class="btn btn-outline btn-sm" type="button" onclick={fillInOrder}>{t('tn.seed.fill')}</button></div>
@@ -86,12 +94,15 @@
 					</li>
 				{/each}
 			</ol>
-			{#if seed?.placement}
+			{#if seed.placement}
 				<p class="text-sm text-muted">{t('tn.seed.placement_on')}</p>
 			{:else}
 				<label class="flex items-center gap-2 text-sm"><input type="checkbox" class="checkbox checkbox-sm" bind:checked={withPlacement} /> {t('tn.setup.placement')}</label>
 			{/if}
-			<div class="flex justify-end"><button class="btn btn-primary" type="submit" disabled={run.busy}>{t('tn.seed.generate')}</button></div>
+			<div class="modal-action mt-2 flex justify-end gap-2">
+				<button class="btn btn-outline" type="button" onclick={() => (open = false)}>{t('common.cancel')}</button>
+				<button class="btn btn-primary" type="submit" disabled={run.busy}>{t('tn.seed.generate')}</button>
+			</div>
 		</form>
 	{/if}
-</div>
+</Modal>
