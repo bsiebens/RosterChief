@@ -159,10 +159,10 @@
 	const level = $derived(rf.home !== '' && rf.away !== '' && !nextPeriod && gameHome === gameAway);
 	async function confirmComplete(e: SubmitEvent) {
 		e.preventDefault();
-		const body = { score_home: Number(rf.home), score_away: Number(rf.away), went_to_overtime: rf.ot, penalty_home: level ? numOrNull(rf.ph) : null, penalty_away: level ? numOrNull(rf.pa) : null };
+		const body = { score_home: Number(rf.home), score_away: Number(rf.away), went_to_overtime: nextPeriod ? false : rf.ot, penalty_home: level ? numOrNull(rf.ph) : null, penalty_away: level ? numOrNull(rf.pa) : null };
 		const nextId = nextPeriod?.id;
 		const goalies = { home_goalie_id: currentGoalie('home') || null, away_goalie_id: currentGoalie('away') || null };
-		if (await run.post(`/tournaments/matches/${data.matchId}/result`, body, undefined, { notice: nextId ? t('tn.game.period_closed', { n: periodNo }) : t('tn.game.completed_done') })) {
+		if (await run.post(`/tournaments/matches/${data.matchId}/result`, body, undefined, { notice: nextId ? undefined : t('tn.game.completed_done'), reload: !nextId })) {
 			doneOpen = false;
 			if (nextId) {
 				await api('POST', `/tournaments/matches/${nextId}/start`, { body: goalies }); // the next period starts by itself, with the goalies that were in goal
@@ -218,7 +218,7 @@
 					{m.home_display}
 					{#if m.home_team}<TeamLogo name={m.home_team.name} logoUrl={m.home_team.logo_url} color={m.home_team.primary_color} size="size-9" />{/if}
 				</div>
-				<div class="rounded-lg bg-ink px-4 py-1.5 font-mono text-2xl font-bold text-white">{m.score_home ?? '–'} : {m.score_away ?? '–'}</div>
+				<div class="rounded-lg bg-ink px-4 py-1.5 font-mono text-2xl font-bold text-white">{isTie ? periods.reduce((n, p) => n + (p.score_home ?? 0), 0) : (m.score_home ?? '–')} : {isTie ? periods.reduce((n, p) => n + (p.score_away ?? 0), 0) : (m.score_away ?? '–')}</div>
 				<div class="flex items-center gap-2 font-display text-lg font-extrabold text-ink">
 					{#if m.away_team}<TeamLogo name={m.away_team.name} logoUrl={m.away_team.logo_url} color={m.away_team.primary_color} size="size-9" />{/if}
 					{m.away_display}
@@ -429,7 +429,7 @@
 			<label class="form-control"><span class="label-text mb-1 truncate text-sm font-medium">{m?.away_display}</span><input class="input input-bordered w-full text-center font-mono text-2xl font-bold" type="number" min="0" required bind:value={rf.away} /></label>
 		</div>
 		{#if run.fields.score_away || run.fields.score_home}<span class="text-xs text-error">{run.fields.score_away ?? run.fields.score_home}</span>{/if}
-		<label class="flex cursor-pointer items-center gap-3 rounded-lg border border-line p-3"><input type="checkbox" class="checkbox" bind:checked={rf.ot} /><span class="text-sm">{t('tn.scores.overtime')}</span></label>
+		{#if !nextPeriod}<label class="flex cursor-pointer items-center gap-3 rounded-lg border border-line p-3"><input type="checkbox" class="checkbox" bind:checked={rf.ot} /><span class="text-sm">{t('tn.scores.overtime')}</span></label>{/if}
 		{#if level}
 			<div class="grid gap-2 rounded-lg border border-line p-3">
 				<p class="text-sm font-semibold text-ink">{t('tn.scores.shots_title')}</p>
