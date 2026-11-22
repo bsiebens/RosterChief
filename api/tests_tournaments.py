@@ -524,6 +524,13 @@ class TournamentApiTests(TestCase):
         r = self.as_("operate", "put", f"/{t.pk}/lunch", {"settings": {**body["settings"], "location": " Club bar "}, "days": []})
         self.assertEqual(r.json()["settings"]["location"], "Club bar", r.content)
 
+    def test_clear_all_shifts(self):
+        t = self.make()
+        gen = {"title": "Clock", "location_label": "Box", "starts_at": "2026-09-19T09:00:00Z", "ends_at": "2026-09-19T12:00:00Z", "shift_minutes": 60, "needed_quantity": 2}
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/tasks/generate", gen).json()["created_count"], 3)
+        self.assertEqual(self.as_("operate", "post", f"/{t.pk}/tasks/clear", {}).json(), {"cleared_count": 3})
+        self.assertEqual(self.as_("operate", "get", f"/{t.pk}/tasks").json()["results"], [])
+
     def test_delete_only_a_draft_tournament(self):
         body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}
         tid = self.as_("manage", "post", "", body).json()["id"]

@@ -83,6 +83,15 @@ def generate_tasks(request, tournament_id: uuid.UUID, payload: TaskGenerateIn):
     return 201, {"created_count": len(tasks), "last_shift_extended": extended, "results": [task_out(_task(t, task.pk)) for task in tasks]}
 
 
+@router.post("/{tournament_id}/tasks/clear", summary="Remove every shift of the tournament, with the volunteers signed up for them", operation_id="tournaments_tasks_clear")
+def clear_tasks(request, tournament_id: uuid.UUID):
+    c.gate_operate(request)
+    t = c.get_tournament(tournament_id)
+    removed = t.tasks.count()
+    t.tasks.all().delete()  # the claims go with their shift
+    return {"cleared_count": removed}
+
+
 @router.post("/{tournament_id}/tasks", summary="Add one shift", operation_id="tournaments_task_create", response={201: dict})
 def create_task(request, tournament_id: uuid.UUID, payload: TaskIn):
     c.gate_operate(request)
