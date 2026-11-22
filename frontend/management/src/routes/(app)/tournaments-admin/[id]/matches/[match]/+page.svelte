@@ -231,10 +231,10 @@
 				<!-- one game in several periods: each period has its own timeline; the switch moves between them, the total is the whole game -->
 				<div class="flex flex-wrap items-center justify-center gap-2" role="group" aria-label={t('tn.scores.legs')}>
 					{#each game.legs as pl (pl.id)}
-						<a href="{TBASE}/{tn.id}/matches/{pl.id}" aria-current={pl.id === m.id ? 'page' : undefined} class="rounded-lg border-2 px-4 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {pl.id === m.id ? 'border-club bg-club/10 text-ink' : 'border-line bg-white text-muted hover:text-ink'}">
+						<a href="{TBASE}/{tn.id}/matches/{pl.id}" aria-current={pl.id === m.id ? 'page' : undefined} class="inline-flex items-center gap-1.5 rounded-lg border-2 px-4 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {pl.id === m.id ? 'border-club bg-club/10 text-ink' : 'border-line bg-white text-muted hover:text-ink'}">
 							{t('tn.leg', { n: pl.leg })}
-							<span class="ml-1 font-mono font-normal normal-case">{pl.score_home ?? '–'}:{pl.score_away ?? '–'}</span>
-							{#if pl.status === 'in_progress'}<span class="ml-1 inline-block size-2 animate-pulse rounded-full bg-danger align-middle"></span>{/if}
+							<span class="font-mono font-normal normal-case">{pl.score_home ?? '–'}:{pl.score_away ?? '–'}</span>
+							{#if pl.status === 'in_progress'}<span class="inline-block size-2 shrink-0 animate-pulse rounded-full bg-danger"></span>{/if}
 						</a>
 					{/each}
 				</div>
