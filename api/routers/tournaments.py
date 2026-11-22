@@ -65,8 +65,9 @@ def _day_rows(days: list[DayIn]) -> list[dict]:
 
 
 def _save_days(t: Tournament, rows: list[dict]):
+    lunch = {d.date: (d.lunch_start, d.lunch_end) for d in t.days.all()}  # a day that stays keeps its lunch window
     t.days.all().delete()
-    TournamentDay.objects.bulk_create([TournamentDay(tournament=t, **r) for r in rows])
+    TournamentDay.objects.bulk_create([TournamentDay(tournament=t, **r, **dict(zip(("lunch_start", "lunch_end"), lunch.get(r["date"], (None, None)), strict=True))) for r in rows])
 
 
 def _season_for(start, end):

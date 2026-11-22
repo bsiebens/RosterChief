@@ -88,7 +88,12 @@ def stages_doc(tournament, *, with_flags=False) -> list[dict]:
 
 
 def block_out(block: ScheduleBlock) -> dict:
-    return {"id": block.pk, "title": block.title, "starts_at": block.starts_at, "ends_at": block.ends_at, "field": c.ref(block.field), "teams": [c.team_ref(t) for t in block.teams.all()]}
+    """``starts_at``/``ends_at`` are the whole reserved window (for a lunch block that includes the padding); ``lunch_start``/``lunch_end`` are
+    the real sitting, null for manual blocks."""
+    return {
+        "id": block.pk, "title": block.title, "kind": block.kind, "starts_at": block.starts_at, "ends_at": block.ends_at, "lunch_start": block.lunch_start, "lunch_end": block.lunch_end,
+        "field": c.ref(block.field), "teams": [c.team_ref(t) for t in block.teams.all()],
+    }  # fmt: skip
 
 
 def _blocks(tournament):
