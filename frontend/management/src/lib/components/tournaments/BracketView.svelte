@@ -129,24 +129,35 @@
 	}
 	type Link = { d: string; loser: boolean; from: string; to: string; sameLane: boolean };
 	const links = $derived.by(() => {
-		const out: Link[] = [];
+		type Raw = { from: Node; n: Node; side: 'home_source' | 'away_source'; winner: boolean; fromId: string };
+		const raw: Raw[] = [];
 		for (const n of nodes.values()) {
 			for (const side of ['home_source', 'away_source'] as const) {
 				const s = n.m[side];
 				const from = s?.type === 'match' ? nodes.get(s.match_id) : undefined;
-				if (!s || s.type !== 'match' || !from) continue;
-				const x1 = from.col * (W + GAP) + W;
-				const x2 = n.col * (W + GAP);
-				const y1 = from.y + H / 2;
-				const y2 = n.y + CAP + ROW / 2 + (side === 'home_source' ? 0 : ROW);
-				// the vertical part runs in the gap right after the source column; the rest is straight, so nothing is hidden behind a box
-				// Winner lines all bend in the middle of the gap, so they look exactly alike; the (hover-only) loser lines get their own tracks beside them
-				const track = s.is_winner ? 0 : 8 + (Math.round(from.y / STEP) % 4) * 6;
-				const bend = x1 + GAP / 2 + track;
-				out.push({ d: `M${x1} ${y1} H${bend} V${y2} H${x2 - 1}`, loser: !s.is_winner, from: s.match_id, to: n.m.id, sameLane: from.lane === n.lane });
+				if (s && s.type === 'match' && from) raw.push({ from, n, side, winner: s.is_winner, fromId: s.match_id });
 			}
 		}
-		return out;
+		// Every "loser goes to" line gets a vertical track of its own, left of where the winner lines bend (the middle of the gap), so none of
+		// them shares a stretch with another line and each keeps a straight run into its arrowhead.
+		const losers = raw.filter((r) => !r.winner).sort((a, b) => a.from.col - b.from.col || a.from.y - b.from.y || a.n.y - b.n.y);
+		const perColumn = new Map<number, number>();
+		for (const r of losers) perColumn.set(r.from.col, (perColumn.get(r.from.col) ?? 0) + 1);
+		const seen = new Map<number, number>();
+		const track = new Map<Raw, number>();
+		for (const r of losers) {
+			const i = seen.get(r.from.col) ?? 0;
+			seen.set(r.from.col, i + 1);
+			track.set(r, 6 + i * Math.min(5, (GAP / 2 - 12) / perColumn.get(r.from.col)!));
+		}
+		return raw.map((r): Link => {
+			const x1 = r.from.col * (W + GAP) + W;
+			const x2 = r.n.col * (W + GAP);
+			const y1 = r.from.y + H / 2;
+			const y2 = r.n.y + CAP + ROW / 2 + (r.side === 'home_source' ? 0 : ROW);
+			const bend = r.winner ? x1 + GAP / 2 : x1 + track.get(r)!;
+			return { d: `M${x1} ${y1} H${bend} V${y2} H${x2 - 1}`, loser: !r.winner, from: r.fromId, to: r.n.m.id, sameLane: r.from.lane === r.n.lane };
+		});
 	});
 
 	const score = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(v));
