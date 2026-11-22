@@ -156,6 +156,14 @@ class Tournament(UUIDModel):
     #: module constant.
     #: The standing gap between two matches on a field, which break rules then replace or add to.
     default_gap_minutes = models.PositiveSmallIntegerField(_("gap between matches (minutes)"), default=5, help_text=_("The time left between two matches on a field. A break rule can replace it or add to it."))
+    class ClockDirection(models.TextChoices):
+        UP = "up", _("counting up")
+        DOWN = "down", _("counting down")
+
+    clock_direction = models.CharField(
+        _("game clock"), max_length=4, choices=ClockDirection.choices, default=ClockDirection.UP,
+        help_text=_("Whether the game clock counts up from 0:00 or down to 0:00. Decides what time staff enter for an event on the game timeline."),
+    )  # fmt: skip
     default_match_duration_minutes = models.PositiveSmallIntegerField(_("default match duration (minutes)"), default=45, help_text=_("How long a single match is assumed to run. Pre-fills the “Generate schedule” form -- still adjustable per run."))
     #: Set by ``tournaments.services.scheduling.reschedule_match`` on every
     #: manual hand-move (the schedule table's inline form, or a board-view

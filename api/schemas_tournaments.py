@@ -47,6 +47,7 @@ class TournamentIn(Schema):
     lunch_billed_with_fee: bool = True
     default_match_duration_minutes: int = Field(45, ge=1, le=1440)
     default_gap_minutes: int = Field(5, ge=0, le=240)
+    clock_direction: Literal["up", "down"] = "up"
 
 
 class TournamentPatch(Schema):
@@ -67,6 +68,7 @@ class TournamentPatch(Schema):
     lunch_billed_with_fee: bool | None = None
     default_match_duration_minutes: int | None = Field(None, ge=1, le=1440)
     default_gap_minutes: int | None = Field(None, ge=0, le=240)
+    clock_direction: Literal["up", "down"] | None = None
 
 
 class RejectIn(Schema):

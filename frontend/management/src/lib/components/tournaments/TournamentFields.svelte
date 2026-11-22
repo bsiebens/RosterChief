@@ -3,6 +3,7 @@
 	import DaysEditor from '#lib/components/tournaments/DaysEditor.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
+	import { Hourglass, Timer } from '@lucide/svelte';
 	import { STATUSES } from '#lib/tournaments.svelte.ts';
 	import type { TournamentForm } from '#lib/tournaments-form.ts';
 
@@ -52,6 +53,23 @@
 		<Field label={t('tn.f.match_duration')} type="number" min="1" bind:value={v.default_match_duration_minutes} error={errors.default_match_duration_minutes} help={t('tn.f.match_duration_help')} />
 		<Field label={t('tn.f.gap')} type="number" min="0" bind:value={v.default_gap_minutes} error={errors.default_gap_minutes} help={t('tn.f.gap_help')} />
 	</div>
+	<fieldset class="grid gap-2">
+		<legend class="label-text text-sm font-medium">{t('tn.f.clock')}</legend>
+		<div class="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label={t('tn.f.clock')}>
+			{#each [{ key: 'up', icon: Timer, from: '0:00', to: '20:00' }, { key: 'down', icon: Hourglass, from: '20:00', to: '0:00' }] as opt (opt.key)}
+				{@const Icon = opt.icon}
+				<button type="button" role="radio" aria-checked={v.clock_direction === opt.key} onclick={() => (v.clock_direction = opt.key as 'up' | 'down')} class="flex cursor-pointer items-start gap-3 rounded-xl border-2 p-4 text-left transition-colors {v.clock_direction === opt.key ? 'border-club bg-club/10' : 'border-line bg-white hover:border-ink/40'}">
+					<span class="flex size-11 shrink-0 items-center justify-center rounded-lg {v.clock_direction === opt.key ? 'bg-club text-club-content' : 'bg-subhead text-muted'}"><Icon size={22} aria-hidden="true" /></span>
+					<span class="grid min-w-0 gap-1">
+						<span class="font-display text-sm font-extrabold tracking-[.06em] text-ink uppercase">{t(`tn.f.clock_${opt.key}`)}</span>
+						<span class="font-mono text-xs font-semibold text-ink/70">{opt.from} → {opt.to}</span>
+						<span class="text-xs text-muted">{t(`tn.f.clock_${opt.key}_help`)}</span>
+					</span>
+				</button>
+			{/each}
+		</div>
+		{#if errors.clock_direction}<span class="text-xs text-error">{errors.clock_direction}</span>{/if}
+	</fieldset>
 {:else}
 	<div class="grid gap-3 sm:grid-cols-2">
 		<Field label={t('tn.f.entry_fee')} inputmode="decimal" bind:value={v.entry_fee_amount} error={errors.entry_fee_amount} />

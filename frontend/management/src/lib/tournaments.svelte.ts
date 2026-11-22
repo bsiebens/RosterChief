@@ -39,6 +39,7 @@ export type TournamentDetail = TournamentItem & {
 	lunch_billed_with_fee: boolean;
 	default_match_duration_minutes: number | null;
 	default_gap_minutes: number;
+	clock_direction: 'up' | 'down';
 	schedule_needs_regeneration: boolean;
 	dates: string[];
 	location: string | null;

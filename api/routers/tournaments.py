@@ -24,7 +24,7 @@ router = Router(auth=AUTHENTICATORS)
 
 SETTINGS = (
     "name", "status", "registration_open", "max_teams", "earliest_birth_year", "latest_birth_year", "contact_email", "description", "deposit_amount", "entry_fee_amount",
-    "lunch_mode", "lunch_price_per_day", "lunch_billed_with_fee", "default_match_duration_minutes", "default_gap_minutes",
+    "lunch_mode", "lunch_price_per_day", "lunch_billed_with_fee", "default_match_duration_minutes", "default_gap_minutes", "clock_direction",
 )  # fmt: skip
 
 
@@ -46,7 +46,8 @@ def tournament_detail(t: Tournament, user) -> dict:
         **tournament_item(t),
         "contact_email": t.contact_email, "description": t.description, "earliest_birth_year": t.earliest_birth_year, "latest_birth_year": t.latest_birth_year, "home_team": c.ref(t.home_team), "event_id": t.event_id,
         "deposit_amount": _money(t.deposit_amount), "entry_fee_amount": _money(t.entry_fee_amount), "lunch_mode": t.lunch_mode, "lunch_price_per_day": _money(t.lunch_price_per_day),
-        "lunch_billed_with_fee": t.lunch_billed_with_fee, "default_match_duration_minutes": t.default_match_duration_minutes, "default_gap_minutes": t.default_gap_minutes, "schedule_needs_regeneration": t.schedule_needs_regeneration,
+        "lunch_billed_with_fee": t.lunch_billed_with_fee, "default_match_duration_minutes": t.default_match_duration_minutes, "default_gap_minutes": t.default_gap_minutes,
+        "clock_direction": t.clock_direction, "schedule_needs_regeneration": t.schedule_needs_regeneration,
         "dates": t.date_range(), "days": c.days_out(t), "is_full": t.is_full, "location": c.ref(location),
         "pending_registration_count": t.registrations.filter(status=TournamentRegistration.Status.PENDING).count(),
         "teams_in_count": t.teams.filter(withdrawn_at__isnull=True).count(),

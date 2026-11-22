@@ -572,6 +572,13 @@ class TournamentApiTests(TestCase):
             r = self.as_("manage", "get", f"/{t.pk}/tasks/pdf")
             self.assertEqual((r.status_code, r["Content-Type"]), (200, "application/pdf"))
 
+    def test_clock_direction_setting(self):
+        t = self.make()
+        self.assertEqual(self.as_("manage", "get", f"/{t.pk}").json()["clock_direction"], "up")
+        r = self.as_("manage", "patch", f"/{t.pk}", {"clock_direction": "down"})
+        self.assertEqual((r.status_code, r.json()["clock_direction"]), (200, "down"), r.content)
+        self.assertEqual(self.as_("manage", "patch", f"/{t.pk}", {"clock_direction": "sideways"}).status_code, 422)
+
     def test_delete_only_a_draft_tournament(self):
         body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}
         tid = self.as_("manage", "post", "", body).json()["id"]

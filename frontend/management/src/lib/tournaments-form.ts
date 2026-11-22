@@ -19,6 +19,7 @@ export type TournamentForm = {
 	lunch_billed_with_fee: boolean;
 	default_match_duration_minutes: string;
 	default_gap_minutes: string;
+	clock_direction: 'up' | 'down';
 };
 
 const s = (v: unknown) => (v === null || v === undefined ? '' : String(v));
@@ -41,7 +42,8 @@ export function formOf(d?: Partial<TournamentDetail>): TournamentForm {
 		lunch_price_per_day: s(d?.lunch_price_per_day),
 		lunch_billed_with_fee: d?.lunch_billed_with_fee ?? false,
 		default_match_duration_minutes: s(d?.default_match_duration_minutes),
-		default_gap_minutes: d?.default_gap_minutes === undefined ? '5' : String(d.default_gap_minutes)
+		default_gap_minutes: d?.default_gap_minutes === undefined ? '5' : String(d.default_gap_minutes),
+		clock_direction: d?.clock_direction ?? 'up'
 	};
 }
 
@@ -63,6 +65,7 @@ export function payload(v: TournamentForm, opts: { homeTeam?: boolean } = { home
 		lunch_price_per_day: strOrNull(v.lunch_price_per_day.trim()),
 		lunch_billed_with_fee: v.lunch_billed_with_fee,
 		default_match_duration_minutes: numOrNull(v.default_match_duration_minutes),
-		default_gap_minutes: numOrNull(v.default_gap_minutes)
+		default_gap_minutes: numOrNull(v.default_gap_minutes),
+		clock_direction: v.clock_direction
 	};
 }

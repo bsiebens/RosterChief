@@ -167,12 +167,12 @@
 					</div>
 
 					<fieldset class="grid gap-1">
-						<legend class="label-text mb-1 text-sm font-medium">{t('tn.game.time')}</legend>
+						<legend class="label-text mb-1 text-sm font-medium">{tn.clock_direction === 'down' ? t('tn.game.time_left') : t('tn.game.time_played')}</legend>
 						<div class="flex items-center gap-2">
 							<input class="input input-bordered w-24 text-center font-mono" type="number" min="0" max="999" inputmode="numeric" placeholder="mm" aria-label={t('tn.game.minutes')} bind:value={f.minute} />
 							<span class="font-mono text-lg font-bold text-muted">:</span>
 							<input class="input input-bordered w-24 text-center font-mono" type="number" min="0" max="59" inputmode="numeric" placeholder="ss" aria-label={t('tn.game.seconds')} bind:value={f.second} />
-							<span class="text-xs text-muted">{t('tn.game.time_help')}</span>
+							<span class="text-xs text-muted">{tn.clock_direction === 'down' ? t('tn.game.time_help_down') : t('tn.game.time_help')}</span>
 						</div>
 						{#if run.fields.minute || run.fields.second}<span class="text-xs text-error">{run.fields.minute ?? run.fields.second}</span>{/if}
 					</fieldset>
