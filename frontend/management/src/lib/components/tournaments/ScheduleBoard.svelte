@@ -30,16 +30,16 @@
 	let dragging = $state<MatchDoc | null>(null);
 	let hover = $state<string>('');
 
-	/** The shared hour axis of a field: from the earliest opening to the latest closing of its days, on whole hours. */
+	/** The shared time axis of a field: from 5 minutes before the earliest opening to 5 minutes after the latest closing of its days. */
 	function axis(days: { start: string; end: string }[]) {
 		if (!days.length) return { start: 0, end: 0 };
-		const start = Math.floor(Math.min(...days.map((d) => toMin(clock(d.start)))) / 60) * 60;
-		const end = Math.ceil(Math.max(...days.map((d) => toMin(clock(d.end)))) / 60) * 60;
+		const start = Math.max(0, Math.min(...days.map((d) => toMin(clock(d.start)))) - 5);
+		const end = Math.min(24 * 60, Math.max(...days.map((d) => toMin(clock(d.end)))) + 5);
 		return { start, end };
 	}
 	const hours = (a: { start: number; end: number }) => {
 		const out: number[] = [];
-		for (let m = a.start; m <= a.end; m += 60) out.push(m);
+		for (let m = Math.ceil(a.start / 60) * 60; m <= a.end; m += 60) out.push(m);  // labelled on whole hours
 		return out;
 	};
 
