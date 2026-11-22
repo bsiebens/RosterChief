@@ -457,8 +457,9 @@
 													</div>
 													{#if lock && m.score_home !== null}
 														<span class="badge badge-sm badge-neutral font-mono">{m.score_home}–{m.score_away}</span>
-													{:else}
-														<span class="badge badge-sm badge-ghost">{m.status}</span>
+													{:else if m.status !== 'scheduled'}
+														<!-- "scheduled" is every unplayed match's normal state, and would read as the opposite of "Not scheduled" (no time yet). -->
+														<span class="badge badge-sm badge-ghost">{t(`tn.match_status.${m.status}`)}</span>
 													{/if}
 													{#if canOperate}
 														{@const tip = lock ? t('tn.setup.match_locked') : ''}
