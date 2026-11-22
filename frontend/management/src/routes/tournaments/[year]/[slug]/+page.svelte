@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { CalendarDays, Lock, Mail, MapPin, Utensils, Wallet } from '@lucide/svelte';
+	import { CalendarDays, Download, FileText, Lock, Mail, MapPin, Utensils, Wallet } from '@lucide/svelte';
 	import MatchList from '#lib/components/tournaments/MatchList.svelte';
 	import Standings from '#lib/components/tournaments/Standings.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -57,3 +57,30 @@
 {#if hasTables}
 	<Standings standings={tn.standings} brackets={tn.brackets} slug={tn.path} />
 {/if}
+
+{#if tn.rules_html || tn.rules_file_url}
+	<section class="card card-body gap-3" aria-labelledby="tp-rules">
+		<h2 id="tp-rules" class="flex items-center gap-2 font-display text-base font-bold text-ink"><FileText size={18} class="shrink-0" aria-hidden="true" /> {t('tp.rules')}</h2>
+		{#if tn.rules_html}<div class="prose max-w-none text-sm">{@html tn.rules_html}</div>{/if}
+		{#if tn.rules_file_url}
+			<a class="btn btn-outline w-full gap-2 sm:w-auto sm:self-start" href={tn.rules_file_url} target="_blank" rel="noopener"><Download size={16} aria-hidden="true" /> {t('tp.rules_download')}</a>
+		{/if}
+	</section>
+{/if}
+
+{#if tn.sponsors.length}
+	<section class="card card-body gap-3" aria-labelledby="tp-sponsors">
+		<h2 id="tp-sponsors" class="font-display text-base font-bold text-ink">{t('tp.sponsors')}</h2>
+		<ul class="flex flex-wrap items-center gap-x-8 gap-y-5">
+			{#each tn.sponsors as sp (sp.name)}
+				<li>
+					{#if sp.url}<a href={sp.url} target="_blank" rel="noopener sponsored" class="flex items-center" title={sp.name}>{@render mark(sp)}</a>{:else}{@render mark(sp)}{/if}
+				</li>
+			{/each}
+		</ul>
+	</section>
+{/if}
+
+{#snippet mark(sp: { name: string; logo_url: string | null })}
+	{#if sp.logo_url}<img src={sp.logo_url} alt={sp.name} class="h-14 max-w-40 object-contain" />{:else}<span class="font-display text-sm font-bold text-ink">{sp.name}</span>{/if}
+{/snippet}

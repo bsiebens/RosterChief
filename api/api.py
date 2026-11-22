@@ -61,6 +61,7 @@ from .routers import team_settings as team_settings_router
 from .routers import teams as teams_router
 from .routers import tournaments as tournaments_router
 from .routers import tournaments_competition as tournaments_competition_router
+from .routers import tournaments_content as tournaments_content_router
 from .routers import tournaments_logistics as tournaments_logistics_router
 from .routers import tournaments_lunch as tournaments_lunch_router
 from .routers import tournaments_roster as tournaments_roster_router
@@ -113,6 +114,7 @@ api.add_router("/shop/delivery", shop_delivery_router.router, tags=["shop"])
 api.add_router("/public/shop", shop_payments_router.public_router, tags=["public"])
 api.add_router("/tournaments", tournaments_router.router, tags=["tournaments"])
 api.add_router("/tournaments", tournaments_roster_router.router, tags=["tournaments"])
+api.add_router("/tournaments", tournaments_content_router.router, tags=["tournaments"])
 api.add_router("/tournaments", tournaments_competition_router.router, tags=["tournaments"])
 api.add_router("/tournaments", tournaments_setup_router.router, tags=["tournaments"])
 api.add_router("/tournaments", tournaments_timeline_router.router, tags=["tournaments"])

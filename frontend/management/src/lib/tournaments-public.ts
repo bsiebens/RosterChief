@@ -34,7 +34,11 @@ export type StandingTable = { group: { id: string; name: string } | null; rows: 
 export type StageStandings = { stage: StageSummary; tables: StandingTable[] };
 export type Bracket = { stage: StageSummary; rounds: Round[] };
 
+export type PublicSponsor = { name: string; url: string; logo_url: string | null };
 export type TournamentDetail = TournamentItem & {
+	rules_html: string;
+	rules_file_url: string | null;
+	sponsors: PublicSponsor[];
 	description_html: string;
 	contact_email: string;
 	earliest_birth_year: number | null;

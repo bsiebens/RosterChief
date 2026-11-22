@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { CalendarClock, CalendarDays, Check, ClipboardList, Copy, ExternalLink, Globe, Save, Trash2, Trophy, Wallet } from '@lucide/svelte';
+	import { CalendarClock, CalendarDays, Check, ClipboardList, Copy, ExternalLink, Link2, Save, Trash2, Trophy, Wallet } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import ActionList from '#lib/components/actions/ActionList.svelte';
 	import ActionRow from '#lib/components/actions/ActionRow.svelte';
@@ -89,14 +89,14 @@
 				{/if}
 			</div>
 		</section>
-		<section class="card card-body card-hl gap-2">
-			<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Globe size={16} aria-hidden="true" />{t('tn.card.public')}</h2>
-			<p class="text-xs text-muted">{t('tn.public.help')}</p>
-			<a class="link block font-mono text-xs break-all" href={publicUrl} target="_blank" rel="noopener">{publicUrl}</a>
-			<div class="flex flex-wrap gap-2">
-				<a class="btn btn-outline btn-sm gap-1" href={publicUrl} target="_blank" rel="noopener"><ExternalLink size={14} /> {t('tn.public.open')}</a>
+		<section class="card card-body card-hl gap-2" aria-labelledby="tn-pub">
+			<h2 id="tn-pub" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Link2 size={16} class="shrink-0" aria-hidden="true" /> {t('tn.card.public')}</h2>
+			<div class="flex items-center gap-2">
+				<input class="input input-bordered input-sm min-w-0 flex-1 font-mono text-xs" readonly value={publicUrl} aria-label={t('tn.card.public')} onfocus={(e) => e.currentTarget.select()} />
 				<button class="btn btn-outline btn-sm gap-1" type="button" onclick={copyLink}>{#if copied}<Check size={14} /> {t('tn.public.copied')}{:else}<Copy size={14} /> {t('tn.public.copy')}{/if}</button>
+				<a class="btn btn-outline btn-sm gap-1" href={publicUrl} target="_blank" rel="noopener"><ExternalLink size={14} /> {t('tn.public.open')}</a>
 			</div>
+			<p class="text-xs text-muted">{t('tn.public.help')}</p>
 		</section>
 	</aside>
 </form>

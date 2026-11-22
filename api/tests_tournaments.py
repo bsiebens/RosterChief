@@ -584,6 +584,32 @@ class TournamentApiTests(TestCase):
         self.assertEqual(t.public_path, f"/tournaments/2026/{t.slug}")
         self.assertEqual(self.as_("manage", "get", f"/{t.pk}").json()["public_path"], f"/tournaments/2026/{t.slug}")
 
+    def test_rules_and_sponsors_content(self):
+        from sponsoring.models import Sponsor
+
+        t = self.make()
+        self.assertEqual(self.as_("manage", "put", f"/{t.pk}/rules", {"markdown": "# Rules\n\n1. Play fair"}).json()["markdown"], "# Rules\n\n1. Play fair")
+        self.assertEqual(self.as_("manage", "get", f"/{t.pk}/rules").json()["file_url"], None)
+        self.assertEqual(self.as_("operate", "put", f"/{t.pk}/rules", {"markdown": "x"}).status_code, 403)  # content is for the manage tier
+        # sponsors: own list, order, and the club sponsor choice
+        r = self.as_("manage", "post", f"/{t.pk}/sponsors", {"name": "  Acme  ", "url": "https://acme.test"})
+        self.assertEqual((r.status_code, r.json()["name"], r.json()["position"]), (201, "Acme", 0), r.content)
+        self.as_("manage", "post", f"/{t.pk}/sponsors", {"name": "Bolt"})
+        listed = self.as_("manage", "get", f"/{t.pk}/sponsors").json()
+        self.assertEqual(([s["name"] for s in listed["results"]], listed["use_club_sponsors"]), (["Acme", "Bolt"], True))
+        Sponsor.objects.create(name="Club Co")
+        Sponsor.objects.create(name="acme")  # same name as a tournament sponsor: shown once
+        from api.routers.public_tournaments import _sponsors
+
+        self.assertEqual([s["name"] for s in _sponsors(t)], ["Acme", "Bolt", "Club Co"])
+        self.as_("manage", "put", f"/{t.pk}/sponsors/settings", {"use_club_sponsors": False})
+        t.refresh_from_db()
+        self.assertEqual([s["name"] for s in _sponsors(t)], ["Acme", "Bolt"])
+        sid = listed["results"][0]["id"]
+        self.assertEqual(self.as_("manage", "patch", f"/{t.pk}/sponsors/{sid}", {"name": "Acme Corp"}).json()["name"], "Acme Corp")
+        self.assertEqual(self.as_("manage", "delete", f"/{t.pk}/sponsors/{sid}").status_code, 204)
+        self.assertEqual(len(self.as_("manage", "get", f"/{t.pk}/sponsors").json()["results"]), 1)
+
     def test_delete_only_a_draft_tournament(self):
         body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}
         tid = self.as_("manage", "post", "", body).json()["id"]

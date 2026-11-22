@@ -17,7 +17,9 @@
 			{ key: '/scores', label: t('tn.tab.scores') },
 			{ key: '/standings', label: t('tn.tab.standings') },
 			{ key: '/tasks', label: t('tn.tab.tasks') },
-			{ key: '/rooms', label: t('tn.tab.rooms') }
+			{ key: '/rooms', label: t('tn.tab.rooms') },
+			{ key: '/rules', label: t('tn.tab.rules'), manage: true },
+			{ key: '/sponsors', label: t('tn.tab.sponsors'), manage: true }
 		].filter((x) => !x.manage || tn.can_manage)
 	);
 	$effect(() => {

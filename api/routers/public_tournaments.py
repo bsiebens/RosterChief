@@ -25,6 +25,7 @@ from api.routers.tournaments_roster import check_birth_date, check_position, lun
 from api.schemas_tournaments import PlayerRowIn, PlayersIn, PublicRegistrationIn
 from members.services.errors import Invalid
 from news.services import render_body_html
+from sponsoring.models import Sponsor
 from tournaments.models import Match, Tournament, TournamentRegistration, TournamentRegistrationPlayer, TournamentRosterEntry, TournamentRosterRole, TournamentTeam
 from tournaments.services import notifications
 from tournaments.sports import is_ice_hockey
@@ -56,6 +57,15 @@ def item(t: Tournament) -> dict:
     }  # fmt: skip
 
 
+def _sponsors(t: Tournament) -> list[dict]:
+    """The sponsors for the public page: the tournament's own, then the club's active ones when the tournament uses them (same name once)."""
+    out = [{"name": s.name, "url": s.url, "logo_url": c.url(s.logo) if s.logo else None} for s in t.sponsors.all()]
+    if t.use_club_sponsors:
+        seen = {s["name"].lower() for s in out}
+        out += [{"name": s.name, "url": s.url, "logo_url": c.url(s.logo) if s.logo else None} for s in Sponsor.active() if s.name.lower() not in seen]
+    return out
+
+
 def _upcoming_matches(t, limit=5):
     qs = (
         Match.objects.filter(stage__tournament=t).exclude(status=Match.Status.COMPLETE).exclude(scheduled_start__isnull=True)
@@ -83,6 +93,7 @@ def detail(request, slug: str):
         "entry_fee_amount": _money(t.entry_fee_amount), "deposit_amount": _money(t.deposit_amount), "lunch_mode": t.lunch_mode, "lunch_price_per_day": _money(t.lunch_price_per_day),
         "ice_hockey": is_ice_hockey(getattr(connection.tenant, "sport", None)), "dates": t.date_range(), "registration_open": t.registration_open, "stages": [c.stage_summary(s) for s in t.stages.order_by("sequence")],
         "upcoming_matches": _upcoming_matches(t), **standings_doc(t),
+        "rules_html": render_body_html(t.rules_markdown) if t.rules_markdown else "", "rules_file_url": c.url(t.rules_file) if t.rules_file else None, "sponsors": _sponsors(t),
     }  # fmt: skip
 
 

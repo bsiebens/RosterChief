@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import FileExtensionValidator
 from django.db import connection, models
 from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
@@ -156,6 +157,13 @@ class Tournament(UUIDModel):
     #: module constant.
     #: The standing gap between two matches on a field, which break rules then replace or add to.
     default_gap_minutes = models.PositiveSmallIntegerField(_("gap between matches (minutes)"), default=5, help_text=_("The time left between two matches on a field. A break rule can replace it or add to it."))
+    rules_markdown = models.TextField(_("rules"), blank=True, help_text=_("The tournament rules as Markdown, shown on the public tournament page."))
+    rules_file = models.FileField(
+        _("rules document"), upload_to="tournaments/rules", blank=True, validators=[FileExtensionValidator(allowed_extensions=["pdf", "doc", "docx", "odt"])],
+        help_text=_("The rules as a document to download (PDF, Word or OpenDocument), shown on the public tournament page."),
+    )
+    use_club_sponsors = models.BooleanField(_("show the club's sponsors"), default=True, help_text=_("Show the club's active sponsors on the public tournament page, next to the tournament's own."))
+
     class ClockDirection(models.TextChoices):
         UP = "up", _("counting up")
         DOWN = "down", _("counting down")
@@ -276,6 +284,25 @@ class Tournament(UUIDModel):
 def tournament_field_availability_default():
     """Empty per-day availability list -- see TournamentField.availability."""
     return []
+
+
+class TournamentSponsor(UUIDModel):
+    """A sponsor of this tournament only (the club's own sponsors are ``sponsoring.Sponsor``). Not itself club-scoped -- its club is reached
+    through ``tournament``."""
+
+    tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE, related_name="sponsors", verbose_name=_("tournament"))
+    name = models.CharField(_("name"), max_length=255)
+    logo = models.ImageField(_("logo"), upload_to="tournaments/sponsors", blank=True)
+    url = models.URLField(_("URL"), blank=True)
+    position = models.PositiveSmallIntegerField(_("position"), default=0)
+
+    class Meta:
+        verbose_name = _("tournament sponsor")
+        verbose_name_plural = _("tournament sponsors")
+        ordering = ["position", "created"]
+
+    def __str__(self):
+        return self.name
 
 
 class TournamentDay(UUIDModel):
