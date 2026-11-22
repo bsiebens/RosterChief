@@ -100,7 +100,10 @@ def url(file) -> str | None:
 
 
 def ref(obj):
-    return {"id": obj.pk, "name": str(obj)} if obj is not None else None
+    """``{id, name}`` of a field or stage: its own name, not the "<tournament> - <name>" of ``str()``."""
+    if obj is None:
+        return None
+    return {"id": obj.pk, "name": obj.name if isinstance(obj, (TournamentField, TournamentStage)) else str(obj)}
 
 
 def count_label(items, key):
