@@ -243,6 +243,8 @@ class StageIn(Schema):
     num_groups: int | None = Field(None, ge=1, le=1000)
     placement: bool = False  # single or double elimination only: keep playing for every place, so each team ends with a final rank
     allow_draws: bool = True  # table stages only: a level game may stay level; knockouts always need a winner
+    two_legged: bool = False  # knockouts: every tie is two games, the scores added together
+    match_duration_minutes: int | None = Field(None, ge=5, le=600)  # game length of this stage; blank = the tournament's
     penalty_shots: bool | None = None  # when draws are not allowed: decide a level game with penalty shots (default on for knockouts)
     points_win: int = Field(3, ge=0, le=1000)
     points_draw: int = Field(1, ge=0, le=1000)
@@ -260,6 +262,8 @@ class StagePatch(Schema):
     num_groups: int | None = Field(None, ge=1, le=1000)
     placement: bool | None = None
     allow_draws: bool | None = None
+    two_legged: bool | None = None
+    match_duration_minutes: int | None = Field(None, ge=5, le=600)
     penalty_shots: bool | None = None
     points_win: int | None = Field(None, ge=0, le=1000)
     points_draw: int | None = Field(None, ge=0, le=1000)

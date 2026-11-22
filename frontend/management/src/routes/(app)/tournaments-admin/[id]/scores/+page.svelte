@@ -31,7 +31,11 @@
 		open = true;
 	}
 	// A level score needs deciding when the stage does not allow draws: by penalty shots, or (without them) by playing on.
-	const level = $derived(f.home !== '' && f.away !== '' && Number(f.home) === Number(f.away));
+	// A back-and-forth tie is judged on both legs added up: the first leg may end level, the second needs a winner over the two games.
+	const firstLeg = $derived(m?.first_leg_id ? (data.scores?.stages.flatMap((st) => st.rounds.flatMap((r) => r.matches)).find((x) => x.id === m!.first_leg_id) ?? null) : null);
+	const addedHome = $derived(Number(f.home || 0) + (firstLeg?.score_home ?? 0));
+	const addedAway = $derived(Number(f.away || 0) + (firstLeg?.score_away ?? 0));
+	const level = $derived(m?.leg === 1 ? false : f.home !== '' && f.away !== '' && addedHome === addedAway);
 	const needsShots = $derived(level && !!mStage && !mStage.allow_draws && mStage.penalty_shots);
 	const drawBlocked = $derived(level && !!mStage && !mStage.allow_draws && !mStage.penalty_shots);
 	async function save(e: SubmitEvent) {
@@ -120,7 +124,7 @@
 											<td class="hidden w-24 text-xs sm:table-cell">{x.field?.name ?? ''}</td>
 											<td class="text-right text-sm">{x.home_display}</td>
 											<td class="w-28 text-center font-mono text-sm font-bold whitespace-nowrap">
-												{#if done(x)}{x.score_home} – {x.score_away}{#if x.went_to_overtime} <span class="text-xs font-normal text-muted">{t('tn.scores.ot')}</span>{/if}{#if x.penalty_home !== null} <span class="text-xs font-normal text-muted">({x.penalty_home}–{x.penalty_away})</span>{/if}{:else}<span class="text-muted">vs</span>{/if}{#each attrs as a (a.key)}{#if x.attributes?.[a.key] && (x.attributes[a.key].home || x.attributes[a.key].away)}<div class="text-xs font-normal text-muted" title={a.name}>{a.name} {x.attributes[a.key].home}–{x.attributes[a.key].away}</div>{/if}{/each}
+												{#if done(x)}{x.score_home} – {x.score_away}{#if x.went_to_overtime} <span class="text-xs font-normal text-muted">{t('tn.scores.ot')}</span>{/if}{#if x.penalty_home !== null} <span class="text-xs font-normal text-muted">({x.penalty_home}–{x.penalty_away})</span>{/if}{:else}<span class="text-muted">vs</span>{/if}{#if x.leg}<div class="text-[10px] font-normal text-muted">{t('tn.leg', { n: x.leg })}{#if x.aggregate} · {t('tn.aggregate', { h: x.aggregate[0], a: x.aggregate[1] })}{/if}</div>{/if}{#each attrs as a (a.key)}{#if x.attributes?.[a.key] && (x.attributes[a.key].home || x.attributes[a.key].away)}<div class="text-xs font-normal text-muted" title={a.name}>{a.name} {x.attributes[a.key].home}–{x.attributes[a.key].away}</div>{/if}{/each}
 											</td>
 											<td class="text-sm">{x.away_display}</td>
 											<td class="w-32 text-right"><div class="flex items-center justify-end gap-1">
@@ -153,7 +157,12 @@
 		</div>
 		{#each ['score_home', 'score_away'] as k (k)}{#if run.fields[k]}<span class="text-xs text-error">{run.fields[k]}</span>{/if}{/each}
 		<label class="flex cursor-pointer items-center gap-3 rounded-lg border border-line p-3"><input type="checkbox" class="checkbox" bind:checked={f.ot} /><span class="text-sm">{t('tn.scores.overtime')}</span></label>
-		{#if drawBlocked}
+		{#if firstLeg}
+			<p class="rounded-lg bg-paper p-3 text-sm text-muted">{t('tn.scores.first_leg', { h: firstLeg.score_home ?? '–', a: firstLeg.score_away ?? '–' })} · <strong class="text-ink">{t('tn.aggregate', { h: addedHome, a: addedAway })}</strong></p>
+		{/if}
+		{#if m?.leg === 1}
+			<!-- a first leg may end level: no shootout -->
+		{:else if drawBlocked}
 			<Alert kind="warning">{t('tn.scores.draw_blocked')}</Alert>
 		{:else if needsShots}
 			<div class="grid gap-2 rounded-lg border border-line p-3">

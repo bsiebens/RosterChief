@@ -78,6 +78,12 @@ def _stage_values(stage: TournamentStage, payload: dict):
     penalty_shots = payload["penalty_shots"] if payload.get("penalty_shots") is not None else stored.get("penalty_shots")
     if not knockout and allow_draws is False:
         stage.config["allow_draws"] = False  # "draws allowed" is the default, so only the exception is stored
+    two_legged = payload["two_legged"] if payload.get("two_legged") is not None else stored.get("two_legged", False)
+    if knockout and two_legged:
+        stage.config["two_legged"] = True
+    duration = payload["match_duration_minutes"] if "match_duration_minutes" in payload else stored.get("match_duration_minutes")
+    if duration:
+        stage.config["match_duration_minutes"] = int(duration)
     if (knockout or allow_draws is False) and penalty_shots is not None:
         stage.config["penalty_shots"] = bool(penalty_shots)
     if merged.get("placement") and merged["format"] in SEEDABLE:

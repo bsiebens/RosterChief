@@ -483,6 +483,16 @@ class TournamentStage(UUIDModel):
         return not self.is_knockout and (self.config or {}).get("allow_draws", True)
 
     @property
+    def is_two_legged(self) -> bool:
+        """Knockout ties played back and forth: two games per tie, the two scores added together."""
+        return self.is_knockout and bool((self.config or {}).get("two_legged"))
+
+    @property
+    def match_minutes(self) -> int:
+        """How long a game of this stage takes: its own setting, else the tournament's default."""
+        return int((self.config or {}).get("match_duration_minutes") or self.tournament.default_match_duration_minutes)
+
+    @property
     def uses_penalty_shots(self) -> bool:
         """Whether a level game is decided by penalty shots (only matters when draws are not allowed). Defaults on for knockouts."""
         return bool((self.config or {}).get("penalty_shots", self.is_knockout))
@@ -858,6 +868,10 @@ class Match(UUIDModel):
     away_source_group = models.ForeignKey(TournamentGroup, on_delete=models.SET_NULL, null=True, blank=True, related_name="feeds_away_rank", verbose_name=_("away source group"))
     away_source_rank = models.PositiveSmallIntegerField(_("away source rank"), null=True, blank=True)
 
+    #: A two-legged tie ("back and forth") is two rows: the bracket match itself is the second leg (later rounds feed from it), and the
+    #: first leg points at it. Both carry the same teams/sources; the tie's result is the two scores added together.
+    leg_of = models.ForeignKey("self", on_delete=models.CASCADE, null=True, blank=True, related_name="first_legs", verbose_name=_("first leg of"))
+
     class Meta:
         verbose_name = _("match")
         verbose_name_plural = _("matches")
@@ -914,7 +928,40 @@ class Match(UUIDModel):
         return str(template % {"match": label})
 
     @property
+    def first_leg(self):
+        """The first leg of this (second-leg) tie, else ``None``."""
+        if self.leg_of_id is not None:
+            return None
+        cached = self.__dict__.get("_first_leg_cache", False)  # set for a whole list at once by the API
+        return cached if cached is not False else next(iter(self.first_legs.all()), None)
+
+    @property
+    def leg_number(self) -> int | None:
+        if self.leg_of_id is not None:
+            return 1
+        return 2 if self.first_leg is not None else None
+
+    @property
+    def aggregate(self) -> tuple[int, int] | None:
+        """Home/away goals of the whole tie (both legs added up), for a second leg whose first leg has been played; else ``None``."""
+        first = self.first_leg
+        if first is None or first.score_home is None or first.score_away is None or self.score_home is None or self.score_away is None:
+            return None
+        return first.score_home + self.score_home, first.score_away + self.score_away
+
+    @property
     def winner(self):
+        if self.leg_of_id is not None:
+            return None  # a first leg never decides a tie by itself
+        if self.first_leg is not None:
+            total = self.aggregate
+            if total is None:
+                return None
+            if total[0] != total[1]:
+                return self.home_team if total[0] > total[1] else self.away_team
+            if self.penalty_home is not None and self.penalty_away is not None and self.penalty_home != self.penalty_away:
+                return self.home_team if self.penalty_home > self.penalty_away else self.away_team
+            return None
         if self.score_home is None or self.score_away is None:
             return None
         if self.score_home > self.score_away:

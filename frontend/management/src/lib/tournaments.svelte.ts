@@ -122,6 +122,11 @@ export type MatchDoc = {
 	away_team: TTeamRef | null;
 	home_display: string;
 	away_display: string;
+	/** Back-and-forth ties: 1 or 2 for the leg; `aggregate` is both legs added up once the first leg is in (on the second leg). */
+	leg: 1 | 2 | null;
+	tie_id: string | null;
+	first_leg_id: string | null;
+	aggregate: [number, number] | null;
 	/** Per-match attribute totals (e.g. penalty minutes), keyed by attribute key. */
 	attributes?: Record<string, { home: number; away: number }>;
 	event_count?: number;
@@ -151,6 +156,8 @@ export type StageDoc = {
 	placement: boolean;
 	allow_draws: boolean;
 	penalty_shots: boolean;
+	two_legged: boolean;
+	match_duration_minutes: number | null;
 	is_knockout: boolean;
 };
 export type FieldDoc = { id: string; name: string; availability: { date: string; start: string; end: string }[] };

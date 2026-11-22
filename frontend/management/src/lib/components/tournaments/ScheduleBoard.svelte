@@ -123,7 +123,7 @@
 										style:height="{s.height_px}px"
 										title="{m.home_display} – {m.away_display}">
 										<span class="block truncate font-semibold text-ink">{m.home_display} – {m.away_display}</span>
-										<span class="block truncate font-mono text-muted">{fmtTime(m.scheduled_start)} · {m.round_label}</span>
+										<span class="block truncate font-mono text-muted">{fmtTime(m.scheduled_start)} · {m.round_label}{m.leg ? ` · ${t('tn.leg', { n: m.leg })}` : ''}</span>
 									</button>
 								{:else if day.slots.some((x) => x.type === 'match')}
 									<div class="pointer-events-none absolute inset-x-0 flex items-center justify-center overflow-hidden rounded bg-ink/5 text-[11px] font-medium text-ink/70" style:top="{s.top_px}px" style:height="{s.height_px}px">

@@ -56,8 +56,8 @@
 	}
 
 	// --- stages
-	type StageForm = { name: string; format: string; placement: boolean; allow_draws: boolean; penalty_shots: boolean; rounds: string; num_groups: string; points_win: string; points_draw: string; points_loss: string; tiebreakers: Tiebreaker[] };
-	const blankStage = (): StageForm => ({ name: '', format: 'round_robin', placement: false, allow_draws: true, penalty_shots: true, rounds: '', num_groups: '', points_win: '3', points_draw: '1', points_loss: '0', tiebreakers: [{ criterion: 'goal_diff', direction: 'most' }, { criterion: 'goals_for', direction: 'most' }] });
+	type StageForm = { name: string; format: string; placement: boolean; allow_draws: boolean; penalty_shots: boolean; two_legged: boolean; match_duration: string; rounds: string; num_groups: string; points_win: string; points_draw: string; points_loss: string; tiebreakers: Tiebreaker[] };
+	const blankStage = (): StageForm => ({ name: '', format: 'round_robin', placement: false, allow_draws: true, penalty_shots: true, two_legged: false, match_duration: '', rounds: '', num_groups: '', points_win: '3', points_draw: '1', points_loss: '0', tiebreakers: [{ criterion: 'goal_diff', direction: 'most' }, { criterion: 'goals_for', direction: 'most' }] });
 	let stageOpen = $state(false);
 	let editStage = $state<StageDoc | null>(null);
 	let sf = $state<StageForm>(blankStage());
@@ -66,7 +66,7 @@
 	function openStage(s: StageDoc | null) {
 		editStage = s;
 		sf = s
-			? { name: s.name, format: s.format, placement: s.placement, allow_draws: s.is_knockout ? true : s.allow_draws, penalty_shots: s.penalty_shots, rounds: s.rounds === null ? '' : String(s.rounds), num_groups: s.num_groups === null ? '' : String(s.num_groups), points_win: String(s.points_win), points_draw: String(s.points_draw), points_loss: String(s.points_loss), tiebreakers: (s.tiebreakers ?? []).map((x) => ({ ...x })) }
+			? { name: s.name, format: s.format, placement: s.placement, allow_draws: s.is_knockout ? true : s.allow_draws, penalty_shots: s.penalty_shots, two_legged: s.two_legged, match_duration: s.match_duration_minutes ? String(s.match_duration_minutes) : '', rounds: s.rounds === null ? '' : String(s.rounds), num_groups: s.num_groups === null ? '' : String(s.num_groups), points_win: String(s.points_win), points_draw: String(s.points_draw), points_loss: String(s.points_loss), tiebreakers: (s.tiebreakers ?? []).map((x) => ({ ...x })) }
 			: blankStage();
 		run.clear();
 		stageOpen = true;
@@ -79,6 +79,8 @@
 			placement: sf.format === 'single_elim' || sf.format === 'double_elim' ? sf.placement : false,
 			allow_draws: sf.allow_draws,
 			penalty_shots: sf.penalty_shots,
+			two_legged: sf.two_legged,
+			match_duration_minutes: numOrNull(sf.match_duration),
 			rounds: sf.format === 'swiss' ? numOrNull(sf.rounds) : null,
 			num_groups: sf.format === 'groups' ? numOrNull(sf.num_groups) : null,
 			points_win: Number(sf.points_win || 0),
@@ -466,6 +468,8 @@
 											<span class="mt-1 flex flex-wrap items-center gap-1">
 												<span class="badge badge-sm badge-outline">{t(`tn.format.${s.format}`)}</span>
 												{#if s.placement}<span class="badge badge-sm badge-info">{t('tn.setup.full_ranking')}</span>{/if}
+												{#if s.two_legged}<span class="badge badge-sm badge-info">{t('tn.setup.two_legs_badge')}</span>{/if}
+												{#if s.match_duration_minutes}<span class="badge badge-sm badge-outline">{s.match_duration_minutes} min</span>{/if}
 												<span class="badge badge-sm {s.status === 'active' ? 'badge-success' : s.status === 'complete' ? 'badge-neutral' : 'badge-ghost'}">{t(`tn.stage_status.${s.status}`)}</span>
 											</span>
 										</button>
@@ -744,12 +748,19 @@
 			{#if run.fields.format}<span class="text-xs text-error">{run.fields.format}</span>{/if}
 		</fieldset>
 		{#if sf.format === 'single_elim' || sf.format === 'double_elim'}
-			<div class="grid gap-3 md:grid-cols-2">
+			<div class="grid gap-3 md:grid-cols-3">
 				<label class="flex cursor-pointer items-start gap-3 rounded-lg border border-line p-3">
 					<input type="checkbox" class="checkbox mt-0.5" bind:checked={sf.placement} />
 					<span class="min-w-0">
 						<span class="block text-sm font-semibold text-ink">{t('tn.setup.placement_title')}</span>
 						<span class="block text-xs text-muted">{t('tn.setup.placement_help')}</span>
+					</span>
+				</label>
+				<label class="flex cursor-pointer items-start gap-3 rounded-lg border border-line p-3">
+					<input type="checkbox" class="checkbox mt-0.5" bind:checked={sf.two_legged} />
+					<span class="min-w-0">
+						<span class="block text-sm font-semibold text-ink">{t('tn.setup.two_legged')}</span>
+						<span class="block text-xs text-muted">{t('tn.setup.two_legged_help')}</span>
 					</span>
 				</label>
 				<label class="flex cursor-pointer items-start gap-3 rounded-lg border border-line p-3">
@@ -782,6 +793,7 @@
 		{/if}
 		{#if sf.format === 'swiss'}<Field label={t('tn.setup.rounds')} type="number" min="1" bind:value={sf.rounds} error={run.fields.rounds} required />{/if}
 		{#if sf.format === 'groups'}<Field label={t('tn.setup.num_groups')} type="number" min="1" bind:value={sf.num_groups} error={run.fields.num_groups} required />{/if}
+		<Field label={t('tn.setup.match_duration')} type="number" min="5" bind:value={sf.match_duration} error={run.fields.match_duration_minutes} placeholder={String(tn.default_match_duration_minutes ?? '')} help={t('tn.setup.match_duration_help')} />
 		<div class="grid grid-cols-3 gap-3">
 			<Field label={t('tn.setup.points_win')} type="number" bind:value={sf.points_win} error={run.fields.points_win} />
 			{#if sf.allow_draws && sf.format !== 'single_elim' && sf.format !== 'double_elim'}

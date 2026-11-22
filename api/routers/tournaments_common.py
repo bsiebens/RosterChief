@@ -187,7 +187,9 @@ def prime_matches(matches) -> None:
     for value in MatchAttributeValue.objects.filter(match_id__in=ids):
         values[(value.match_id, value.attribute_id)] = value
     counts = dict(MatchEvent.objects.filter(match_id__in=ids).values_list("match_id").annotate(n=Count("pk")))
+    first_legs = {leg.leg_of_id: leg for leg in Match.objects.filter(leg_of_id__in=ids)}
     for match in matches:
+        match.__dict__["_first_leg_cache"] = first_legs.get(match.pk)
         attributes = {}
         for attribute in definitions.get(tournament_of_stage[match.pk], []):
             value = values.get((match.pk, attribute.pk))
@@ -205,6 +207,8 @@ def match_out(match: Match, *, with_field=True) -> dict:
         "field": ref(match.field) if with_field else None, "scheduled_start": match.scheduled_start, "auto_scheduled": match.auto_scheduled, "status": match.status,
         "score_home": match.score_home, "score_away": match.score_away, "went_to_overtime": match.went_to_overtime, "penalty_home": match.penalty_home, "penalty_away": match.penalty_away,
         "home_team": team_ref(match.home_team), "away_team": team_ref(match.away_team), "home_display": match.home_display, "away_display": match.away_display,
+        "leg": match.leg_number, "tie_id": match.leg_of_id, "first_leg_id": match.first_leg.pk if match.first_leg else None,
+        "aggregate": list(match.aggregate) if match.aggregate else None,
     }
 
 
@@ -236,7 +240,7 @@ def stage_summary(stage: TournamentStage) -> dict:
     return {
         "id": stage.pk, "name": stage.name, "sequence": stage.sequence, "format": stage.format, "status": stage.status,
         "rounds": config.get("rounds"), "num_groups": config.get("num_groups"), "placement": bool(config.get("placement")),
-        "allow_draws": stage.allows_draws, "penalty_shots": stage.uses_penalty_shots, "is_knockout": stage.is_knockout,
+        "allow_draws": stage.allows_draws, "two_legged": stage.is_two_legged, "match_duration_minutes": (stage.config or {}).get("match_duration_minutes"), "penalty_shots": stage.uses_penalty_shots, "is_knockout": stage.is_knockout,
         "points_win": points.get("win", 3), "points_draw": points.get("draw", 1), "points_loss": points.get("loss", 0),
         "tiebreakers": tiebreakers, "tiebreaker_1": legacy[0] if legacy else None, "tiebreaker_2": legacy[1] if len(legacy) > 1 else None,
     }

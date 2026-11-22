@@ -477,6 +477,43 @@ class TournamentApiTests(TestCase):
         Match.objects.filter(stage_id=stage["id"]).update(status=Match.Status.COMPLETE)
         self.assertEqual(self.as_("operate", "post", f"/{t.pk}/stages/{stage['id']}/clear-matches", {}).status_code, 409)  # played matches stay
 
+    def test_two_legged_knockout_and_stage_game_time(self):
+        t = self.make(status="in_progress")
+        [self.foreign(t, n) for n in ("A", "B", "C", "D")]
+        self.as_("operate", "post", f"/{t.pk}/fields", {"name": "Field 1", "availability": [{"date": "2026-09-19", "start": "09:00", "end": "20:00"}]})
+        stage = self.as_("operate", "post", f"/{t.pk}/stages", {"name": "KO", "format": "single_elim", "two_legged": True, "match_duration_minutes": 20}).json()
+        self.assertEqual((stage["two_legged"], stage["match_duration_minutes"]), (True, 20))
+        self.as_("operate", "post", f"/{t.pk}/stages/{stage['id']}/generate-matches", {})
+        ties = list(Match.objects.filter(stage_id=stage["id"], leg_of__isnull=True).order_by("round_number", "sequence"))
+        self.assertEqual((len(ties), Match.objects.filter(stage_id=stage["id"], leg_of__isnull=False).count()), (3, 3))  # semis, final: each has a first leg
+        semi = ties[0]
+        first = Match.objects.get(leg_of=semi)
+        # the second leg cannot be entered before the first
+        r = self.as_("operate", "post", f"/matches/{semi.pk}/result", {"score_home": 1, "score_away": 0})
+        self.assertEqual((r.status_code, r.json()["code"]), (422, "first_leg_missing"))
+        # a first leg may end level and never needs shots
+        self.assertEqual(self.as_("operate", "post", f"/matches/{first.pk}/result", {"score_home": 1, "score_away": 1}).status_code, 200)
+        # aggregate level (1-1 then 2-2) needs the shootout
+        r = self.as_("operate", "post", f"/matches/{semi.pk}/result", {"score_home": 2, "score_away": 2})
+        self.assertEqual((r.status_code, r.json()["code"]), (422, "penalty_shots_required"))
+        r = self.as_("operate", "post", f"/matches/{semi.pk}/result", {"score_home": 2, "score_away": 1})  # aggregate 3-2 to the home side
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()["match"]
+        self.assertEqual((body["leg"], body["aggregate"]), (2, [3, 2]))
+        semi.refresh_from_db()
+        self.assertEqual(semi.winner, semi.home_team)
+        final = ties[2]
+        self.assertEqual(Match.objects.get(pk=final.pk).home_team_id, semi.home_team_id)  # the winner advanced
+        self.assertEqual(Match.objects.get(leg_of=final).home_team_id, semi.home_team_id)  # and into the final's first leg too
+        # the game time of the stage drives scheduling
+        self.as_("operate", "post", f"/{t.pk}/schedule/generate", {"match_duration_minutes": 45})
+        starts = sorted(Match.objects.filter(stage_id=stage["id"], scheduled_start__isnull=False).values_list("scheduled_start", flat=True))
+        self.assertEqual((starts[1] - starts[0]).total_seconds() / 60, 25)  # 20 minutes of play + the default 5 minute gap
+        self.assertTrue(Match.objects.get(leg_of=semi).scheduled_start < Match.objects.get(pk=semi.pk).scheduled_start)  # first leg before second
+        self.assertEqual(self.as_("operate", "delete", f"/matches/{ties[1].pk}").status_code, 409)  # feeds the final
+        self.assertEqual(self.as_("operate", "delete", f"/matches/{Match.objects.get(leg_of=final).pk}").status_code, 204)  # the final goes with both legs
+        self.assertFalse(Match.objects.filter(pk=final.pk).exists() or Match.objects.filter(leg_of_id=final.pk).exists())
+
     def test_delete_only_a_draft_tournament(self):
         body = {"name": "Spring Cup", "days": [{"date": "2026-10-03", "starts_at": "09:00", "ends_at": "17:00"}, {"date": "2026-10-04", "starts_at": "09:00", "ends_at": "17:00"}], "status": "draft", "home_team_id": str(self.club_team.pk)}
         tid = self.as_("manage", "post", "", body).json()["id"]

@@ -231,10 +231,21 @@ def _manual_values(tournament, submitted) -> list:
     return out
 
 
-def _decided_result(stage, payload) -> tuple[int | None, int | None]:
+def _decided_result(match, payload) -> tuple[int | None, int | None]:
     """The penalty shots to store for a result, after checking the stage's draw rule: a level score is only accepted when the stage allows
-    draws, or when penalty shots (filled in and different) decide it. Shots are dropped from a result that is not level."""
-    if payload.score_home != payload.score_away:
+    draws, or when penalty shots (filled in and different) decide it. Shots are dropped from a result that is not level. Back-and-forth ties:
+    the first leg may end level, the second leg is judged on the two scores added together."""
+    stage = match.stage
+    if match.leg_of_id is not None:
+        return None, None  # a first leg never needs a winner
+    home, away = payload.score_home, payload.score_away
+    if match.first_leg is not None:
+        first = match.first_leg
+        if first.score_home is None or first.score_away is None:
+            message = "Enter the first leg before the second."
+            raise Invalid(message, {"detail": [message]}, code="first_leg_missing")
+        home, away = home + first.score_home, away + first.score_away
+    if home != away:
         return None, None
     if stage.allows_draws:
         return payload.penalty_home, payload.penalty_away
@@ -242,7 +253,7 @@ def _decided_result(stage, payload) -> tuple[int | None, int | None]:
         message = "This stage does not allow draws: enter the final score including any overtime goals."
         raise Invalid(message, {"score_away": [message]}, code="draw_not_allowed")
     if payload.penalty_home is None or payload.penalty_away is None:
-        message = "The game is level: enter the penalty shots score that decided it."
+        message = "The tie is level: enter the penalty shots score that decided it." if match.first_leg is not None else "The game is level: enter the penalty shots score that decided it."
         raise Invalid(message, {"penalty_home": [message]}, code="penalty_shots_required")
     if payload.penalty_home == payload.penalty_away:
         message = "Penalty shots must have a winner."
@@ -257,7 +268,7 @@ def result(request, match_id: uuid.UUID, payload: ResultIn):
     if match.home_team_id is None or match.away_team_id is None:
         raise Invalid("Both teams must be known before a score can be recorded.", {"detail": ["Both teams must be known before a score can be recorded."]}, code="teams_unknown")
     values = _manual_values(match.stage.tournament, payload.attributes)
-    penalty_home, penalty_away = _decided_result(match.stage, payload)
+    penalty_home, penalty_away = _decided_result(match, payload)
     with transaction.atomic():
         updated = svc.record_result(
             match, score_home=payload.score_home, score_away=payload.score_away, went_to_overtime=payload.went_to_overtime, penalty_home=penalty_home, penalty_away=penalty_away
@@ -293,7 +304,9 @@ def _clear_source(match, side):
 def set_teams(request, match_id: uuid.UUID, payload: MatchTeamsPatch):
     c.gate_operate(request)
     match = _match(match_id)
-    if match.status == Match.Status.COMPLETE:
+    if match.leg_of_id is not None:
+        match = _match(match.leg_of_id)  # the teams of a tie are set on the tie; both legs follow
+    if match.status == Match.Status.COMPLETE or any(leg.status == Match.Status.COMPLETE for leg in match.first_legs.all()):
         raise Conflict("A played match cannot be changed.", "match_complete")
     tournament = match.stage.tournament
     data = payload.dict(exclude_unset=True)
@@ -306,14 +319,17 @@ def set_teams(request, match_id: uuid.UUID, payload: MatchTeamsPatch):
         _clear_source(match, side)  # a manual choice replaces whatever used to feed the slot
     _teams_differ(match.home_team_id, match.away_team_id)
     match.save()
-    return c.match_out(_match(match_id))
+    svc.sync_first_leg(match)
+    return c.match_out(_match(match.pk))
 
 
 @router.delete("/matches/{match_id}", summary="Delete a match that is not played and feeds no other match", operation_id="tournaments_match_delete", response={204: None})
 def delete_match(request, match_id: uuid.UUID):
     c.gate_operate(request)
     match = _match(match_id)
-    if match.status == Match.Status.COMPLETE:
+    if match.leg_of_id is not None:
+        match = _match(match.leg_of_id)  # a tie goes as a whole, both legs
+    if match.status == Match.Status.COMPLETE or any(leg.status == Match.Status.COMPLETE for leg in match.first_legs.all()):
         raise Conflict("A played match cannot be deleted.", "match_complete")
     dependents = list(Match.objects.filter(Q(home_source_match=match) | Q(away_source_match=match)).select_related("home_team__team", "away_team__team", "home_source_match", "away_source_match", "home_source_group", "away_source_group"))
     if dependents:
@@ -352,6 +368,8 @@ def create_match(request, tournament_id: uuid.UUID, stage_id: uuid.UUID, payload
         match = Match(stage=stage, group=group, round_number=round_number, round_label=payload.round_label, sequence=0 if last is None else last + 1, home_team=home, away_team=away)
         c.validate(match)
         match.save()
+        if stage.is_two_legged:
+            svc.add_first_leg(match)
         if field is not None:
             start = payload.scheduled_start
             if timezone.is_naive(start):

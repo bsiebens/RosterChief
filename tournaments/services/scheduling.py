@@ -144,13 +144,40 @@ def generate_stage_matches(stage: TournamentStage, *, entries: list | None = Non
         return _generate_round_robin(stage, entries)
     if stage.format == TournamentStage.Format.GROUPS:
         return _generate_groups(stage, entries)
-    if stage.format == TournamentStage.Format.SINGLE_ELIM:
-        return _generate_single_elim(stage, entries, with_placement=with_placement)
-    if stage.format == TournamentStage.Format.DOUBLE_ELIM:
-        return _generate_double_elim(stage, entries, with_placement=with_placement)
+    if stage.format in (TournamentStage.Format.SINGLE_ELIM, TournamentStage.Format.DOUBLE_ELIM):
+        generate = _generate_single_elim if stage.format == TournamentStage.Format.SINGLE_ELIM else _generate_double_elim
+        matches = generate(stage, entries, with_placement=with_placement)
+        if stage.is_two_legged:
+            add_first_legs(stage)
+        return matches
     if stage.format == TournamentStage.Format.SWISS:
         return generate_next_swiss_round(stage, entries=entries)
     raise SchedulingError(_("Unknown format: %(format)s") % {"format": stage.format})
+
+
+_LEG_COPIED = ("home_team_id", "away_team_id", "home_source_match_id", "home_source_is_winner", "away_source_match_id", "away_source_is_winner", "home_source_group_id", "home_source_rank", "away_source_group_id", "away_source_rank")
+
+
+def add_first_leg(match: Match) -> Match:
+    """The first leg of a tie: the same pairing (or the same sources, so it fills in with the second leg), played before it."""
+    leg = Match(stage_id=match.stage_id, group_id=match.group_id, round_number=match.round_number, round_label=match.round_label, sequence=match.sequence, leg_of=match)
+    for name in _LEG_COPIED:
+        setattr(leg, name, getattr(match, name))
+    leg.save()
+    return leg
+
+
+def add_first_legs(stage) -> list[Match]:
+    """Turns every tie of a freshly generated knockout stage into a two-legged one."""
+    return [add_first_leg(match) for match in stage.matches.filter(leg_of__isnull=True)]
+
+
+def sync_first_leg(match: Match) -> None:
+    """After the teams or sources of a second leg were edited by hand, the first leg follows."""
+    for leg in match.first_legs.all():
+        for name in _LEG_COPIED:
+            setattr(leg, name, getattr(match, name))
+        leg.save(update_fields=list(_LEG_COPIED))
 
 
 def _generate_round_robin(stage, entries):
@@ -444,6 +471,12 @@ def _skip_to_available_window(field, candidate_start: datetime.datetime, match_d
 
 
 @transaction.atomic
+def _duration_of(match: Match, fallback: datetime.timedelta) -> datetime.timedelta:
+    """A game's length: its stage's own setting when it has one, else the run's default."""
+    own = (match.stage.config or {}).get("match_duration_minutes")
+    return datetime.timedelta(minutes=int(own)) if own else fallback
+
+
 def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAULT_MATCH_DURATION, reset: bool = False) -> list[Match]:
     """First-draft field/time assignment for every not-yet-scheduled match
     across every stage, in stage-sequence then round order -- a still-TBD
@@ -484,6 +517,7 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
     fields = list(tournament.fields.all())
     if not fields:
         raise SchedulingError(_("Add at least one field before generating a schedule."))
+    run_duration = match_duration  # the run's default game length; a stage may override it for its own games
 
     default_gap = datetime.timedelta(minutes=tournament.default_gap_minutes)  # the tournament's own setting, 5 minutes unless changed
 
@@ -499,8 +533,8 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
     schedule_blocks = list(ScheduleBlock.objects.filter(tournament=tournament).select_related("field").prefetch_related("teams"))
     occupied = [_occupied_window(block.starts_at, block.ends_at, field_id=block.field_id, team_ids=frozenset(team.id for team in block.teams.all())) for block in schedule_blocks]
     occupied += [
-        _occupied_window(match.scheduled_start, match.scheduled_start + match_duration, field_id=match.field_id, team_ids=frozenset(team_id for team_id in (match.home_team_id, match.away_team_id) if team_id))
-        for match in Match.objects.filter(stage__tournament=tournament, scheduled_start__isnull=False)
+        _occupied_window(match.scheduled_start, match.scheduled_start + _duration_of(match, match_duration), field_id=match.field_id, team_ids=frozenset(team_id for team_id in (match.home_team_id, match.away_team_id) if team_id))
+        for match in Match.objects.filter(stage__tournament=tournament, scheduled_start__isnull=False).select_related("stage")
     ]
 
     # The tournament's own start date, not "today" -- a draft generated a
@@ -520,9 +554,12 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
 
     scheduled: list[Match] = []
     for stage in tournament.stages.order_by("sequence"):
-        matches = list(stage.matches.filter(scheduled_start__isnull=True).order_by("round_number", "sequence"))
+        matches = list(stage.matches.filter(scheduled_start__isnull=True).select_related("stage").order_by("round_number", "sequence"))
+        stage_duration = _duration_of(matches[0], run_duration) if matches else run_duration
         for round_number in sorted({match.round_number for match in matches}):
-            for match in [m for m in matches if m.round_number == round_number]:
+            # first legs of a round are played before its second legs
+            for match in sorted([m for m in matches if m.round_number == round_number], key=lambda m: (m.leg_of_id is None, m.sequence)):
+                match_duration = stage_duration  # every game of a stage takes the stage's own time
                 field = min(fields, key=lambda f: field_clock[f.id])
                 candidate_start = field_clock[field.id]
                 is_first_game_on_field = not field_has_game[field.id]
@@ -750,8 +787,9 @@ def field_timeline(tournament) -> list[dict]:
                 # matches, or after the last one) still shows.
                 if index > 0 and match_start > cursor:
                     slots.append(_gap_slot(cursor, match_start, blackout_rules))
-                match_end = match_start + duration
-                match_minutes = duration.total_seconds() / 60
+                own = _duration_of(match, duration)
+                match_end = match_start + own
+                match_minutes = own.total_seconds() / 60
                 slots.append({"type": "match", "match": match, "start": match_start, "end": match_end, "minutes": match_minutes, "height_px": _slot_height_px(match_minutes)})
                 cursor = max(cursor, match_end)
             if cursor < window_end:
@@ -790,17 +828,17 @@ def validate_placement(match, field, start: datetime.datetime, end: datetime.dat
     ``allocate_schedule``'s own default run (and the board's own gap/height
     math) used to place it."""
     violations = []
-    other_duration = datetime.timedelta(minutes=field.tournament.default_match_duration_minutes)
+    default_duration = datetime.timedelta(minutes=field.tournament.default_match_duration_minutes)
 
-    overlapping_on_field = Match.objects.filter(field=field, scheduled_start__lt=end).exclude(pk=match.pk).exclude(scheduled_start__isnull=True)
-    if any(candidate.scheduled_start + other_duration > start for candidate in overlapping_on_field):
+    overlapping_on_field = Match.objects.filter(field=field, scheduled_start__lt=end).exclude(pk=match.pk).exclude(scheduled_start__isnull=True).select_related("stage")
+    if any(candidate.scheduled_start + _duration_of(candidate, default_duration) > start for candidate in overlapping_on_field):
         violations.append(str(_("Another match is already scheduled on this field at that time.")))
 
     for team in (match.home_team, match.away_team):
         if team is None:
             continue
-        team_matches = Match.objects.filter(stage__tournament_id=field.tournament_id, scheduled_start__lt=end).exclude(pk=match.pk).exclude(scheduled_start__isnull=True).filter(Q(home_team=team) | Q(away_team=team))
-        if any(candidate.scheduled_start + other_duration > start for candidate in team_matches):
+        team_matches = Match.objects.filter(stage__tournament_id=field.tournament_id, scheduled_start__lt=end).exclude(pk=match.pk).exclude(scheduled_start__isnull=True).filter(Q(home_team=team) | Q(away_team=team)).select_related("stage")
+        if any(candidate.scheduled_start + _duration_of(candidate, default_duration) > start for candidate in team_matches):
             violations.append(str(_("%(team)s already has a match scheduled at that time.") % {"team": team}))
 
     # Local wall-clock time, same reasoning as _skip_blackouts.
@@ -1078,7 +1116,7 @@ def resolve_group_slots(group: TournamentGroup, *, team_order: list | None = Non
     conflicts: list[str] = []
     for dependent in dependents.values():
         if dependent.scheduled_start and dependent.field_id:
-            end = dependent.scheduled_start + datetime.timedelta(minutes=dependent.stage.tournament.default_match_duration_minutes)
+            end = dependent.scheduled_start + datetime.timedelta(minutes=dependent.stage.match_minutes)
             conflicts.extend(f"{dependent}: {violation}" for violation in validate_placement(dependent, dependent.field, dependent.scheduled_start, end))
 
     return list(dependents.values()), conflicts
@@ -1108,7 +1146,7 @@ def reschedule_match(match: Match, *, field, scheduled_start: datetime.datetime)
     once it's already True) so staff can make several changes before
     running Generate schedule just once -- see ``allocate_schedule``, which
     clears it."""
-    end = scheduled_start + datetime.timedelta(minutes=field.tournament.default_match_duration_minutes)
+    end = scheduled_start + datetime.timedelta(minutes=match.stage.match_minutes)
     violations = validate_placement(match, field, scheduled_start, end)
     if violations:
         raise SchedulingError(" ".join(violations))
