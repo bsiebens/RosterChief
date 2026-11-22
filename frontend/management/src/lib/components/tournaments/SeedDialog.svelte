@@ -37,6 +37,9 @@
 		});
 	});
 
+	/** Round 1 pairs slot i with slot size + 1 - i (size = the bracket size, a power of two); a missing opponent is a bye. */
+	const size = $derived(Math.max(2, 2 ** Math.ceil(Math.log2(Math.max(slots.length, 2)))));
+	const opponent = (n: number) => (size + 1 - n > slots.length ? '' : String(size + 1 - n));
 	const used = $derived(new Set(slots.filter((s) => s.type === 'team' && s.team_id).map((s) => s.team_id)));
 	const body = () => ({
 		slots: slots.map((s) => (s.type === 'team' ? { type: 'team', team_id: s.team_id } : s.type === 'group' ? { type: 'group', group_id: s.group_id, rank: Number(s.rank) } : { type: 'skip' })),
@@ -78,8 +81,8 @@
 			</div>
 			<ol class="grid gap-2">
 				{#each slots as s, i (i)}
-					<li class="grid grid-cols-[2rem_7rem_1fr] items-center gap-2 sm:grid-cols-[2rem_8rem_1fr_6rem]">
-						<span class="font-mono text-xs text-muted">{i + 1}</span>
+					<li class="grid grid-cols-[3.5rem_7rem_1fr] items-center gap-2 sm:grid-cols-[3.5rem_8rem_1fr_6rem]">
+						<span class="font-mono text-xs text-muted" title={t('tn.seed.plays')}>{i + 1} <span class="text-[10px]">v {opponent(i + 1) || t('tn.seed.bye')}</span></span>
 						<select class="select select-bordered select-sm" aria-label={t('tn.seed.slot_type', { n: i + 1 })} bind:value={s.type}>
 							<option value="team">{t('tn.seed.type_team')}</option>
 							<option value="group">{t('tn.seed.type_group')}</option>
