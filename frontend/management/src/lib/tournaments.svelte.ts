@@ -123,6 +123,9 @@ export type MatchDoc = {
 	home_display: string;
 	away_display: string;
 };
+/** One step of a stage's ranking chain: `criterion` is a built-in name or `attr:<key>` for a match statistic. */
+export type Tiebreaker = { criterion: string; direction: 'most' | 'least' };
+export type AttributeDoc = { id: string; name: string; key: string; source: 'manual' | 'timeline'; event_type: string | null; aggregate: 'count' | 'sum' | null; position: number };
 export type StageDoc = {
 	id: string;
 	name: string;
@@ -134,8 +137,7 @@ export type StageDoc = {
 	points_win: number;
 	points_draw: number;
 	points_loss: number;
-	tiebreaker_1: string;
-	tiebreaker_2: string;
+	tiebreakers: Tiebreaker[];
 	match_count: number;
 	groups: { id: string; name: string }[];
 	needs_seed_choice: boolean;
@@ -162,7 +164,7 @@ export type ScheduleBlock = { id: string; title: string; starts_at: string; ends
 export const STATUSES = ['draft', 'published', 'in_progress', 'completed', 'cancelled'] as const;
 export const statusBadge = (s: string) => ({ draft: 'badge-ghost', published: 'badge-info', in_progress: 'badge-success', completed: 'badge-neutral', cancelled: 'badge-error' })[s] ?? 'badge-ghost';
 export const FORMATS = ['single_elim', 'double_elim', 'round_robin', 'groups', 'swiss', 'custom'] as const;
-export const TIEBREAKERS = ['goal_diff', 'goals_for', 'goals_against', 'won', 'head_to_head'] as const;
+export const TIEBREAKERS = ['goal_diff', 'goals_for', 'goals_against', 'wins', 'head_to_head'] as const;
 
 /** Formats an ISO date (YYYY-MM-DD) in the user's language, without a time-zone shift. */
 export function fmtDate(iso: string | null | undefined, opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' }): string {
