@@ -214,14 +214,13 @@
 				<div class="absolute overflow-hidden rounded-lg border text-xs shadow-sm transition-opacity {role(n.m.id) === 'self' ? 'border-ink bg-white ring-2 ring-ink' : role(n.m.id) === 'before' ? 'border-sky-500 bg-sky-50 ring-1 ring-sky-400' : role(n.m.id) === 'next' ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-400' : 'border-line bg-white'} {role(n.m.id) === 'other' ? 'opacity-35' : ''}" onmouseenter={() => (hover = n.m.id)} onmouseleave={() => (hover = null)} style:left="{n.col * (W + GAP)}px" style:top="{HEAD + n.y}px" style:width="{W}px" style:height="{H}px">
 					<div class="flex h-[18px] items-center justify-between gap-2 border-b border-line bg-subhead px-2 font-mono text-[10px] text-muted">
 						<span class="truncate">{n.m.round_label}</span>
-						{#if n.m.leg}<span class="flex shrink-0 items-center gap-2"><span>{t('tn.leg', { n: 1 })}</span><span>{t('tn.leg', { n: 2 })}</span><span class="w-5 text-right">Σ</span></span>{/if}
+						{#if n.m.leg}<span class="flex shrink-0 items-center gap-2"><span class="w-6 text-right">P1</span><span class="w-6 text-right">P2</span><span class="w-5 text-right">Σ</span></span>{/if}
 					</div>
 					{#each rows(n.m) as row, i (i)}
 						<div class="flex items-center justify-between gap-2 px-2 {i === 0 ? 'border-b border-line' : ''} {n.m.leg ? 'h-[34px]' : 'h-[28px]'}">
-							<span class="truncate {row.win ? 'font-bold text-ink' : 'text-ink/80'}">{row.name}</span>
+							<span class="flex min-w-0 items-baseline gap-1"><span class="truncate {row.win ? 'font-bold text-ink' : 'text-ink/80'}">{row.name}</span>{#if row.shots !== null && row.shots !== undefined}<span class="shrink-0 font-mono text-[10px] text-muted">({row.shots})</span>{/if}</span>
 							<span class="flex shrink-0 items-center gap-2 font-mono">
 								{#each row.legs as v, k (k)}<span class="w-6 text-right text-muted">{v}</span>{/each}
-								{#if row.shots !== null && row.shots !== undefined}<span class="text-[10px] text-muted">({row.shots})</span>{/if}
 								<span class="w-5 text-right font-bold {row.win ? 'text-ink' : 'text-ink/70'}">{row.total}</span>
 							</span>
 						</div>
