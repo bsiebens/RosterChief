@@ -234,7 +234,6 @@
 							{#if pl.status === 'in_progress'}<span class="ml-1 inline-block size-2 animate-pulse rounded-full bg-danger align-middle"></span>{/if}
 						</a>
 					{/each}
-					<span class="text-sm text-muted">{t('tn.aggregate', { h: game.legs.reduce((n, pl) => n + (pl.score_home ?? 0), 0), a: game.legs.reduce((n, pl) => n + (pl.score_away ?? 0), 0) })}</span>
 				</div>
 			{/if}
 			<p class="text-center text-xs text-muted">{t('tn.game.help')}</p>
