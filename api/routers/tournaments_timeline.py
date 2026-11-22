@@ -16,7 +16,7 @@ from api.schemas_tournaments import AttributeIn, AttributePatch, EventIn, EventP
 from formbuilder.services.management import Conflict
 from members.services.errors import Invalid
 from tournaments.models import MatchAttribute, MatchEvent, MatchEventType, TournamentRosterEntry
-from tournaments.services import timeline
+from tournaments.services import alerts, timeline
 from tournaments.services.scheduling import ATTR_PREFIX, stage_tiebreakers
 from tournaments.sports import ICE_HOCKEY_PENALTIES, PENALTY_LENGTHS, is_ice_hockey, normalise_position, penalty_minutes
 
@@ -250,6 +250,8 @@ def create_event(request, match_id: uuid.UUID, payload: EventIn):
     _apply_details(match, event, extra)
     c.validate(event)
     _changing(match, event.save)
+    if event.type in (MatchEvent.Type.GOAL, MatchEvent.Type.PENALTY):
+        alerts.after_commit(alerts.event_recorded, event.pk)
     return 201, {**event_out(event), "match": c.match_out(_match(match_id))}
 
 

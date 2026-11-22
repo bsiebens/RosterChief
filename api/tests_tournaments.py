@@ -739,6 +739,63 @@ class TournamentApiTests(TestCase):
         self.assertEqual([x["title"] for x in team_doc["blocks"]], ["Opening"])
         self.assertEqual(self.call("get", f"/{t.slug}/teams/{b.slug}", prefix="/public/tournaments").json()["blocks"], [])
 
+    def _subscription(self):
+        import base64
+
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+
+        point = ec.generate_private_key(ec.SECP256R1()).public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+        b64 = lambda raw: base64.urlsafe_b64encode(raw).decode().rstrip("=")  # noqa: E731
+        return {"endpoint": "https://fcm.googleapis.com/fcm/send/abc", "keys": {"p256dh": b64(point), "auth": b64(b"0123456789abcdef")}}
+
+    def test_visitors_follow_teams_and_get_alerts(self):
+        from notifications import gateways
+        from tournaments.services import alerts
+
+        t = self.make(status="in_progress")
+        a, b, c = self.foreign(t, "Alpha"), self.foreign(t, "Bravo"), self.foreign(t, "Charlie")
+        base = f"/{t.slug}/alerts"
+        with mock.patch("api.routers.public_tournaments._alerts_key", return_value="KEY"):
+            self.assertEqual(self.call("get", f"{base}/config", prefix="/public/tournaments").json()["public_key"], "KEY")
+            body = {**self._subscription(), "team_slugs": [a.slug], "prefs": {"goals": False}, "lang": "nl"}
+            r = self.call("put", base, None, body, prefix="/public/tournaments")
+            self.assertEqual((r.status_code, r.json()["team_slugs"], r.json()["prefs"]["goals"], r.json()["prefs"]["start"]), (200, [a.slug], False, True), r.content)
+            self.assertEqual(self.call("post", f"{base}/status", None, {"endpoint": body["endpoint"]}, prefix="/public/tournaments").json()["subscribed"], True)
+            bad = self.call("put", base, None, {**body, "keys": {"p256dh": "x", "auth": "y"}}, prefix="/public/tournaments")
+            self.assertEqual(bad.status_code, 422)
+        stage = TournamentStage.objects.create(tournament=t, name="RR", format="round_robin")
+        soon = timezone.now() + datetime.timedelta(minutes=4)
+        mine = Match.objects.create(stage=stage, round_number=1, sequence=0, home_team=a, away_team=b, scheduled_start=soon)
+        other = Match.objects.create(stage=stage, round_number=1, sequence=1, home_team=b, away_team=c, scheduled_start=soon)
+        block = ScheduleBlock.objects.create(tournament=t, title="Opening", starts_at=soon, ends_at=soon + datetime.timedelta(hours=1))
+        block.teams.add(a)
+        lunch = ScheduleBlock.objects.create(tournament=t, title="Lunch", kind="lunch", starts_at=soon, ends_at=soon + datetime.timedelta(hours=1))
+        lunch.teams.add(a)
+        sent = []
+        ok = gateways.GatewayResult(gateways.SENT)
+        with mock.patch.object(gateways.WebPushGateway, "send", side_effect=lambda target, message, **kw: sent.append((message.title, message.body, message.data["href"])) or ok):
+            self.assertEqual(alerts.send_due_alerts(), 2)  # my game and the block; not the other game, not the lunch
+            self.assertEqual(alerts.send_due_alerts(), 0)  # never twice
+            self.assertEqual(sorted(x[0] for x in sent), ["Opening over 5 minuten", "Wedstrijd over 5 minuten"])
+            sent.clear()
+            alerts.game_started(mine.pk)
+            self.assertEqual([x[0] for x in sent], ["Wedstrijd gestart"])
+            sent.clear()
+            MatchEvent.objects.create(match=mine, type="goal", side="home", minute=3, player="Ann")  # goals are switched off for this follower
+            alerts.event_recorded(MatchEvent.objects.get(match=mine).pk)
+            self.assertEqual(sent, [])
+            MatchEvent.objects.create(match=mine, type="penalty", side="away", minute=5, player="Bo")
+            alerts.event_recorded(MatchEvent.objects.get(match=mine, type="penalty").pk)
+            self.assertEqual([x[0] for x in sent], ["Strafbank"])
+            sent.clear()
+            alerts.game_ended(other.pk)
+            self.assertEqual(sent, [])  # a game of teams nobody follows
+        gone = gateways.GatewayResult(gateways.DEAD)
+        with mock.patch.object(gateways.WebPushGateway, "send", return_value=gone):
+            alerts.game_ended(mine.pk)
+        self.assertEqual(t.followers.count(), 0)  # a subscription the push service dropped is forgotten
+
     def test_public_endpoints_are_404_without_feature(self):
         t = self.make(status="published")
         self.features = Entitlements({})

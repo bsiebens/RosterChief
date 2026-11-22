@@ -17,6 +17,7 @@ from api.schemas_tournaments import BlockIn, BlockPatch, GenerateScheduleIn, Mat
 from formbuilder.services.management import Conflict
 from members.services.errors import Invalid
 from tournaments.models import Match, MatchAttribute, MatchAttributeValue, ScheduleBlock, Tournament, TournamentGroup, TournamentRosterEntry, TournamentStage, TournamentTeam
+from tournaments.services import alerts
 from tournaments.services import scheduling as svc
 
 router = Router(auth=AUTHENTICATORS)
@@ -298,6 +299,8 @@ def result(request, match_id: uuid.UUID, payload: ResultIn):
         )  # fmt: skip
         for attribute, value in values:
             MatchAttributeValue.objects.update_or_create(match=match, attribute=attribute, defaults={"home_value": value.home, "away_value": value.away})
+    if match.leg_of_id is None:  # the end of a game, not of its first period
+        alerts.after_commit(alerts.game_ended, match.pk)
     return {"match": c.match_out(_match(match_id)), "updated_match_ids": [m.pk for m in updated]}
 
 
@@ -333,6 +336,8 @@ def start(request, match_id: uuid.UUID, payload: GoaliesIn | None = None):
         _set_goalies(match, payload)
     match.status = Match.Status.IN_PROGRESS
     match.save(update_fields=["status", "home_goalie", "away_goalie"])
+    if match.first_leg is None:  # followers hear about the start of a game once, not again for its second period
+        alerts.after_commit(alerts.game_started, match.pk)
     return c.match_out(_match(match_id))
 
 

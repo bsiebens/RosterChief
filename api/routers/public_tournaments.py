@@ -16,7 +16,7 @@ from django.core.validators import validate_email
 from django.db import connection, transaction
 from django.db.models import Q
 from django.utils import timezone
-from ninja import File, Router, UploadedFile
+from ninja import Field, File, Router, Schema, UploadedFile
 from ninja.errors import HttpError
 
 from api.routers import tournaments_common as c
@@ -24,11 +24,14 @@ from api.routers.public_registration import _address, _count, _too_many
 from api.routers.tournaments_competition import stages_doc, standings_doc
 from api.routers.tournaments_roster import check_birth_date, check_position, lunch_days_for
 from api.routers.tournaments_timeline import event_out
+from api.routers.web_push import _valid_keys
 from api.schemas_tournaments import PlayerRowIn, PlayersIn, PublicRegistrationIn
 from members.services.errors import Invalid
 from news.services import render_body_html
+from notifications import gateways
+from notifications.models import PushSettings
 from sponsoring.models import Sponsor
-from tournaments.models import Match, ScheduleBlock, Tournament, TournamentRegistration, TournamentRegistrationPlayer, TournamentRosterEntry, TournamentRosterRole, TournamentTeam
+from tournaments.models import Match, ScheduleBlock, Tournament, TournamentFollower, TournamentRegistration, TournamentRegistrationPlayer, TournamentRosterEntry, TournamentRosterRole, TournamentTeam
 from tournaments.services import notifications
 from tournaments.sports import is_ice_hockey
 
@@ -205,6 +208,70 @@ def game(request, slug: str, match_id: str):
         "tournament": item(t), "ice_hockey": is_ice_hockey(getattr(connection.tenant, "sport", None)), "clock_direction": t.clock_direction,
         "periods": [{"match": d, "events": [event_out(e) for e in by_id[d["id"]].events.select_related("player_entry").all()]} for d in docs],
     }  # fmt: skip
+
+
+# --- push alerts -----------------------------------------------------------------------------------------------------------
+
+
+class AlertKeys(Schema):
+    p256dh: str = Field(min_length=1, max_length=255)
+    auth: str = Field(min_length=1, max_length=255)
+
+
+class AlertIn(Schema):
+    endpoint: str = Field(min_length=1, max_length=500)
+    keys: AlertKeys
+    team_slugs: list[str] = Field(default_factory=list, max_length=64)
+    prefs: dict[str, bool] = Field(default_factory=dict)
+    lang: str = Field(default="en", max_length=5)
+
+
+class AlertEndpoint(Schema):
+    endpoint: str = Field(min_length=1, max_length=500)
+
+
+def _alerts_key() -> str | None:
+    return (gateways.webpush_public_key() or None) if PushSettings.get().webpush_enabled else None
+
+
+def _follower_doc(f: TournamentFollower | None) -> dict:
+    if f is None:
+        return {"subscribed": False, "team_slugs": [], "prefs": dict.fromkeys(TournamentFollower.PREFS, True)}
+    return {"subscribed": True, "team_slugs": [t.slug for t in f.teams.all()], "prefs": {k: f.wants(k) for k in TournamentFollower.PREFS}}
+
+
+@router.get("/{slug}/alerts/config", summary="Whether push alerts are available, and the key a browser subscribes with", operation_id="public_tournaments_alerts_config")
+def alerts_config(request, slug: str):
+    _tournament(request, slug)
+    return {"public_key": _alerts_key()}
+
+
+@router.post("/{slug}/alerts/status", summary="What this browser follows", operation_id="public_tournaments_alerts_status")
+def alerts_status(request, slug: str, payload: AlertEndpoint):
+    t = _tournament(request, slug)
+    return _follower_doc(t.followers.filter(endpoint=payload.endpoint).prefetch_related("teams").first())
+
+
+@router.put("/{slug}/alerts", summary="Follow teams of a tournament with this browser (creates or replaces the subscription)", operation_id="public_tournaments_alerts_follow")
+def alerts_follow(request, slug: str, payload: AlertIn):
+    t = _tournament(request, slug)
+    if not _alerts_key():
+        raise HttpError(503, "Push alerts are unavailable.")
+    if not gateways.is_allowed_push_endpoint(payload.endpoint) or not _valid_keys(payload.keys):
+        raise HttpError(422, "Invalid push subscription.")
+    teams = list(t.teams.filter(slug__in=payload.team_slugs, withdrawn_at__isnull=True))
+    prefs = {k: bool(payload.prefs.get(k, True)) for k in TournamentFollower.PREFS}
+    lang = payload.lang if payload.lang in ("en", "nl", "fr") else "en"
+    follower, _created = TournamentFollower.objects.update_or_create(tournament=t, endpoint=payload.endpoint, defaults={"p256dh": payload.keys.p256dh, "auth": payload.keys.auth, "prefs": prefs, "lang": lang})
+    follower.teams.set(teams)
+    return _follower_doc(follower)
+
+
+@router.post("/{slug}/alerts/unfollow", summary="Stop all alerts of this tournament for this browser", operation_id="public_tournaments_alerts_unfollow", response={204: None})
+def alerts_unfollow(request, slug: str, payload: AlertEndpoint):
+    t = _tournament(request, slug)
+    t.followers.filter(endpoint=payload.endpoint).delete()
+    return 204, None
 
 
 # --- registration ----------------------------------------------------------------------------------------------------------

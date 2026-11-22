@@ -594,6 +594,7 @@ class TournamentRegistration(UUIDModel):
     status = models.CharField(_("status"), max_length=10, choices=Status.choices, default=Status.PENDING)
     rejection_reason = models.TextField(_("rejection reason"), blank=True)
     status_token = models.CharField(_("status token"), max_length=64, unique=True, default=_generate_status_token, editable=False)
+    messages_seen_at = models.DateTimeField(_("messages seen at"), null=True, blank=True, help_text=_("When the team last opened its messages: newer organiser messages are unread."))
     submitted_at = models.DateTimeField(_("submitted at"), auto_now_add=True)
     reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("reviewed by"))
     reviewed_at = models.DateTimeField(_("reviewed at"), null=True, blank=True)
@@ -1332,3 +1333,66 @@ class MatchEvent(UUIDModel):
 
     def __str__(self):
         return f"{self.type} ({self.side or '-'}) {self.match_id}"
+
+
+class TournamentFollower(UUIDModel):
+    """A visitor's browser that follows teams of a tournament for push alerts (no account: the push subscription is the identity).
+    ``prefs`` holds which alerts it wants: ``pre_game``, ``start``, ``goals``, ``penalties``, ``end`` and ``blocks`` (booleans)."""
+
+    PREFS = ("pre_game", "start", "goals", "penalties", "end", "blocks")
+
+    tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE, related_name="followers", verbose_name=_("tournament"))
+    teams = models.ManyToManyField("TournamentTeam", blank=True, related_name="followers", verbose_name=_("followed teams"))
+    endpoint = models.TextField(_("endpoint"))
+    p256dh = models.CharField(_("p256dh key"), max_length=255)
+    auth = models.CharField(_("auth secret"), max_length=255)
+    prefs = models.JSONField(_("alerts"), default=dict, blank=True)
+    lang = models.CharField(_("language"), max_length=5, default="en")
+    last_seen = models.DateTimeField(_("last seen"), auto_now=True)
+
+    class Meta:
+        verbose_name = _("tournament follower")
+        verbose_name_plural = _("tournament followers")
+        constraints = [models.UniqueConstraint(fields=["tournament", "endpoint"], name="tournaments_follower_unique_endpoint")]
+
+    def __str__(self):
+        return f"follower {self.endpoint[:30]} of {self.tournament_id}"
+
+    def wants(self, kind: str) -> bool:
+        return bool(self.prefs.get(kind, True))
+
+
+class TournamentAlertLog(UUIDModel):
+    """Which timed alerts (a game or block about to start) have been sent already, so a minute-by-minute job never repeats one."""
+
+    tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE, related_name="alert_log", verbose_name=_("tournament"))
+    kind = models.CharField(_("kind"), max_length=20)
+    key = models.CharField(_("key"), max_length=64, help_text=_("The id of the match or block the alert was about."))
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tournament", "kind", "key"], name="tournaments_alertlog_unique")]
+
+
+class TournamentMessage(UUIDModel):
+    """One message between the organisers and a team's responsible person. ``registration`` is the team's application (its private
+    link is how the team gets in); empty means a broadcast to every team. The team side has no account, so ``author`` is a name."""
+
+    class Sender(models.TextChoices):
+        ORGANISER = "organiser", _("organiser")
+        TEAM = "team", _("team")
+
+    tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE, related_name="messages", verbose_name=_("tournament"))
+    registration = models.ForeignKey("TournamentRegistration", on_delete=models.CASCADE, null=True, blank=True, related_name="messages", verbose_name=_("registration"))
+    sender = models.CharField(_("sender"), max_length=10, choices=Sender.choices)
+    author = models.CharField(_("author"), max_length=150, blank=True)
+    body = models.TextField(_("message"), max_length=4000)
+    read_by_organisers = models.BooleanField(_("read by the organisers"), default=False)
+
+    class Meta:
+        verbose_name = _("tournament message")
+        verbose_name_plural = _("tournament messages")
+        ordering = ["created"]
+        indexes = [models.Index(fields=["tournament", "registration", "created"])]
+
+    def __str__(self):
+        return f"{self.sender} message in {self.tournament_id}"

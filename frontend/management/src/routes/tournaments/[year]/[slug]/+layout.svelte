@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import LangSwitcher from '#lib/components/LangSwitcher.svelte';
+	import AlertsButton from '#lib/components/tournaments/public/AlertsButton.svelte';
 	import LiveBadge from '#lib/components/tournaments/LiveBadge.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { range } from '#lib/tournaments-public.ts';
@@ -32,7 +33,7 @@
 				{#if club}<ClubCrest name={club.name} logoUrl={club.logo_url} size={32} />{/if}
 				<span class="font-display text-sm font-extrabold tracking-[.1em] uppercase">{club?.name ?? t('tp.kicker')}</span>
 			</a>
-			<LangSwitcher />
+			<div class="flex items-center gap-3">{#if tn.status === 'published' || tn.status === 'in_progress'}<AlertsButton slug={tn.slug} />{/if}<LangSwitcher /></div>
 		</div>
 		<div class="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-x-8 gap-y-4 px-4 sm:px-6 {slim ? 'py-5' : 'py-10 sm:py-14'}">
 			<div class="min-w-0">
