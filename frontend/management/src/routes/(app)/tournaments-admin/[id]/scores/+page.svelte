@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Check, ClipboardPen, ListOrdered, Pencil, Plus, Trash2 } from '@lucide/svelte';
+	import { Check, ChevronDown, ChevronRight, ClipboardPen, ListOrdered, Pencil, Plus, Trash2 } from '@lucide/svelte';
 	import { api, type ApiCall } from '#lib/management-api.ts';
 	import Alert from '#lib/components/Alert.svelte';
 	import NoticeAlert from '#lib/components/NoticeAlert.svelte';
@@ -18,6 +18,11 @@
 	const attrs = $derived(data.attributes ?? []);
 	const manualAttrs = $derived(attrs.filter((a) => a.source === 'manual'));
 	const timelineAttrs = $derived(attrs.filter((a) => a.source === 'timeline'));
+
+	// Rounds fold away; only the round being played (the first one not finished) starts open, the rest can be opened by hand.
+	let roundOpen = $state<Record<string, boolean>>({});
+	const currentRound = (st: { rounds: { round_number: number; all_complete: boolean }[] }) => (st.rounds.find((r) => !r.all_complete) ?? st.rounds[st.rounds.length - 1])?.round_number;
+	const isRoundOpen = (stageId: string, st: { rounds: { round_number: number; all_complete: boolean }[] }, n: number) => roundOpen[`${stageId}:${n}`] ?? n === currentRound(st);
 
 	let open = $state(false);
 	let m = $state<MatchDoc | null>(null);
@@ -113,23 +118,31 @@
 					</div>
 				</div>
 				{#each st.rounds as r (r.round_number)}
+					{@const expanded = isRoundOpen(st.stage.id, st, r.round_number)}
 					<div class="grid gap-1">
-						<h3 class="flex items-center gap-2 text-xs font-bold text-muted">{r.label}{#if r.all_complete}<span class="badge badge-success badge-xs">{t('tn.scores.complete')}</span>{/if}</h3>
-						<div class="overflow-x-auto">
+						<h3 class="text-xs font-bold text-muted">
+							<button class="flex w-full cursor-pointer items-center gap-2 py-1 text-left" type="button" aria-expanded={expanded} onclick={() => (roundOpen[`${st.stage.id}:${r.round_number}`] = !expanded)}>
+								{#if expanded}<ChevronDown size={14} aria-hidden="true" />{:else}<ChevronRight size={14} aria-hidden="true" />{/if}
+								{r.label}
+								<span class="font-normal">({r.matches.length})</span>
+								{#if r.all_complete}<span class="badge badge-success badge-xs">{t('tn.scores.complete')}</span>{/if}
+							</button>
+						</h3>
+						<div class="overflow-x-auto" class:hidden={!expanded}>
 							<table class="table table-sm">
 								<tbody>
 									{#each r.matches as x (x.id)}
 										<tr class="hover:bg-paper">
 											<td class="w-36 font-mono text-xs whitespace-nowrap">{x.scheduled_start ? fmtDateTime(x.scheduled_start) : '—'}</td>
-											<td class="hidden w-24 text-xs sm:table-cell">{x.field?.name ?? ''}</td>
+											<td class="hidden text-xs whitespace-nowrap sm:table-cell">{x.field?.name ?? ''}</td>
 											<td class="text-right text-sm">{x.home_display}</td>
 											<td class="w-28 text-center font-mono text-sm font-bold whitespace-nowrap">
 												{#if done(x)}{x.score_home} – {x.score_away}{#if x.went_to_overtime} <span class="text-xs font-normal text-muted">{t('tn.scores.ot')}</span>{/if}{#if x.penalty_home !== null} <span class="text-xs font-normal text-muted">({x.penalty_home}–{x.penalty_away})</span>{/if}{:else}<span class="text-muted">vs</span>{/if}{#if x.leg}<div class="text-[10px] font-normal text-muted">{t('tn.leg', { n: x.leg })}{#if x.aggregate} · {t('tn.aggregate', { h: x.aggregate[0], a: x.aggregate[1] })}{/if}</div>{/if}{#each attrs as a (a.key)}{#if x.attributes?.[a.key] && (x.attributes[a.key].home || x.attributes[a.key].away)}<div class="text-xs font-normal text-muted" title={a.name}>{a.name} {x.attributes[a.key].home}–{x.attributes[a.key].away}</div>{/if}{/each}
 											</td>
 											<td class="text-sm">{x.away_display}</td>
-											<td class="w-32 text-right"><div class="flex items-center justify-end gap-1">
-												<button class="btn btn-outline btn-xs btn-square relative" type="button" aria-label={t('tn.scores.timeline')} title={t('tn.scores.timeline')} onclick={() => openTimeline(x)}><ListOrdered size={13} />{#if (x.event_count ?? 0) > 0}<span class="badge badge-neutral badge-xs absolute -top-1.5 -right-1.5">{x.event_count}</span>{/if}</button>
-												{#if canOperate}<button class="btn btn-outline btn-xs" type="button" disabled={!x.home_team || !x.away_team} onclick={() => openResult(x, st.stage)}>{done(x) ? t('common.edit') : t('tn.scores.enter')}</button>{/if}
+											<td class="text-right"><div class="flex items-center justify-end gap-1">
+												<button class="btn btn-outline btn-xs relative gap-1" type="button" title={t('tn.scores.timeline')} onclick={() => openTimeline(x)}><ListOrdered size={13} aria-hidden="true" /> {t('tn.scores.timeline')}{#if (x.event_count ?? 0) > 0}<span class="badge badge-neutral badge-xs absolute -top-1.5 -right-1.5">{x.event_count}</span>{/if}</button>
+												{#if canOperate}<button class="btn btn-outline btn-xs gap-1" type="button" disabled={!x.home_team || !x.away_team} onclick={() => openResult(x, st.stage)}>{#if done(x)}<Pencil size={13} aria-hidden="true" /> {t('common.edit')}{:else}<ClipboardPen size={13} aria-hidden="true" /> {t('tn.scores.enter')}{/if}</button>{/if}
 											</div></td>
 										</tr>
 									{/each}

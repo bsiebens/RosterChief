@@ -484,7 +484,7 @@ const rows: [string, string, string, string][] = [
 
 	// scores, standings
 	['tn.scores.empty', 'No matches yet. Generate matches under Fields & stages.', 'Nog geen wedstrijden. Genereer wedstrijden bij Velden & fases.', 'Aucun match. Générez des matchs dans Terrains et phases.'],
-	['tn.scores.enter', 'Enter result', 'Resultaat invoeren', 'Saisir le résultat'],
+	['tn.scores.enter', 'Result', 'Resultaat', 'Résultat'],
 	['tn.scores.saved', 'Result saved.', 'Resultaat opgeslagen.', 'Résultat enregistré.'],
 	['tn.scores.complete', 'Complete', 'Afgewerkt', 'Terminé'],
 	['tn.scores.ot', 'OT', 'VL', 'Prol.'],
