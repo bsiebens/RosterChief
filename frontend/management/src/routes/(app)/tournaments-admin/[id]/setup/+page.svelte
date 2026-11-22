@@ -5,7 +5,6 @@
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
-	import Toast from '#lib/components/Toast.svelte';
 	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -356,6 +355,7 @@
 <svelte:head><title>{pageTitle(t('tn.tab.setup'))}</title></svelte:head>
 
 {#snippet err()}
+	{#if run.notice}<Alert kind="success">{run.notice}</Alert>{/if}
 	{#if run.error && !Object.keys(run.fields).length}<Alert kind="error">{run.error}</Alert>{/if}
 {/snippet}
 
@@ -1031,4 +1031,3 @@
 		</div>
 	</form>
 </Modal>
-<Toast message={run.notice} onhide={() => (run.notice = '')} />

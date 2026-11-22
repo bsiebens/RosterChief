@@ -4,7 +4,6 @@
 	import TeamLogo from '#lib/components/tournaments/TeamLogo.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
-	import Toast from '#lib/components/Toast.svelte';
 	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -66,6 +65,7 @@
 <svelte:head><title>{pageTitle(t('tn.tab.teams'))}</title></svelte:head>
 
 <div class="grid gap-4">
+	{#if run.notice}<Alert kind="success">{run.notice}</Alert>{/if}
 	{#if run.error && !addOpen && !withdrawOpen && !deleteOpen}<Alert kind="error">{run.error}</Alert>{/if}
 	{#if data.error}
 		<Alert kind="error">{t('common.error.generic')}</Alert>
@@ -195,4 +195,3 @@
 		</div>
 	</div>
 </Modal>
-<Toast message={run.notice} onhide={() => (run.notice = '')} />

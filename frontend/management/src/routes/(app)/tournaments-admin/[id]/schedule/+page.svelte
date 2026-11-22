@@ -4,7 +4,6 @@
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import ScheduleBoard from '#lib/components/tournaments/ScheduleBoard.svelte';
-	import Toast from '#lib/components/Toast.svelte';
 	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -120,6 +119,7 @@
 	{#if needsRegen}
 		<Alert kind="warning" title={t('tn.sched.regen_title')}>{t('tn.sched.regen_body')}</Alert>
 	{/if}
+	{#if run.notice}<Alert kind="success">{run.notice}</Alert>{/if}
 	{#if run.error && !moveOpen && !blockOpen && !delOpen && !clearOpen}<Alert kind="error">{run.error}</Alert>{/if}
 
 	{#if data.error || !sched}
@@ -172,6 +172,7 @@
 				<p class="text-sm text-muted">{t('tn.lunch.disabled')} <a class="link font-semibold" href="{TBASE}/{tn.id}">{t('tn.lunch.disabled_link')}</a>.</p>
 			{:else}
 				<p class="text-xs text-muted">{t('tn.lunch.help')}</p>
+				{#if lrun.notice}<Alert kind="success">{lrun.notice}</Alert>{/if}
 				{#if lrun.error}<Alert kind="error">{lrun.error}{#each lerrOther as m (m)} {m}{/each}</Alert>{/if}
 				<div class="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
 					<Field label={t('tn.lunch.duration')} type="number" min="1" bind:value={lset.duration_minutes} error={lerr('duration_minutes')} help={t('tn.lunch.duration_help')} disabled={!canOperate} />
@@ -379,5 +380,3 @@
 		</div>
 	</div>
 </Modal>
-<Toast message={lrun.notice} onhide={() => (lrun.notice = '')} />
-<Toast message={run.notice} onhide={() => (run.notice = '')} />
