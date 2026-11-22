@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUp, CalendarClock, Coffee, GripVertical, Layers, LayoutGrid, MapPin, Network, Pencil, Plus, Repeat, Shuffle, Trash2, Users, Wrench, X, GitFork } from '@lucide/svelte';
+	import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUp, CalendarClock, Coffee, GripVertical, Layers, LayoutGrid, MapPin, Network, Pencil, Plus, BarChart3, Repeat, Shuffle, Trash2, Users, Wrench, X, GitFork } from '@lucide/svelte';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import Alert from '#lib/components/Alert.svelte';
@@ -10,7 +10,7 @@
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
-	import { fmtDateTime, fmtDay, FORMATS, fromLocalInput, numOrNull, Runner, strOrNull, TBASE, TIEBREAKERS, toLocalInput, type BreakRule, type FieldDoc, type MatchDoc, type StageDoc } from '#lib/tournaments.svelte.ts';
+	import { fmtDateTime, fmtDay, FORMATS, fromLocalInput, numOrNull, Runner, strOrNull, TBASE, TIEBREAKERS, toLocalInput, type AttributeDoc, type BreakRule, type FieldDoc, type MatchDoc, type StageDoc, type Tiebreaker } from '#lib/tournaments.svelte.ts';
 
 	let { data } = $props();
 	const tn = $derived(data.tournament);
@@ -53,8 +53,8 @@
 	}
 
 	// --- stages
-	type StageForm = { name: string; format: string; placement: boolean; rounds: string; num_groups: string; points_win: string; points_draw: string; points_loss: string; tiebreaker_1: string; tiebreaker_2: string };
-	const blankStage = (): StageForm => ({ name: '', format: 'round_robin', placement: false, rounds: '', num_groups: '', points_win: '3', points_draw: '1', points_loss: '0', tiebreaker_1: 'goal_diff', tiebreaker_2: 'goals_for' });
+	type StageForm = { name: string; format: string; placement: boolean; rounds: string; num_groups: string; points_win: string; points_draw: string; points_loss: string; tiebreakers: Tiebreaker[] };
+	const blankStage = (): StageForm => ({ name: '', format: 'round_robin', placement: false, rounds: '', num_groups: '', points_win: '3', points_draw: '1', points_loss: '0', tiebreakers: [{ criterion: 'goal_diff', direction: 'most' }, { criterion: 'goals_for', direction: 'most' }] });
 	let stageOpen = $state(false);
 	let editStage = $state<StageDoc | null>(null);
 	let sf = $state<StageForm>(blankStage());
@@ -63,7 +63,7 @@
 	function openStage(s: StageDoc | null) {
 		editStage = s;
 		sf = s
-			? { name: s.name, format: s.format, placement: s.placement, rounds: s.rounds === null ? '' : String(s.rounds), num_groups: s.num_groups === null ? '' : String(s.num_groups), points_win: String(s.points_win), points_draw: String(s.points_draw), points_loss: String(s.points_loss), tiebreaker_1: s.tiebreaker_1, tiebreaker_2: s.tiebreaker_2 }
+			? { name: s.name, format: s.format, placement: s.placement, rounds: s.rounds === null ? '' : String(s.rounds), num_groups: s.num_groups === null ? '' : String(s.num_groups), points_win: String(s.points_win), points_draw: String(s.points_draw), points_loss: String(s.points_loss), tiebreakers: (s.tiebreakers ?? []).map((x) => ({ ...x })) }
 			: blankStage();
 		run.clear();
 		stageOpen = true;
@@ -79,11 +79,65 @@
 			points_win: Number(sf.points_win || 0),
 			points_draw: Number(sf.points_draw || 0),
 			points_loss: Number(sf.points_loss || 0),
-			tiebreaker_1: sf.tiebreaker_1,
-			tiebreaker_2: sf.tiebreaker_2
+			tiebreakers: sf.tiebreakers.map((x) => ({ criterion: x.criterion, direction: x.criterion === 'head_to_head' ? 'most' : x.direction }))
 		};
 		if (await (editStage ? run.patch(`${base}/stages/${editStage.id}`, body) : run.post(`${base}/stages`, body))) stageOpen = false;
 	}
+	// --- tie breakers (the ordered chain edited inside the stage dialog)
+	const attrs = $derived<AttributeDoc[]>(data.attributes?.results ?? []);
+	/** Every criterion a stage can rank by: the built-in ones plus one per match statistic. */
+	const criteria = $derived<string[]>([...TIEBREAKERS, ...attrs.map((a) => `attr:${a.key}`)]);
+	const criterionLabel = (c: string) => (c.startsWith('attr:') ? (attrs.find((a) => `attr:${a.key}` === c)?.name ?? c.slice(5)) : t(`tn.tiebreaker.${c}`));
+	const unusedCriterion = $derived(criteria.find((c) => !sf.tiebreakers.some((x) => x.criterion === c)));
+	const chainText = (list: Tiebreaker[]) => list.map((x) => criterionLabel(x.criterion)).join(' › ');
+	function addTiebreaker() {
+		if (unusedCriterion) sf.tiebreakers.push({ criterion: unusedCriterion, direction: unusedCriterion === 'goals_against' ? 'least' : 'most' });
+	}
+	function moveTiebreaker(from: number, to: number) {
+		if (to < 0 || to >= sf.tiebreakers.length) return;
+		const next = [...sf.tiebreakers];
+		next.splice(to, 0, next.splice(from, 1)[0]);
+		sf.tiebreakers = next;
+	}
+	function setCriterion(i: number, c: string) {
+		sf.tiebreakers[i].criterion = c;
+		if (c === 'head_to_head') sf.tiebreakers[i].direction = 'most';
+	}
+
+	// --- match statistics (custom attributes)
+	type AttrForm = { name: string; source: 'manual' | 'timeline'; event_type: string; aggregate: 'count' | 'sum' };
+	let attrOpen = $state(false);
+	let editAttr = $state<AttributeDoc | null>(null);
+	let af2 = $state<AttrForm>({ name: '', source: 'manual', event_type: '', aggregate: 'count' });
+	let delAttr = $state<AttributeDoc | null>(null);
+	let delAttrOpen = $state(false);
+	const eventTypes = $derived(data.attributes?.event_types ?? []);
+	const attrSource = (a: AttributeDoc) =>
+		a.source === 'timeline' && a.event_type && a.aggregate
+			? t('tn.attr.source_timeline', { event: t(`tn.event.${a.event_type}`), agg: t(`tn.attr.agg.${a.aggregate}`) })
+			: t('tn.attr.source.manual');
+	function openAttr(a: AttributeDoc | null) {
+		editAttr = a;
+		af2 = a ? { name: a.name, source: a.source, event_type: a.event_type ?? eventTypes[0] ?? '', aggregate: a.aggregate ?? 'count' } : { name: '', source: 'manual', event_type: eventTypes[0] ?? '', aggregate: 'count' };
+		run.clear();
+		attrOpen = true;
+	}
+	async function saveAttr(e: SubmitEvent) {
+		e.preventDefault();
+		const timeline = af2.source === 'timeline';
+		if (editAttr) {
+			// The source cannot change; only a timeline attribute has an event type and calculation to edit.
+			const body = { name: af2.name.trim(), ...(editAttr.source === 'timeline' ? { event_type: af2.event_type, aggregate: af2.aggregate } : {}) };
+			if (await run.patch(`${base}/attributes/${editAttr.id}`, body)) attrOpen = false;
+		} else {
+			const body = { name: af2.name.trim(), source: af2.source, ...(timeline ? { event_type: af2.event_type, aggregate: af2.aggregate } : {}) };
+			if (await run.post(`${base}/attributes`, body)) attrOpen = false;
+		}
+	}
+	async function removeAttr() {
+		if (delAttr && (await run.del(`${base}/attributes/${delAttr.id}`))) delAttrOpen = false;
+	}
+
 	// The visible order of the break rules: follows the server, changes at once while dragging or using the arrows, then is saved.
 	let ruleList = $state<BreakRule[]>([]);
 	$effect(() => {
@@ -307,7 +361,7 @@
 	{#if data.error || !setup}
 		<Alert kind="error">{t('common.error.generic')}</Alert>
 	{:else}
-		{#if run.error && !fieldOpen && !stageOpen && !ruleOpen && !delFieldOpen && !delStageOpen && !regenOpen && !delRuleOpen && !replaceOpen && !moveOpen && !delMatchOpen && !addOpen}<Alert kind="error">{run.error}</Alert>{/if}
+		{#if run.error && !fieldOpen && !stageOpen && !ruleOpen && !delFieldOpen && !delStageOpen && !regenOpen && !delRuleOpen && !attrOpen && !delAttrOpen && !replaceOpen && !moveOpen && !delMatchOpen && !addOpen}<Alert kind="error">{run.error}</Alert>{/if}
 
 		<section class="card card-body card-hl gap-3">
 			<div class="flex flex-wrap items-center justify-between gap-2">
@@ -418,6 +472,7 @@
 											<dd class="text-sm font-semibold text-ink">{s.points_win} / {s.points_draw} / {s.points_loss}</dd>
 										</div>
 									</dl>
+									{#if s.tiebreakers?.length}<p class="truncate text-[11px] text-muted" title={t('tn.setup.tb_chain', { chain: chainText(s.tiebreakers) })}>{t('tn.setup.tb_chain', { chain: chainText(s.tiebreakers) })}</p>{/if}
 									<div class="grid grid-cols-2 gap-2">
 										<button class="btn btn-outline btn-xs w-full gap-1 {canGenerate ? '' : 'col-span-2'}" type="button" aria-pressed={isSel} onclick={() => toggleStage(s.id)}>
 											{isSel ? t('tn.setup.hide_matches') : t('tn.setup.view_matches', { n: s.match_count })}
@@ -504,6 +559,47 @@
 							{/if}
 						{/if}
 					</div>
+				</div>
+			{/if}
+		</section>
+
+		<section class="card card-body card-hl gap-3">
+			<div class="flex flex-wrap items-center justify-between gap-2">
+				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><BarChart3 size={16} class="shrink-0" aria-hidden="true" /> {t('tn.attr.title')}</h2>
+				{#if canOperate}<button class="btn btn-outline btn-sm gap-1" type="button" onclick={() => openAttr(null)}><Plus size={14} /> {t('tn.attr.add')}</button>{/if}
+			</div>
+			<p class="text-xs text-muted">{t('tn.attr.help')}</p>
+			{#if !data.attributes}
+				<Alert kind="error">{t('common.error.generic')}</Alert>
+			{:else if !attrs.length}
+				<p class="text-sm text-muted">{t('tn.attr.none')}</p>
+			{:else}
+				<div class="overflow-x-auto rounded-lg border border-line">
+					<table class="table">
+						<thead>
+							<tr>
+								<th class="w-64">{t('tn.attr.col.name')}</th>
+								<th>{t('tn.attr.col.source')}</th>
+								{#if canOperate}<th></th>{/if}
+							</tr>
+						</thead>
+						<tbody>
+							{#each attrs as a (a.id)}
+								<tr class="hover:bg-paper">
+									<td class="font-semibold text-ink">{a.name}</td>
+									<td class="text-sm">{attrSource(a)}</td>
+									{#if canOperate}
+										<td class="text-right whitespace-nowrap">
+											<div class="flex items-center justify-end gap-1">
+												<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('tn.setup.edit_named', { name: a.name })} title={t('tn.setup.edit_named', { name: a.name })} onclick={() => openAttr(a)}><Pencil size={13} /></button>
+												<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.setup.delete_named', { name: a.name })} title={t('tn.setup.delete_named', { name: a.name })} onclick={() => { delAttr = a; run.clear(); delAttrOpen = true; }}><Trash2 size={13} /></button>
+											</div>
+										</td>
+									{/if}
+								</tr>
+							{/each}
+						</tbody>
+					</table>
 				</div>
 			{/if}
 		</section>
@@ -647,21 +743,88 @@
 			<Field label={t('tn.setup.points_draw')} type="number" bind:value={sf.points_draw} error={run.fields.points_draw} />
 			<Field label={t('tn.setup.points_loss')} type="number" bind:value={sf.points_loss} error={run.fields.points_loss} />
 		</div>
-		<div class="grid grid-cols-2 gap-3">
-			{#each [['tiebreaker_1', t('tn.setup.tiebreaker_1')], ['tiebreaker_2', t('tn.setup.tiebreaker_2')]] as [key, label] (key)}
-				<div class="form-control w-full">
-					<label class="label" for="st-{key}"><span class="label-text">{label}</span></label>
-					<select id="st-{key}" class="select select-bordered w-full" bind:value={sf[key as 'tiebreaker_1' | 'tiebreaker_2']}>
-						{#each TIEBREAKERS as tb (tb)}<option value={tb}>{t(`tn.tiebreaker.${tb}`)}</option>{/each}
+		<fieldset class="grid gap-2">
+			<legend class="label"><span class="label-text">{t('tn.setup.tiebreakers')}</span></legend>
+			<p class="text-xs text-muted">{t('tn.setup.tiebreakers_help')}</p>
+			{#if !sf.tiebreakers.length}<p class="text-sm text-muted">{t('tn.setup.tb_none')}</p>{/if}
+			{#each sf.tiebreakers as tb, i (tb.criterion)}
+				<div class="grid grid-cols-[1.5rem_minmax(0,1fr)_auto_auto] items-center gap-2 sm:grid-cols-[1.5rem_minmax(0,1fr)_9rem_auto]">
+					<span class="font-mono text-xs text-muted">{i + 1}.</span>
+					<select class="select select-bordered select-sm w-full" aria-label={t('tn.setup.tb_criterion', { n: i + 1 })} value={tb.criterion} onchange={(e) => setCriterion(i, e.currentTarget.value)}>
+						{#each criteria as c (c)}<option value={c} disabled={c !== tb.criterion && sf.tiebreakers.some((x) => x.criterion === c)}>{criterionLabel(c)}</option>{/each}
 					</select>
+					{#if tb.criterion === 'head_to_head'}
+						<span></span>
+					{:else}
+						<select class="select select-bordered select-sm w-full" aria-label={t('tn.setup.tb_direction')} bind:value={tb.direction}>
+							<option value="most">{t('tn.setup.tb_most')}</option>
+							<option value="least">{t('tn.setup.tb_least')}</option>
+						</select>
+					{/if}
+					<span class="flex items-center gap-0.5">
+						<button class="btn btn-ghost btn-xs btn-square" type="button" disabled={i === 0} aria-label={t('tn.setup.tb_up')} title={t('tn.setup.tb_up')} onclick={() => moveTiebreaker(i, i - 1)}><ArrowUp size={14} /></button>
+						<button class="btn btn-ghost btn-xs btn-square" type="button" disabled={i === sf.tiebreakers.length - 1} aria-label={t('tn.setup.tb_down')} title={t('tn.setup.tb_down')} onclick={() => moveTiebreaker(i, i + 1)}><ArrowDown size={14} /></button>
+						<button class="btn btn-ghost btn-xs btn-square" type="button" aria-label={t('tn.setup.tb_remove')} title={t('tn.setup.tb_remove')} onclick={() => (sf.tiebreakers = sf.tiebreakers.filter((_, j) => j !== i))}><X size={14} /></button>
+					</span>
 				</div>
 			{/each}
-		</div>
+			{#if run.fields.tiebreakers}<span class="text-xs text-error">{run.fields.tiebreakers}</span>{/if}
+			<button class="btn btn-outline btn-sm w-fit gap-1" type="button" disabled={!unusedCriterion} onclick={addTiebreaker}><Plus size={14} /> {t('tn.setup.tb_add')}</button>
+		</fieldset>
 		<div class="modal-action mt-2 flex justify-end gap-2">
 			<button class="btn btn-outline" type="button" onclick={() => (stageOpen = false)}>{t('common.cancel')}</button>
 			<button class="btn btn-primary" type="submit" disabled={run.busy}>{t('common.save')}</button>
 		</div>
 	</form>
+</Modal>
+
+<Modal bind:open={attrOpen} title={editAttr ? t('tn.attr.edit') : t('tn.attr.add')}>
+	<form class="grid gap-3" onsubmit={saveAttr}>
+		{@render err()}
+		<Field label={t('tn.attr.name')} bind:value={af2.name} error={run.fields.name} placeholder={t('tn.attr.name_hint')} required />
+		<div class="form-control w-full">
+			<label class="label" for="at-source"><span class="label-text">{t('tn.attr.source')}</span></label>
+			<select id="at-source" class="select select-bordered w-full" bind:value={af2.source} disabled={!!editAttr}>
+				<option value="manual">{t('tn.attr.source.manual')}</option>
+				<option value="timeline">{t('tn.attr.source.timeline')}</option>
+			</select>
+			{#if run.fields.source}<span class="mt-1 block text-xs text-error">{run.fields.source}</span>{:else}<span class="label-text-alt mt-1 block">{t('tn.attr.source_help')}</span>{/if}
+		</div>
+		{#if af2.source === 'timeline'}
+			<div class="grid gap-3 sm:grid-cols-2">
+				<div class="form-control w-full">
+					<label class="label" for="at-event"><span class="label-text">{t('tn.attr.event_type')}</span></label>
+					<select id="at-event" class="select select-bordered w-full" bind:value={af2.event_type} required>
+						{#each eventTypes as ev (ev)}<option value={ev}>{t(`tn.event.${ev}`)}</option>{/each}
+					</select>
+					{#if run.fields.event_type}<span class="mt-1 block text-xs text-error">{run.fields.event_type}</span>{/if}
+				</div>
+				<div class="form-control w-full">
+					<label class="label" for="at-agg"><span class="label-text">{t('tn.attr.aggregate')}</span></label>
+					<select id="at-agg" class="select select-bordered w-full" bind:value={af2.aggregate}>
+						<option value="count">{t('tn.attr.agg_opt.count')}</option>
+						<option value="sum">{t('tn.attr.agg_opt.sum')}</option>
+					</select>
+					{#if run.fields.aggregate}<span class="mt-1 block text-xs text-error">{run.fields.aggregate}</span>{/if}
+				</div>
+			</div>
+		{/if}
+		<div class="modal-action mt-2 flex justify-end gap-2">
+			<button class="btn btn-outline" type="button" onclick={() => (attrOpen = false)}>{t('common.cancel')}</button>
+			<button class="btn btn-primary" type="submit" disabled={run.busy}>{t('common.save')}</button>
+		</div>
+	</form>
+</Modal>
+
+<Modal bind:open={delAttrOpen} title={t('tn.attr.delete')}>
+	<div class="grid gap-3">
+		{#if run.error}<Alert kind="error">{run.error}</Alert>{/if}
+		<p>{t('tn.attr.delete_body', { name: delAttr?.name ?? '' })}</p>
+		<div class="modal-action mt-2 flex justify-end gap-2">
+			<button class="btn btn-outline" type="button" onclick={() => (delAttrOpen = false)}>{t('common.cancel')}</button>
+			<button class="btn btn-error gap-2" type="button" disabled={run.busy} onclick={removeAttr}><Trash2 size={16} /> {t('common.delete')}</button>
+		</div>
+	</div>
 </Modal>
 
 <Modal bind:open={ruleOpen} title={editRule ? t('tn.setup.edit_rule') : t('tn.setup.add_rule')}>
