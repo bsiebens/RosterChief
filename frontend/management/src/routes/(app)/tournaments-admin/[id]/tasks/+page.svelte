@@ -31,11 +31,17 @@
 		run.clear();
 		open = true;
 	}
+	/** Editing changes the one task; adding creates the same task on every chosen day. */
 	async function save(e: SubmitEvent) {
 		e.preventDefault();
 		if (!f.dates.length) return void (run.error = t('tn.tasks.pick_day'));
-		const body = { title: f.title.trim(), description: f.description, location_label: f.location_label.trim(), starts_at: fromLocalInput(`${f.dates[0]}T${f.from}`), ends_at: fromLocalInput(`${f.dates[0]}T${f.to}`), needed_quantity: numOrNull(f.needed_quantity) ?? 1 };
-		if (await (editing ? run.patch(`${base}/${editing.id}`, body) : run.post(base, body))) open = false;
+		const body = (date: string) => ({ title: f.title.trim(), description: f.description, location_label: f.location_label.trim(), starts_at: fromLocalInput(`${date}T${f.from}`), ends_at: fromLocalInput(`${date}T${f.to}`), needed_quantity: numOrNull(f.needed_quantity) ?? 1 });
+		if (editing) {
+			if (await run.patch(`${base}/${editing.id}`, body(f.dates[0]))) open = false;
+			return;
+		}
+		for (const date of f.dates) if (!(await run.post(base, body(date)))) return;
+		open = false;
 	}
 	let delTask = $state<TaskDoc | null>(null);
 	let delOpen = $state(false);
@@ -157,7 +163,7 @@
 		{#if run.error && !Object.keys(run.fields).length}<Alert kind="error">{run.error}</Alert>{/if}
 		<Field label={t('tn.tasks.f.title')} bind:value={f.title} error={run.fields.title} required />
 		<Field label={t('tn.tasks.f.location')} bind:value={f.location_label} error={run.fields.location_label} />
-		<DayHoursPicker days={tn.days} bind:dates={f.dates} bind:from={f.from} bind:to={f.to} error={run.fields.starts_at ?? run.fields.ends_at} />
+		<DayHoursPicker multi={!editing} days={tn.days} bind:dates={f.dates} bind:from={f.from} bind:to={f.to} error={run.fields.starts_at ?? run.fields.ends_at} />
 		<Field label={t('tn.tasks.f.needed')} type="number" min="1" bind:value={f.needed_quantity} error={run.fields.needed_quantity} />
 		<div class="form-control w-full">
 			<label class="label" for="task-desc"><span class="label-text">{t('tn.tasks.f.description')}</span></label>
