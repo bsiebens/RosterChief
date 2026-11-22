@@ -2,7 +2,7 @@
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import type { Bracket, StageStandings } from '#lib/tournaments-public.ts';
-	import MatchList from './MatchList.svelte';
+	import BracketCards from './BracketCards.svelte';
 
 	/** Standings tables per stage and group, then the knockout brackets round by round. */
 	let { standings, brackets, slug, heading = 'h2' }: { standings: StageStandings[]; brackets: Bracket[]; slug: string; heading?: 'h2' | 'h3' } = $props();
@@ -13,6 +13,7 @@
 	<div class="card card-body items-center py-8 text-center text-muted">{t('tp.standings.empty')}</div>
 {/if}
 
+<div class="grid items-start gap-4 lg:grid-cols-2">
 {#each standings as s (s.stage.id)}
 	{#each s.tables as table (table.group?.id ?? 'all')}
 		{#if table.rows.length}
@@ -64,16 +65,6 @@
 	{/each}
 {/each}
 
-{#each brackets as b (b.stage.id)}
-	{#if b.rounds.length}
-		<section class="card overflow-hidden">
-			<div class="px-4 pt-4 pb-1">
-				<svelte:element this={heading} class="font-display text-base font-bold text-ink">{b.stage.name}</svelte:element>
-			</div>
-			{#each b.rounds as round (round.round_number)}
-				<h4 class="px-4 pt-3 font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{round.label}</h4>
-				<MatchList matches={round.matches} {slug} />
-			{/each}
-		</section>
-	{/if}
-{/each}
+</div>
+
+<BracketCards {brackets} {slug} />

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { CalendarClock, CalendarDays, Check, ClipboardList, Copy, ExternalLink, Link2, Save, Trash2, Trophy, Wallet } from '@lucide/svelte';
+	import { ArrowRight, CalendarClock, CalendarDays, Check, ClipboardList, Copy, ExternalLink, Link2, Save, Trash2, Trophy, Wallet } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import ActionList from '#lib/components/actions/ActionList.svelte';
 	import ActionRow from '#lib/components/actions/ActionRow.svelte';
@@ -32,6 +32,10 @@
 		}
 	}
 	const run = new Runner();
+	/** The next step of a tournament's life; cancelling stays a deliberate choice in the status buttons. */
+	const NEXT: Record<string, string> = { draft: 'published', published: 'in_progress', in_progress: 'completed' };
+	const next = $derived(NEXT[tn.status] ?? null);
+	const advance = () => next && run.patch(`/tournaments/${tn.id}`, { status: next }, undefined, { notice: t('tn.next_status_done', { status: t(`tn.status.${next}`) }) });
 	// svelte-ignore state_referenced_locally
 	let v = $state(formOf(data.tournament));
 	$effect(() => {
@@ -83,6 +87,9 @@
 			<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ClipboardList size={16} aria-hidden="true" />{t('tn.card.summary')}</h2>
 			<TournamentSummary {v} teams={data.teams} />
 			<div class="grid gap-2">
+				{#if next}
+					<button class="btn btn-outline w-full justify-between gap-2" type="button" disabled={run.busy} onclick={advance}><span class="flex items-center gap-2"><ArrowRight size={16} aria-hidden="true" /> {t('tn.next_status')}</span><span class="badge badge-info badge-sm">{t(`tn.status.${next}`)}</span></button>
+				{/if}
 				<button class="btn btn-primary w-full gap-2" type="submit" disabled={run.busy}><Save size={16} /> {t('common.save')}</button>
 				{#if tn.status === 'draft'}
 					<ActionList><ActionRow icon={Trash2} danger onclick={() => { run.clear(); deleteOpen = true; }}>{t('tn.delete')}</ActionRow></ActionList>

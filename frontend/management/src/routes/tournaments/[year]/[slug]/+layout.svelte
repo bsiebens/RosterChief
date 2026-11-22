@@ -18,7 +18,7 @@
 	const current = (tab: { href: string; exact?: boolean }) => (tab.exact ? page.url.pathname === tab.href : page.url.pathname.startsWith(tab.href));
 </script>
 
-<PublicShell title={tn.name} kicker={t('tp.kicker')} {club} wide>
+<PublicShell title={tn.name} kicker={t('tp.kicker')} {club} full>
 	<nav class="flex flex-wrap gap-2" aria-label={tn.name}>
 		{#each tabs as tab (tab.href)}
 			<a
