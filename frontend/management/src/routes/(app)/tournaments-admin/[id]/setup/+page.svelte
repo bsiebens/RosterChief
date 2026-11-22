@@ -730,16 +730,24 @@
 			{#if run.fields.format}<span class="text-xs text-error">{run.fields.format}</span>{/if}
 		</fieldset>
 		{#if sf.format === 'single_elim' || sf.format === 'double_elim'}
-			<label class="flex cursor-pointer items-start gap-3 rounded-lg border border-line p-3">
-				<input type="checkbox" class="checkbox mt-0.5" bind:checked={sf.placement} />
-				<span class="min-w-0">
-					<span class="block text-sm font-semibold text-ink">{t('tn.setup.placement_title')}</span>
-					<span class="block text-xs text-muted">{t('tn.setup.placement_help')}</span>
-				</span>
-			</label>
-		{/if}
-		<div class="grid gap-3 rounded-lg border border-line p-3">
-			{#if !(sf.format === 'single_elim' || sf.format === 'double_elim')}
+			<div class="grid gap-3 md:grid-cols-2">
+				<label class="flex cursor-pointer items-start gap-3 rounded-lg border border-line p-3">
+					<input type="checkbox" class="checkbox mt-0.5" bind:checked={sf.placement} />
+					<span class="min-w-0">
+						<span class="block text-sm font-semibold text-ink">{t('tn.setup.placement_title')}</span>
+						<span class="block text-xs text-muted">{t('tn.setup.placement_help')}</span>
+					</span>
+				</label>
+				<label class="flex cursor-pointer items-start gap-3 rounded-lg border border-line p-3">
+					<input type="checkbox" class="checkbox mt-0.5" bind:checked={sf.penalty_shots} />
+					<span class="min-w-0">
+						<span class="block text-sm font-semibold text-ink">{t('tn.setup.penalty_shots')}</span>
+						<span class="block text-xs text-muted">{sf.penalty_shots ? t('tn.setup.penalty_shots_on') : t('tn.setup.penalty_shots_off')}</span>
+					</span>
+				</label>
+			</div>
+		{:else}
+			<div class="grid gap-3 rounded-lg border border-line p-3">
 				<label class="flex cursor-pointer items-start gap-3">
 					<input type="checkbox" class="checkbox mt-0.5" bind:checked={sf.allow_draws} />
 					<span class="min-w-0">
@@ -747,17 +755,17 @@
 						<span class="block text-xs text-muted">{t('tn.setup.allow_draws_help')}</span>
 					</span>
 				</label>
-			{/if}
-			{#if sf.format === 'single_elim' || sf.format === 'double_elim' || !sf.allow_draws}
-				<label class="flex cursor-pointer items-start gap-3">
-					<input type="checkbox" class="checkbox mt-0.5" bind:checked={sf.penalty_shots} />
-					<span class="min-w-0">
-						<span class="block text-sm font-semibold text-ink">{t('tn.setup.penalty_shots')}</span>
-						<span class="block text-xs text-muted">{sf.penalty_shots ? t('tn.setup.penalty_shots_on') : t('tn.setup.penalty_shots_off')}</span>
-					</span>
-				</label>
-			{/if}
-		</div>
+				{#if !sf.allow_draws}
+					<label class="flex cursor-pointer items-start gap-3">
+						<input type="checkbox" class="checkbox mt-0.5" bind:checked={sf.penalty_shots} />
+						<span class="min-w-0">
+							<span class="block text-sm font-semibold text-ink">{t('tn.setup.penalty_shots')}</span>
+							<span class="block text-xs text-muted">{sf.penalty_shots ? t('tn.setup.penalty_shots_on') : t('tn.setup.penalty_shots_off')}</span>
+						</span>
+					</label>
+				{/if}
+			</div>
+		{/if}
 		{#if sf.format === 'swiss'}<Field label={t('tn.setup.rounds')} type="number" min="1" bind:value={sf.rounds} error={run.fields.rounds} required />{/if}
 		{#if sf.format === 'groups'}<Field label={t('tn.setup.num_groups')} type="number" min="1" bind:value={sf.num_groups} error={run.fields.num_groups} required />{/if}
 		<div class="grid grid-cols-3 gap-3">
