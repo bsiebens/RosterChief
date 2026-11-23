@@ -594,6 +594,7 @@ class TournamentRegistration(UUIDModel):
     status = models.CharField(_("status"), max_length=10, choices=Status.choices, default=Status.PENDING)
     rejection_reason = models.TextField(_("rejection reason"), blank=True)
     status_token = models.CharField(_("status token"), max_length=64, unique=True, default=_generate_status_token, editable=False)
+    access_password = models.CharField(_("access password (hashed)"), max_length=128, blank=True, editable=False, help_text=_("Needed next to the private link. Empty: the link alone opens the page (older applications)."))
     messages_seen_at = models.DateTimeField(_("messages seen at"), null=True, blank=True, help_text=_("When the team last opened its messages: newer organiser messages are unread."))
     submitted_at = models.DateTimeField(_("submitted at"), auto_now_add=True)
     reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("reviewed by"))

@@ -58,7 +58,7 @@ def _send(registration, subject: str, lines: list[str]) -> bool:
         return False
 
 
-def send_registration_confirmation_email(registration, *, request=None) -> bool:
+def send_registration_confirmation_email(registration, *, request=None, password: str = "") -> bool:
     club = _club()
     club_name = club.name if club is not None else ""
     tournament = registration.tournament
@@ -69,6 +69,7 @@ def send_registration_confirmation_email(registration, *, request=None) -> bool:
             _("Hi %(name)s,") % {"name": registration.foreign_contact_name},
             _("We received the registration of %(team)s for %(tournament)s. We will review it and come back to you.") % {"team": registration.foreign_name, "tournament": tournament.name},
             _("Follow your registration here: %(url)s") % {"url": _status_url(registration, request=request)},
+            *([_("Password for this page: %(password)s") % {"password": password}] if password else []),
         ],
     )
 
@@ -154,13 +155,14 @@ def send_organiser_message_email(registration, body: str, *, request=None) -> bo
     return _send(registration, _("New message from the organisers of %(tournament)s") % {"tournament": t.name}, lines)
 
 
-def send_team_link_email(registration, *, request=None) -> bool:
-    """Mail a team's responsible person the private link to their team page (roster, logo, messages with the organisers)."""
+def send_team_link_email(registration, password: str, *, request=None) -> bool:
+    """Mail a team's responsible person the private link to their team page and its password (roster, logo, messages with the organisers)."""
     t = registration.tournament
     lines = [
         _("Hello %(name)s,") % {"name": registration.foreign_contact_name or registration.foreign_name},
         _("This is the private page of %(team)s at %(tournament)s. Use it to keep your players up to date, upload your logo and exchange messages with the organisers.") % {"team": registration.foreign_name, "tournament": t.name},
-        _status_url(registration, request=request),
-        _("Keep this link to yourself: anyone who has it can change your team's details."),
+        _("Link: %(url)s") % {"url": _status_url(registration, request=request)},
+        _("Password: %(password)s") % {"password": password},
+        _("Keep the link and password to yourself: anyone who has both can change your team's details. An earlier password no longer works."),
     ]
     return _send(registration, _("Your team page for %(tournament)s") % {"tournament": t.name}, lines)

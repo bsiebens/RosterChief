@@ -4,9 +4,11 @@ tier includes it). Permission (403) is checked before the ``tournaments`` featur
 
 import uuid
 
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.db import connection, transaction
 from django.db.models import Count, Q
-from ninja import File, Router, UploadedFile
+from ninja import Field, File, Router, Schema, UploadedFile
 
 from api.auth import AUTHENTICATORS
 from api.routers import tournaments_common as c
@@ -17,7 +19,7 @@ from members.services import access
 from members.services.errors import Invalid
 from teams.models import Team
 from tournaments.models import Tournament, TournamentDay, TournamentRegistration, TournamentTeam
-from tournaments.services import notifications
+from tournaments.services import notifications, team_access
 from tournaments.services import registration as svc
 from tournaments.sports import is_ice_hockey
 
@@ -231,6 +233,46 @@ def reject(request, registration_id: uuid.UUID, payload: RejectIn):
     return registration_out(r, r.tournament)
 
 
+class ContactIn(Schema):
+    contact_name: str = Field(min_length=1, max_length=255)
+    contact_email: str = Field(min_length=3, max_length=254)
+    contact_phone: str = Field("", max_length=32)
+
+
+def _apply_contact(registration: TournamentRegistration, payload: ContactIn) -> None:
+    """Change the contact person of a team's application, and of its live team when it has one (they are the same person)."""
+    email = payload.contact_email.strip()
+    try:
+        validate_email(email)
+    except ValidationError:
+        raise Invalid("Enter a valid email address.", {"contact_email": ["Enter a valid email address."]}) from None
+    registration.foreign_contact_name, registration.foreign_contact_email, registration.foreign_contact_phone = payload.contact_name.strip(), email, payload.contact_phone.strip()
+    registration.save(update_fields=["foreign_contact_name", "foreign_contact_email", "foreign_contact_phone"])
+    team = getattr(registration, "tournament_team", None)
+    if team is not None:
+        team.foreign_contact_name, team.foreign_contact_email, team.foreign_contact_phone = registration.foreign_contact_name, email, registration.foreign_contact_phone
+        team.save(update_fields=["foreign_contact_name", "foreign_contact_email", "foreign_contact_phone"])
+
+
+@router.patch("/registrations/{registration_id}/contact", summary="Change the contact person of an application", operation_id="tournaments_registration_contact")
+def registration_contact(request, registration_id: uuid.UUID, payload: ContactIn):
+    c.gate_manage(request)
+    r = _registration(registration_id)
+    if r.team_id:
+        raise Invalid("A club team has no outside contact person.", {"detail": ["A club team has no outside contact person."]}, code="not_foreign")
+    _apply_contact(r, payload)
+    return registration_out(_registration(registration_id), r.tournament)
+
+
+@router.post("/registrations/{registration_id}/access/send", summary="Email the private page link and a new password to the application's contact person", operation_id="tournaments_registration_access_send")
+def registration_access_send(request, registration_id: uuid.UUID):
+    c.gate_manage(request)
+    r = _registration(registration_id)
+    if r.team_id:
+        raise Invalid("A club team has no outside contact person.", {"detail": ["A club team has no outside contact person."]}, code="not_foreign")
+    return _send_access(r, request)
+
+
 # --- teams ------------------------------------------------------------------------------------------------------------------
 
 
@@ -308,9 +350,30 @@ def _private_registration(team: TournamentTeam) -> TournamentRegistration:
         tournament=team.tournament, foreign_name=team.foreign_name, foreign_contact_name=team.foreign_contact_name, foreign_contact_email=team.foreign_contact_email,
         foreign_contact_phone=team.foreign_contact_phone, foreign_primary_color=team.foreign_primary_color, foreign_secondary_color=team.foreign_secondary_color, status=TournamentRegistration.Status.APPROVED,
     )  # fmt: skip
+    team_access.reset_password(registration)  # never an open link: the contact gets the password when the link is sent
     team.registration = registration
     team.save(update_fields=["registration"])
     return registration
+
+
+def _send_access(registration: TournamentRegistration, request) -> dict:
+    """A new password and the link, mailed to the registered contact person. The password is only kept hashed, so "send again" always means
+    "make a new one"; whatever was sent before stops working."""
+    if not registration.foreign_contact_email:
+        raise Invalid("This team has no contact email.", {"detail": ["This team has no contact email."]}, code="no_email")
+    password = team_access.reset_password(registration)
+    if not notifications.send_team_link_email(registration, password, request=request):
+        raise Conflict("The email could not be sent.", "mail_failed")
+    return {"sent": True, "email": registration.foreign_contact_email}
+
+
+@router.patch("/teams/{team_id}/contact", summary="Change the contact person of a team", operation_id="tournaments_team_contact")
+def team_contact(request, team_id: uuid.UUID, payload: ContactIn):
+    c.gate_manage(request)
+    team = _team(team_id)
+    registration = _private_registration(team)
+    _apply_contact(registration, payload)
+    return c.team_out(_team(team_id), team.tournament)
 
 
 @router.post("/teams/{team_id}/private-link", summary="The private page link of a team (made on first use)", operation_id="tournaments_team_private_link")
@@ -326,10 +389,7 @@ def team_private_link_send(request, team_id: uuid.UUID):
     team = _team(team_id)
     if not team.team_id and not team.foreign_contact_email:
         raise Invalid("This team has no contact email.", {"detail": ["This team has no contact email."]}, code="no_email")
-    registration = _private_registration(team)
-    if not notifications.send_team_link_email(registration, request=request):
-        raise Conflict("The email could not be sent.", "mail_failed")
-    return {"sent": True, "email": registration.foreign_contact_email}
+    return _send_access(_private_registration(team), request)
 
 
 @router.post("/teams/{team_id}/withdraw", summary="Withdraw an approved team (soft: matches and roster stay)", operation_id="tournaments_team_withdraw")

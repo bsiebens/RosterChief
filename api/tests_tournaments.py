@@ -95,8 +95,16 @@ class TournamentApiTests(TestCase):
         if user is not None:
             headers["HTTP_X_SESSION_TOKEN"] = login_session(user)
         body = {"data": json.dumps(data), "content_type": "application/json"} if data is not None else {}
+        access = getattr(self, "team_access", {})
+        for token, key in access.items():  # a team page call carries the access token its application handed out, like the browser does
+            if f"/registrations/{token}" in path:
+                headers["HTTP_X_TEAM_ACCESS"] = key
         response = getattr(Client(), method)(BASE + prefix + path, **body, **headers)
         connection.set_tenant(self.club)
+        if method == "post" and path.endswith("/registrations") and response.status_code == 201:
+            doc = response.json()
+            if doc.get("access"):
+                self.team_access = {**access, doc["status_token"]: doc["access"]}
         return response
 
     def as_(self, key, method, path, data=None, prefix="/tournaments"):
@@ -852,11 +860,47 @@ class TournamentApiTests(TestCase):
         self.assertIn("/registration/", url)
         self.assertEqual(self.as_("operate", "post", f"/teams/{team.pk}/private-link").json()["url"], url)  # the same link every time
         token = url.rsplit("/", 1)[1]
-        self.assertEqual(self.call("get", f"/{t.slug}/registrations/{token}", prefix="/public/tournaments").json()["registration"]["name"], "Alpha")
+        self.assertEqual(self.call("get", f"/{t.slug}/registrations/{token}", prefix="/public/tournaments").status_code, 401)  # a copied link alone never opens it
         sent = self.as_("operate", "post", f"/teams/{team.pk}/private-link/send")
         self.assertEqual((sent.status_code, len(mail.outbox)), (200, 1), sent.content)
         self.assertIn(token, mail.outbox[0].body)
+        password = mail.outbox[0].body.split("Password: ")[1].split()[0]
+        access = self.call("post", f"/{t.slug}/registrations/{token}/access", None, {"password": password}, prefix="/public/tournaments").json()["access"]
+        page = Client().get(BASE + "/public/tournaments" + f"/{t.slug}/registrations/{token}", HTTP_HOST=self.host, HTTP_X_TEAM_ACCESS=access)
+        self.assertEqual(page.json()["registration"]["name"], "Alpha")
         self.assertEqual(self.as_("operate", "post", f"/teams/{uuid.uuid4()}/private-link").status_code, 404)
+
+    def test_the_private_link_needs_its_password(self):
+        from django.core import mail
+
+        t = self.make(status="published")
+        body = {"foreign_name": "Visitors", "foreign_contact_name": "Vic", "foreign_contact_email": "v@x.test"}
+        reg = self.call("post", f"/{t.slug}/registrations", None, body, prefix="/public/tournaments").json()
+        token, access = reg["status_token"], reg["access"]
+        url = f"/{t.slug}/registrations/{token}"
+        open_call = lambda path="", **kw: Client().get(BASE + "/public/tournaments" + url + path, HTTP_HOST=self.host, **kw)  # noqa: E731
+        self.assertEqual(open_call().status_code, 401)  # the link alone is not enough
+        self.assertEqual(open_call("/lock").json()["locked"], True)
+        self.assertEqual(open_call(HTTP_X_TEAM_ACCESS=access).status_code, 200)  # the registrant's browser is let in right away
+        self.assertEqual(open_call(HTTP_X_TEAM_ACCESS="forged").status_code, 401)
+        self.assertEqual(self.call("post", f"{url}/access", None, {"password": "nope"}, prefix="/public/tournaments").status_code, 422)
+        # the organisers send the link again: a new password by email, the old session stops working
+        rid = self.as_("manage", "get", f"/{t.pk}/registrations").json()["results"][0]["id"]
+        sent = self.as_("manage", "post", f"/registrations/{rid}/access/send")
+        self.assertEqual(sent.status_code, 200, sent.content)
+        mail_body = mail.outbox[-1].body
+        password = mail_body.split("Password: ")[1].split()[0]
+        self.assertIn(token, mail_body)
+        self.assertEqual(open_call(HTTP_X_TEAM_ACCESS=access).status_code, 401)
+        fresh = self.call("post", f"{url}/access", None, {"password": password.upper()}, prefix="/public/tournaments")  # typed in capitals: still fine
+        self.assertEqual(fresh.status_code, 200, fresh.content)
+        self.assertEqual(open_call(HTTP_X_TEAM_ACCESS=fresh.json()["access"]).status_code, 200)
+        # the contact person can be changed (the email goes to the new address)
+        changed = self.as_("manage", "patch", f"/registrations/{rid}/contact", {"contact_name": "Sam", "contact_email": "sam@x.test"})
+        self.assertEqual((changed.status_code, changed.json()["contact_email"]), (200, "sam@x.test"), changed.content)
+        self.as_("manage", "post", f"/registrations/{rid}/access/send")
+        self.assertEqual(mail.outbox[-1].to, ["sam@x.test"])
+        self.assertEqual(self.as_("manage", "patch", f"/registrations/{rid}/contact", {"contact_name": "S", "contact_email": "bad"}).status_code, 422)
 
     def test_public_endpoints_are_404_without_feature(self):
         t = self.make(status="published")

@@ -32,7 +32,7 @@ from notifications import gateways
 from notifications.models import PushSettings
 from sponsoring.models import Sponsor
 from tournaments.models import Match, ScheduleBlock, Tournament, TournamentFollower, TournamentMessage, TournamentRegistration, TournamentRegistrationPlayer, TournamentRosterEntry, TournamentRosterRole, TournamentTeam
-from tournaments.services import notifications
+from tournaments.services import notifications, team_access
 from tournaments.services.messages import message_out, notify_organisers, thread_for_team, unread_for_team
 from tournaments.sports import is_ice_hockey
 
@@ -341,13 +341,20 @@ def register(request, slug: str, payload: PublicRegistrationIn):
             foreign_contact_phone=payload.foreign_contact_phone, foreign_primary_color=payload.foreign_primary_color, foreign_secondary_color=payload.foreign_secondary_color,
         )  # fmt: skip
         TournamentRegistrationPlayer.objects.bulk_create([TournamentRegistrationPlayer(registration=registration, **p) for p in players])
-    notifications.send_registration_confirmation_email(registration, request=request)
-    return 201, {"status_token": registration.status_token, "status": registration.status, "age_flagged_count": sum(1 for p in players if t.birth_year_out_of_range(p["date_of_birth"]))}
+        password = team_access.reset_password(registration)
+    notifications.send_registration_confirmation_email(registration, request=request, password=password)
+    # the person at this browser just filled the form: they go straight in, the emailed password is for later and for colleagues
+    return 201, {"status_token": registration.status_token, "access": team_access.make_access(registration), "status": registration.status, "age_flagged_count": sum(1 for p in players if t.birth_year_out_of_range(p["date_of_birth"]))}
 
 
-def _registration(request, slug, token) -> TournamentRegistration:
+def _registration(request, slug, token, *, check=True) -> TournamentRegistration:
+    """The application behind a private link. With a password set, the link alone is not enough: the caller has to send the access token
+    that ``POST .../access`` hands out for the right password (401 ``password_required`` otherwise)."""
     t = _tournament(request, slug)
-    return c.get_or_404(TournamentRegistration.objects.select_related("tournament", "tournament_team"), tournament=t, status_token=token)
+    registration = c.get_or_404(TournamentRegistration.objects.select_related("tournament", "tournament_team"), tournament=t, status_token=token)
+    if check and not team_access.access_ok(registration, request.headers.get("X-Team-Access")):
+        raise HttpError(401, "password_required")
+    return registration
 
 
 def _roster_editable(r: TournamentRegistration) -> bool:
@@ -407,6 +414,26 @@ def _registration_doc(r: TournamentRegistration) -> dict:
         "amount_owed": _money(_amount_owed(t, lunch_total, team)) if approved else None,
         "unread_messages": unread_for_team(r),
     }  # fmt: skip
+
+
+class AccessIn(Schema):
+    password: str = Field(min_length=1, max_length=64)
+
+
+@router.get("/{slug}/registrations/{token}/lock", summary="Whether this private link needs a password", operation_id="public_tournaments_registration_lock")
+def registration_lock(request, slug: str, token: str):
+    return {"locked": team_access.is_locked(_registration(request, slug, token, check=False))}
+
+
+@router.post("/{slug}/registrations/{token}/access", summary="Trade the emailed password for an access token", operation_id="public_tournaments_registration_access")
+def registration_access(request, slug: str, token: str, payload: AccessIn):
+    r = _registration(request, slug, token, check=False)
+    blocked = _throttled(request, token)
+    if blocked is not None:
+        return blocked
+    if not team_access.password_ok(r, payload.password):
+        raise Invalid("That password is not right.", {"password": ["That password is not right."]}, code="bad_password")
+    return {"access": team_access.make_access(r)}
 
 
 @router.get("/{slug}/registrations/{token}", summary="The status of an application, by its private token", operation_id="public_tournaments_registration_status")
