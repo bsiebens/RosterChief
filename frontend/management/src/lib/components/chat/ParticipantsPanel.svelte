@@ -80,19 +80,19 @@
 	}
 </script>
 
-<div class="grid gap-5 p-4">
+<div class="grid grid-cols-1 gap-5 p-4">
 	{#if error}<p class="text-sm text-danger" role="alert">{error}</p>{/if}
 
 	<label class="flex items-center justify-between gap-3 rounded-lg border border-line bg-white p-3">
 		<span class="min-w-0"><b class="flex items-center gap-1.5 text-sm text-ink"><BellOff size={14} aria-hidden="true" />{t('chat.people.mute')}</b><span class="block text-xs text-muted">{t('chat.people.mute_help')}</span></span>
-		<input type="checkbox" class="toggle" checked={conversation.muted} disabled={busy} onchange={(e) => patch({ muted: e.currentTarget.checked })} />
+		<input type="checkbox" class="toggle shrink-0" checked={conversation.muted} disabled={busy} onchange={(e) => patch({ muted: e.currentTarget.checked })} />
 	</label>
 
 	<section aria-live="polite">
-		<div class="mb-2 flex items-center justify-between gap-2">
+		<div class="mb-2 flex min-w-0 items-center justify-between gap-2">
 			<h3 class="font-display text-sm font-extrabold tracking-wide text-ink uppercase">{t('chat.people.title')} <span class="font-mono text-xs text-muted">{conversation.participant_count}</span></h3>
 			{#if conversation.is_admin && !conversation.archived}
-				<button type="button" class="btn btn-outline btn-sm gap-1.5" aria-expanded={adding} onclick={() => (adding = !adding)}><UserPlus size={14} aria-hidden="true" />{t('chat.people.add')}</button>
+				<button type="button" class="btn btn-outline btn-sm shrink-0 gap-1.5" aria-expanded={adding} onclick={() => (adding = !adding)}><UserPlus size={14} aria-hidden="true" />{t('chat.people.add')}</button>
 			{/if}
 		</div>
 		{#if adding}
@@ -110,7 +110,8 @@
 				{#each group.people as p (p.person.member_id)}
 					<li class="flex items-center gap-2.5 px-3 py-2">
 						<PersonAvatar person={p.person} />
-						<span class="min-w-0 flex-1 truncate text-sm text-ink">{p.person.name}{#if showRoleLabel(p.person)} <span class="text-xs text-muted">· {p.person.role_label}</span>{/if}{#if p.is_admin} <span class="badge badge-ghost badge-sm">{t('chat.people.chat_admin')}</span>{/if}</span>
+						<span class="min-w-0 flex-1 truncate text-sm text-ink">{p.person.name}{#if showRoleLabel(p.person)} <span class="text-xs text-muted">· {p.person.role_label}</span>{/if}</span>
+						{#if p.is_admin}<span class="badge badge-ghost badge-sm shrink-0 whitespace-nowrap">{t('chat.people.chat_admin')}</span>{/if}
 						{#if conversation.is_admin && !conversation.archived && conversation.kind !== 'direct'}
 							<button type="button" class="grid size-7 shrink-0 place-items-center rounded-full text-muted hover:bg-paper hover:text-danger" aria-label={t('chat.people.remove', { name: p.person.name })} disabled={busy} onclick={() => remove(p)}><UserMinus size={15} aria-hidden="true" /></button>
 						{/if}

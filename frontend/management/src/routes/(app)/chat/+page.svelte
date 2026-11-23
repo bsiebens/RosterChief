@@ -17,5 +17,5 @@
 	canModerate={data.me?.can_moderate_chat === true}
 	canAnnounce={data.me?.can_announce_chat === true}
 	kinds={chatKinds(data.me, true)}
-	heightClass={data.me?.can_moderate_chat ? 'h-[calc(100dvh-14rem)] lg:h-[calc(100dvh-11.5rem)]' : 'h-[calc(100dvh-11rem)] lg:h-[calc(100dvh-9rem)]'}
+	heightClass={data.me?.can_moderate_chat ? 'h-[calc(100dvh-14.5rem)] lg:h-[calc(100dvh-12rem)]' : 'h-[calc(100dvh-11rem)] lg:h-[calc(100dvh-9rem)]'}
 />

@@ -37,8 +37,7 @@
 	}
 </script>
 
-<form class="grid max-w-xl gap-4 rounded-xl border border-line bg-white p-4" onsubmit={save}>
-	<h2 class="font-display text-lg font-extrabold text-ink uppercase">{t('chat.settings.title')}</h2>
+<form class="grid gap-4" onsubmit={save}>
 	{#if !loaded}
 		<p class="text-sm text-muted" role="status">{t('chat.loading')}</p>
 	{:else}

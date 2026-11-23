@@ -23,7 +23,9 @@ export const load: PageServerLoad = async ({ url, fetch, parent }) => {
 		// The other open invoices (charges such as tournament fees, shop orders): what the person may see of them, with the counts and amounts of each kind.
 		api<InvoiceList>('GET', '/finance/invoices', { query: { type: 'orders', status: payment === 'overdue' ? 'overdue' : 'open', q: q || undefined, limit: 50 }, f: fetch })
 	]);
-	const sums = Object.values(orders.data?.summary ?? {}) as TypeSummary[];
+	// The summary also carries the registration kind, which the registrations list and /finance/summary already cover: only shop and charge are "other".
+	const { registration: _registrations, ...others } = orders.data?.summary ?? {};
+	const sums = Object.values(others) as TypeSummary[];
 	const add = (key: 'open' | 'overdue' | 'invoiced' | 'received', base: string) => String(sums.reduce((n, x) => n + Number(x[`${key}_amount` as keyof TypeSummary] ?? 0), Number(base)));
 	const ordersOpenCount = sums.reduce((n, x) => n + x.open, 0);
 	const base = summary.ok ? summary.data : null;

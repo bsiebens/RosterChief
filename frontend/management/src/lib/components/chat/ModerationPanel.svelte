@@ -6,7 +6,7 @@
 	import MessageList from './MessageList.svelte';
 
 	/** For people who may moderate: the reported messages, a read-only look at the conversation around one, delete, and "handled". */
-	let { heightClass = 'h-[calc(100dvh-8rem)]' }: { heightClass?: string } = $props();
+	let { heightClass = 'h-[calc(100dvh-8rem)]', openCount = $bindable(0) }: { heightClass?: string; /** The number of reports not yet handled, for the badge on the tab. */ openCount?: number } = $props();
 
 	let reports = $state<Report[] | null>(null);
 	let error = $state('');
@@ -25,6 +25,9 @@
 	}
 	onMount(() => void load());
 
+	$effect(() => {
+		if (reports) openCount = reports.filter((r) => !r.handled).length;
+	});
 	const shown = $derived((reports ?? []).filter((r) => showHandled || !r.handled));
 	const stamp = (iso: string) => new Date(iso).toLocaleString(getLang(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 

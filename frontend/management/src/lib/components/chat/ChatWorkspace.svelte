@@ -4,8 +4,12 @@
 	import { MessageSquare, Plus } from '@lucide/svelte';
 	import { onMount } from 'svelte';
 	import type { Conversation, ConversationKind } from '#lib/chat.ts';
+	import { chatApi } from '#lib/chat.ts';
 	import { chatList } from '#lib/chat.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
+	import Modal from '#lib/components/Modal.svelte';
+	import FilterTabs from '#lib/components/FilterTabs.svelte';
+	import ListFilterBar from '#lib/components/ListFilterBar.svelte';
 	import ConversationList from './ConversationList.svelte';
 	import ConversationView from './ConversationView.svelte';
 	import ModerationPanel from './ModerationPanel.svelte';
@@ -30,10 +34,22 @@
 	} = $props();
 
 	const selected = $derived(page.url.searchParams.get('c') ?? '');
-	const tab = $derived(canModerate && page.url.searchParams.get('tab') === 'moderation' ? 'moderation' : canModerate && page.url.searchParams.get('tab') === 'settings' ? 'settings' : 'chats');
+	const tab = $derived(canModerate && page.url.searchParams.get('tab') === 'moderation' ? 'moderation' : 'chats');
+	let reportCount = $state(0);
+	let settingsOpen = $state(false);
+	const tabList = $derived([
+		{ key: 'chats', label: t('chat.tab.chats') },
+		{ key: 'moderation', label: t('chat.tab.moderation'), count: reportCount, warn: true }
+	]);
 	let creating = $state(false);
 
-	onMount(() => chatList.acquire());
+	onMount(() => {
+		if (canModerate)
+			void chatApi.reports().then((res) => {
+				if (res.ok && res.data) reportCount = res.data.results.filter((r) => !r.handled).length;
+			});
+		return chatList.acquire();
+	});
 
 	const hrefFor = (id: string) => `${base}?c=${id}`;
 	const open = (c: Conversation) => {
@@ -42,18 +58,20 @@
 	};
 </script>
 
-{#if canModerate}
-	<div class="mb-3 flex w-fit flex-wrap items-center gap-1.5" role="group" aria-label={t('chat.title')}>
-		<a class="portal-person compact text" href={base} aria-current={tab === 'chats' ? 'true' : undefined}>{t('chat.tab.chats')}</a>
-		<a class="portal-person compact text" href="{base}?tab=moderation" aria-current={tab === 'moderation' ? 'true' : undefined}>{t('chat.tab.moderation')}</a>
-		<a class="portal-person compact text" href="{base}?tab=settings" aria-current={tab === 'settings' ? 'true' : undefined}>{t('chat.tab.settings')}</a>
-	</div>
-{/if}
+{#snippet tabBar()}
+	<ListFilterBar>
+		{#snippet tabs()}
+			<FilterTabs tabs={tabList} active={tab} label={t('chat.title')} hrefFor={(key) => (key === 'chats' ? base : `${base}?tab=${key}`)} onnavigate={(h) => goto(h, { reset: false })} />
+			<button type="button" class="btn btn-outline btn-sm" onclick={() => (settingsOpen = true)}>{t('chat.tab.settings')}</button>
+		{/snippet}
+	</ListFilterBar>
+{/snippet}
 
+<div class={canModerate ? '-mx-7 -my-6 flex flex-col' : ''}>
+{#if canModerate}{@render tabBar()}{/if}
+<div class={canModerate ? 'px-7 py-6' : ''}>
 {#if tab === 'moderation'}
-	<ModerationPanel {heightClass} />
-{:else if tab === 'settings'}
-	<SettingsPanel />
+	<ModerationPanel {heightClass} bind:openCount={reportCount} />
 {:else}
 	<div class="flex overflow-hidden rounded-xl border border-line bg-white {heightClass}">
 		<aside class="{selected ? 'hidden md:flex' : 'flex'} w-full shrink-0 flex-col border-r border-line md:w-80 xl:w-[22rem]" aria-label={t('chat.list.label')}>
@@ -74,4 +92,12 @@
 		</div>
 	</div>
 	<NewChatSheet bind:open={creating} {canAnnounce} {kinds} oncreated={open} />
+{/if}
+</div>
+</div>
+
+{#if canModerate}
+	<Modal bind:open={settingsOpen} title={t('chat.settings.title')} closable onclose={() => (settingsOpen = false)}>
+		{#if settingsOpen}<SettingsPanel />{/if}
+	</Modal>
 {/if}

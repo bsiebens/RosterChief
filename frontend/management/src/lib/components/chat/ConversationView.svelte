@@ -149,7 +149,7 @@
 	</section>
 
 	{#if c && showPeople && wide}
-		<aside class="w-80 shrink-0 overflow-y-auto border-l border-line bg-paper/60" aria-label={t('chat.people.title')}>
+		<aside class="w-80 shrink-0 overflow-x-hidden overflow-y-auto border-l border-line bg-paper/60" aria-label={t('chat.people.title')}>
 			<ParticipantsPanel conversation={c} onchanged={(next) => poller.setConversation(next)} />
 		</aside>
 	{/if}
