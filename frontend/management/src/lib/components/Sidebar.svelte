@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { CalendarDays, ChevronUp, KeyRound, LogOut, ShieldCheck } from '@lucide/svelte';
+	import { chatList } from '#lib/chat.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { visibleNav, isActive } from '#lib/nav.ts';
 	import { signOut } from '#lib/session.ts';
@@ -10,8 +11,8 @@
 	import AppSwitcher from './AppSwitcher.svelte';
 	import PortalNav from './PortalNav.svelte';
 
-	let { me, branding, email, portal = null, compact = false, shopEnabled = false }: {
-		me: Me | null; branding: Branding; email: string; portal?: 'parent' | 'coach' | null; compact?: boolean; shopEnabled?: boolean;
+	let { me, branding, email, portal = null, compact = false, shopEnabled = false, chatEnabled = false }: {
+		me: Me | null; branding: Branding; email: string; portal?: 'parent' | 'coach' | null; compact?: boolean; shopEnabled?: boolean; chatEnabled?: boolean;
 	} = $props();
 
 	const items = $derived(me && !portal ? visibleNav(me) : []);
@@ -36,7 +37,8 @@
 				counts.finance = counts.registrations + counts.payments;
 			});
 	});
-	const badgeLabel = (badge: string, n: number) => t(badge === 'registrations' ? 'reg.badge' : badge === 'payments' ? 'fin.badge' : badge === 'finance' ? 'fin.badge_all' : 'signups.badge', { n });
+	const countOf = (badge: string) => (badge === 'chat' ? chatList.unreadTotal : (counts[badge] ?? 0));
+	const badgeLabel = (badge: string, n: number) => t(badge === 'chat' ? 'chat.unread_badge' : badge === 'registrations' ? 'reg.badge' : badge === 'payments' ? 'fin.badge' : badge === 'finance' ? 'fin.badge_all' : 'signups.badge', { n });
 	const fullName = $derived(me ? `${me.first_name} ${me.last_name}`.trim() || me.email : email);
 	const initials = $derived(((me?.first_name[0] ?? '') + (me?.last_name[0] ?? '')).toUpperCase() || email[0]?.toUpperCase() || '?');
 	const home = $derived(portal === 'parent' ? '/member' : portal === 'coach' ? '/coach' : '/');
@@ -60,7 +62,7 @@
 	{/if}
 
 	{#if portal}
-		<PortalNav mode={portal} {shopEnabled} />
+		<PortalNav mode={portal} {shopEnabled} {chatEnabled} />
 	{:else}
 		<nav class="flex flex-col gap-0.5 px-2.5" aria-label={t('shell.nav.label')}>
 			{#if compact && me?.member_id && !me.has_member_portal_role}
@@ -72,7 +74,7 @@
 					<a class="nav-item {active ? 'active' : ''}" href={item.href} aria-current={active ? 'page' : undefined}>
 						<item.icon size={17} aria-hidden="true" />
 						{t(item.label)}
-						{#if item.badge && counts[item.badge]}<span class="ml-auto rounded-full bg-sidebar-chip px-1.5 font-mono text-[10px] leading-4 font-bold text-sidebar-fg" aria-label={badgeLabel(item.badge, counts[item.badge])}>{counts[item.badge]}</span>{/if}
+						{#if item.badge && countOf(item.badge)}<span class="ml-auto rounded-full bg-sidebar-chip px-1.5 font-mono text-[10px] leading-4 font-bold text-sidebar-fg" aria-label={badgeLabel(item.badge, countOf(item.badge))}>{countOf(item.badge)}</span>{/if}
 					</a>
 					{#if active && item.children?.length}
 						<div class="flex flex-col">

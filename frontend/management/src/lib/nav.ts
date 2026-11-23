@@ -1,5 +1,5 @@
 import type { Component } from 'svelte';
-import { Banknote, CalendarDays, ClipboardCheck, ClipboardList, LayoutDashboard, Newspaper, Settings, Shirt, ShoppingBag, Trophy, Users, Whistle } from '@lucide/svelte';
+import { Banknote, CalendarDays, ClipboardCheck, ClipboardList, LayoutDashboard, MessageCircle, Newspaper, Settings, Shirt, ShoppingBag, Trophy, Users, Whistle } from '@lucide/svelte';
 import type { Me } from './types.ts';
 
 /**
@@ -8,7 +8,7 @@ import type { Me } from './types.ts';
  * is active). Sections that are not built yet (Teams, Calendar, Finance, Settings ...) are deliberately absent.
  */
 /** A count shown as a small badge next to a nav entry; the sidebar fetches the numbers (see `Sidebar.svelte`). */
-export type NavBadge = 'signups' | 'registrations' | 'members' | 'payments' | 'finance';
+export type NavBadge = 'signups' | 'registrations' | 'members' | 'payments' | 'finance' | 'chat';
 export type NavChild = { href: string; label: string; match?: (path: string) => boolean; visible?: (me: Me) => boolean; badge?: NavBadge };
 export type NavItem = {
 	key: string;
@@ -72,6 +72,15 @@ export const NAV: NavItem[] = [
 		icon: Newspaper,
 		match: (p) => p === '/news' || p.startsWith('/news/'),
 		visible: (me) => me.can_add_news
+	},
+	{
+		key: 'chat',
+		href: '/chat',
+		label: 'chat.nav',
+		icon: MessageCircle,
+		match: (p) => p === '/chat' || p.startsWith('/chat/'),
+		visible: (me) => me.features.includes('chat') && me.can_use_chat === true,
+		badge: 'chat'
 	},
 	{
 		key: 'forms',
