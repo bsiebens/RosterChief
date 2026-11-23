@@ -38,7 +38,7 @@ def notify_organisers(message: TournamentMessage) -> int:
     club = current_club()
     title = _("New message from %(team)s") % {"team": registration.display_name if registration else tournament.name}
     body = f"{message.author}: {message.body}"[:200] if message.author else message.body[:200]
-    href = f"/tournaments-admin/{tournament.pk}/messages"
+    href = f"/tournaments-admin/{tournament.pk}/messages" + (f"?team={registration.pk}" if registration else "")  # straight to this team's conversation
     told = 0
     for profile in UserTenantPermissions.objects.select_related("profile"):
         user = profile.profile

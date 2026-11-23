@@ -815,7 +815,9 @@ class TournamentApiTests(TestCase):
             self.assertEqual(self.call("post", f"{mine}/messages", None, {"body": "  Can we play later on Sunday?  "}, prefix="/public/tournaments").status_code, 201)
         from notifications.models import InboxNotification
 
-        self.assertTrue(InboxNotification.objects.filter(title__startswith="New message from").exists())  # the people running tournaments are told
+        note = InboxNotification.objects.filter(title__startswith="New message from").first()
+        self.assertIsNotNone(note)
+        self.assertTrue(note.href.endswith(f"/messages?team={rid}"))  # the notification opens that team's conversation  # the people running tournaments are told
         self.assertEqual(self.as_("operate", "get", f"/{t.pk}/message-unread").json()["unread"], 1)
         rows = self.as_("operate", "get", f"/{t.pk}/messages").json()
         self.assertEqual((rows["unread_total"], len(rows["threads"])), (1, 2))

@@ -3,10 +3,11 @@
 	import { onMount } from 'svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { api } from '#lib/management-api.ts';
+	import { accessHeaders } from '#lib/team-access.ts';
 	import { dateTimeLabel } from '#lib/tournaments-public.ts';
 
 	/** A team's conversation with the organisers, on its private page. Opening it marks the organisers' messages as read. */
-	let { base, onread }: { base: string; onread?: () => void } = $props();
+	let { base, token, onread }: { base: string; token: string; onread?: () => void } = $props();
 	type Msg = { id: string; sender: 'organiser' | 'team'; author: string; body: string; created: string; broadcast: boolean };
 	let messages = $state<Msg[]>([]);
 	let text = $state('');
@@ -14,7 +15,7 @@
 	let error = $state('');
 
 	async function load() {
-		const res = await api<{ messages: Msg[] }>('GET', `${base}/messages`);
+		const res = await api<{ messages: Msg[] }>('GET', `${base}/messages`, { headers: accessHeaders(token) });
 		messages = res.data?.messages ?? [];
 		onread?.();
 	}
@@ -26,7 +27,7 @@
 		if (!body || busy) return;
 		busy = true;
 		error = '';
-		const res = await api('POST', `${base}/messages`, { body: { body } });
+		const res = await api('POST', `${base}/messages`, { body: { body }, headers: accessHeaders(token) });
 		busy = false;
 		if (!res.ok) {
 			error = t('ts.team.msg_failed');

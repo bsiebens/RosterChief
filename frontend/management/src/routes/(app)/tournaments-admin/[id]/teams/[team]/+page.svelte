@@ -5,7 +5,7 @@
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
-	import TeamLinkButtons from '#lib/components/tournaments/TeamLinkButtons.svelte';
+	import TeamAccessButtons from '#lib/components/tournaments/TeamAccessButtons.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { eventHref } from '#lib/events/types.ts';
@@ -62,12 +62,12 @@
 	/** Lunch days can also be flipped straight in the table when lunch is optional. */
 	const setLunch = (p: Person, day: string, on: boolean) => run.put(`${base}/roster/${p.id}/lunch`, { lunch_days: on ? [...p.lunch_days, day] : p.lunch_days.filter((d) => d !== day) });
 
-	const hdr = headerSnapshot(() => ({ base, canOperate, hasLunch: !!roster && roster.lunch_mode !== 'none', teamId: data.teamId, foreign: !!roster && !roster.team.club_team, email: roster?.team.contact_email ?? '' }));
+	const hdr = headerSnapshot(() => ({ base, canOperate, hasLunch: !!roster && roster.lunch_mode !== 'none', teamId: data.teamId, foreign: !!roster && !roster.team.club_team, contact: { name: roster?.team.contact_name, email: roster?.team.contact_email, phone: roster?.team.contact_phone }, canManage: tn.can_manage }));
 	usePageHeader(() => ({ badge: statusPill, title: roster?.team.name ?? tn.name, context: tn.name, actions }));
 </script>
 
 {#snippet actions()}
-	{#if hdr.canOperate && hdr.foreign}<TeamLinkButtons teamId={hdr.teamId} email={hdr.email} />{/if}
+	{#if hdr.canOperate && hdr.foreign}<TeamAccessButtons kind="team" id={hdr.teamId} contact={hdr.contact} canManage={hdr.canManage} />{/if}
 	<a class="btn btn-outline gap-2" href="/api/v1{hdr.base}/roster/pdf" target="_blank" rel="noopener"><FileDown size={16} /> {t('tn.roster.pdf')}</a>
 	{#if hdr.hasLunch}<a class="btn btn-outline gap-2" href="/api/v1{hdr.base}/lunch/pdf" target="_blank" rel="noopener"><Utensils size={16} /> {t('tn.roster.lunch_pdf')}</a>{/if}
 	{#if hdr.canOperate}<button class="btn btn-primary gap-2" type="button" onclick={() => openForm(null)}><Plus size={16} /> {t('tn.roster.add')}</button>{/if}

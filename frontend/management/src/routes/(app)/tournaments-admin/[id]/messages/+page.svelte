@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { Megaphone, MessageSquare, Send } from '@lucide/svelte';
 	import { invalidateAll } from '$app/navigation';
+	import { page } from '$app/state';
+	import { onMount } from 'svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
@@ -37,6 +39,11 @@
 	}
 	$effect(() => {
 		if (current === 'all') messages = doc?.broadcasts ?? [];
+	});
+	// a notification opens the page on the conversation it is about: ?team=<application id>
+	onMount(() => {
+		const wanted = page.url.searchParams.get('team');
+		if (wanted && doc?.threads.some((x) => x.registration_id === wanted)) open(wanted);
 	});
 
 	async function send(e: SubmitEvent) {

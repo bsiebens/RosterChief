@@ -29,6 +29,7 @@ const FORWARDED_REQUEST_HEADERS = [
 	'idempotency-key',
 	'x-password-reset-key',
 	'x-email-verification-key',
+	'x-team-access',
 	'user-agent',
 	'if-none-match',
 	'if-modified-since'

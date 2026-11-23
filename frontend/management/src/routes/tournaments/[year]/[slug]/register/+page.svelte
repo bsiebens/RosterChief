@@ -7,6 +7,7 @@
 	import PlayersEditor from '#lib/components/tournaments/PlayersEditor.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { api } from '#lib/management-api.ts';
+	import { accessHeaders, storeAccess } from '#lib/team-access.ts';
 	import { money } from '#lib/shop.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { blankPlayer, isBlank, playerBody, type PlayerDraft } from '#lib/tournaments-public.ts';
@@ -71,7 +72,7 @@
 			return;
 		}
 		busy = true;
-		const res = await api<{ status_token: string }>('POST', `/public/tournaments/${encodeURIComponent(tn.slug)}/registrations`, {
+		const res = await api<{ status_token: string; access?: string }>('POST', `/public/tournaments/${encodeURIComponent(tn.slug)}/registrations`, {
 			body: {
 				foreign_name: name.trim(),
 				foreign_contact_name: contactName.trim(),
@@ -85,11 +86,12 @@
 		});
 		if (res.ok && res.data) {
 			const token = res.data.status_token;
+			if (res.data.access) storeAccess(token, res.data.access); // the person at this browser goes straight in; the emailed password is for later
 			// The logo goes up as a second call; a failure there is not fatal: the status page offers the upload again.
 			if (logo && !website) {
 				const form = new FormData();
 				form.set('logo', logo);
-				await api('POST', `/public/tournaments/${encodeURIComponent(tn.slug)}/registrations/${encodeURIComponent(token)}/logo`, { form });
+				await api('POST', `/public/tournaments/${encodeURIComponent(tn.slug)}/registrations/${encodeURIComponent(token)}/logo`, { form, headers: accessHeaders(token) });
 			}
 			await goto(`/tournaments/${tn.path}/registration/${token}?submitted=1`);
 			return;

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Check, ChevronDown, ClipboardList, X } from '@lucide/svelte';
+	import TeamAccessButtons from '#lib/components/tournaments/TeamAccessButtons.svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import { statusPill } from '#lib/components/tournaments/headerBadge.svelte';
@@ -60,6 +61,7 @@
 							<button class="btn btn-ghost btn-sm gap-1" type="button" aria-expanded={expanded === r.id} onclick={() => (expanded = expanded === r.id ? null : r.id)}>
 								{t('tn.reg.players', { n: r.players.length })} <ChevronDown size={14} class={expanded === r.id ? 'rotate-180' : ''} />
 							</button>
+							{#if r.is_foreign && r.status !== 'rejected'}<TeamAccessButtons kind="registration" id={r.id} contact={{ name: r.contact_name, email: r.contact_email, phone: r.contact_phone }} canManage={tn.can_manage} />{/if}
 							{#if r.status === 'pending'}
 								<button class="btn btn-primary btn-sm gap-1" type="button" disabled={run.busy} onclick={() => approve(r)}><Check size={14} /> {t('tn.reg.approve')}</button>
 								<button class="btn btn-outline btn-error btn-sm gap-1" type="button" disabled={run.busy} onclick={() => { rejecting = r; reason = ''; run.clear(); rejectOpen = true; }}><X size={14} /> {t('tn.reg.reject')}</button>
