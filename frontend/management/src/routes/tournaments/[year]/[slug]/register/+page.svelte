@@ -3,6 +3,7 @@
 	import { Lock } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import ColorField from '#lib/components/ColorField.svelte';
+	import AddPersonButtons from '#lib/components/tournaments/AddPersonButtons.svelte';
 	import PlayersEditor from '#lib/components/tournaments/PlayersEditor.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { api } from '#lib/management-api.ts';
@@ -173,9 +174,12 @@
 		</section>
 
 		<section class="card card-body gap-3" aria-labelledby="tp-roster">
-			<div>
-				<h2 id="tp-roster" class="font-display text-base font-bold text-ink">{t('tp.register.roster')}</h2>
-				<p class="text-sm text-muted">{t('tp.register.roster_help')}</p>
+			<div class="flex flex-wrap items-start justify-between gap-3">
+				<div>
+					<h2 id="tp-roster" class="font-display text-base font-bold text-ink">{t('tp.register.roster')}</h2>
+					<p class="text-sm text-muted">{t('tp.register.roster_help')}</p>
+				</div>
+				<AddPersonButtons bind:players dates={tn.dates} mandatory={tn.lunch_mode === 'mandatory'} />
 			</div>
 			<PlayersEditor bind:players tournament={tn} {errors} />
 		</section>

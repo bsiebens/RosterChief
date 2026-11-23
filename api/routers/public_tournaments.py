@@ -33,7 +33,7 @@ from notifications.models import PushSettings
 from sponsoring.models import Sponsor
 from tournaments.models import Match, ScheduleBlock, Tournament, TournamentFollower, TournamentMessage, TournamentRegistration, TournamentRegistrationPlayer, TournamentRosterEntry, TournamentRosterRole, TournamentTeam
 from tournaments.services import notifications
-from tournaments.services.messages import message_out, thread_for_team, unread_for_team
+from tournaments.services.messages import message_out, notify_organisers, thread_for_team, unread_for_team
 from tournaments.sports import is_ice_hockey
 
 router = Router(auth=None)
@@ -437,6 +437,7 @@ def team_message_send(request, slug: str, token: str, payload: MessageIn):
     if not body:
         raise HttpError(422, "Write a message first.")
     message = TournamentMessage.objects.create(tournament=r.tournament, registration=r, sender=TournamentMessage.Sender.TEAM, author=r.foreign_contact_name, body=body)
+    transaction.on_commit(lambda: notify_organisers(message))
     return 201, message_out(message)
 
 

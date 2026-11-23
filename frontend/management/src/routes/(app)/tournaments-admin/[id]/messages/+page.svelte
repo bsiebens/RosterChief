@@ -72,10 +72,10 @@
 			<ul class="max-h-[34rem] divide-y divide-rule overflow-y-auto">
 				{#each doc.threads as th (th.registration_id)}
 					<li>
-						<button type="button" class="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-paper {current === th.registration_id ? 'bg-paper' : ''}" onclick={() => open(th.registration_id)}>
-							<span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-ink/5 text-ink"><MessageSquare size={16} aria-hidden="true" /></span>
-							<span class="min-w-0 flex-1"><b class="block truncate text-ink">{th.team}</b><span class="block truncate text-xs text-muted">{preview(th)}</span></span>
-							{#if th.unread}<span class="badge badge-warning badge-sm">{th.unread}</span>{/if}
+						<button type="button" class="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-paper {th.unread ? 'bg-amber-50 shadow-[inset_4px_0_0_var(--color-warning)]' : ''} {current === th.registration_id ? 'bg-paper' : ''}" onclick={() => open(th.registration_id)}>
+							<span class="flex size-9 shrink-0 items-center justify-center rounded-full {th.unread ? 'bg-warning text-white' : 'bg-ink/5 text-ink'}"><MessageSquare size={16} aria-hidden="true" /></span>
+							<span class="min-w-0 flex-1"><b class="block truncate text-ink {th.unread ? 'font-extrabold' : ''}">{th.team}</b><span class="block truncate text-xs {th.unread ? 'font-semibold text-ink' : 'text-muted'}">{preview(th)}</span></span>
+							{#if th.unread}<span class="badge badge-warning badge-sm font-bold">{th.unread}</span>{/if}
 						</button>
 					</li>
 				{/each}

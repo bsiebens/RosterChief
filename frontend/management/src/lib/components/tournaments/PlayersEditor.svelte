@@ -26,7 +26,6 @@
 	const hasRange = $derived(tournament.earliest_birth_year !== null || tournament.latest_birth_year !== null);
 	const flagged = (p: PlayerDraft) => p.role === 'player' && !!p.date_of_birth && outOfRange(p.date_of_birth, tournament.earliest_birth_year, tournament.latest_birth_year);
 
-	const add = (role: 'player' | 'staff') => (players = [...players, blankPlayer(role, mandatory ? [...tournament.dates] : [])]);
 	const remove = (uid: number) => (players = players.filter((p) => p.uid !== uid));
 	function toggleDay(p: PlayerDraft, day: string, on: boolean) {
 		p.lunch_days = on ? [...p.lunch_days, day].sort() : p.lunch_days.filter((d) => d !== day);
@@ -115,8 +114,4 @@
 		</fieldset>
 	{/each}
 
-	<div class="flex flex-wrap gap-2">
-		<button type="button" class="btn btn-outline gap-2" onclick={() => add('player')}><Plus size={16} aria-hidden="true" /> {t('tp.add_player')}</button>
-		<button type="button" class="btn btn-outline gap-2" onclick={() => add('staff')}><Plus size={16} aria-hidden="true" /> {t('tp.add_staff')}</button>
-	</div>
 </div>

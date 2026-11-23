@@ -803,7 +803,11 @@ class TournamentApiTests(TestCase):
         other = self.call("post", f"/{t.slug}/registrations", None, {**body, "foreign_name": "Others", "foreign_contact_email": "o@x.test"}, prefix="/public/tournaments").json()["status_token"]
         rid = self.as_("manage", "get", f"/{t.pk}/registrations").json()["results"][0]["id"]
         mine = f"/{t.slug}/registrations/{token}"
-        self.assertEqual(self.call("post", f"{mine}/messages", None, {"body": "  Can we play later on Sunday?  "}, prefix="/public/tournaments").status_code, 201)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(self.call("post", f"{mine}/messages", None, {"body": "  Can we play later on Sunday?  "}, prefix="/public/tournaments").status_code, 201)
+        from notifications.models import InboxNotification
+
+        self.assertTrue(InboxNotification.objects.filter(title__startswith="New message from").exists())  # the people running tournaments are told
         self.assertEqual(self.as_("operate", "get", f"/{t.pk}/message-unread").json()["unread"], 1)
         rows = self.as_("operate", "get", f"/{t.pk}/messages").json()
         self.assertEqual((rows["unread_total"], len(rows["threads"])), (1, 2))

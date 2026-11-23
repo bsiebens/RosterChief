@@ -2,6 +2,7 @@
 	import { CircleCheck, CircleX, Clock, Save, Upload } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
+	import AddPersonButtons from '#lib/components/tournaments/AddPersonButtons.svelte';
 	import PlayersEditor from '#lib/components/tournaments/PlayersEditor.svelte';
 	import TeamMessages from '#lib/components/tournaments/public/TeamMessages.svelte';
 	import { page } from '$app/state';
@@ -167,7 +168,10 @@
 
 {#if r.status !== 'rejected' && !withdrawn}
 	<section class="card card-body gap-3" aria-labelledby="tp-players">
-		<h2 id="tp-players" class="font-display text-base font-bold text-ink">{t('tp.register.roster')}</h2>
+		<div class="flex flex-wrap items-center justify-between gap-3">
+			<h2 id="tp-players" class="font-display text-base font-bold text-ink">{t('tp.register.roster')}</h2>
+			{#if reg.players_editable}<AddPersonButtons bind:players dates={tn.dates} mandatory={tn.lunch_mode === 'mandatory'} />{/if}
+		</div>
 		{#if reg.players_editable}
 			<form class="grid gap-3" onsubmit={save} novalidate>
 				<p class="text-sm text-muted">{r.status === 'pending' ? t('tp.status.edit_pending') : t('tp.status.edit_approved', { date: dayLabel(tn.start_date) })}</p>
