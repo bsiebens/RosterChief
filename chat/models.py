@@ -132,10 +132,12 @@ class MessageReport(UUIDModel):
 
 
 class AudienceRule(UUIDModel):
-    """Who a team chat contains: the staff / players / parents of a team in the current season. The roster sync keeps the participants in step."""
+    """Who a team chat contains: the staff / players / parents of a team in the current season. The roster sync keeps the participants in step.
+    A rule without a team is a club-wide audience (every reachable member, narrowed by the include flags); a club-wide chat narrowed to
+    teams has one rule per team."""
 
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="rules")
-    team = models.ForeignKey("teams.Team", on_delete=models.CASCADE, related_name="+")
+    team = models.ForeignKey("teams.Team", null=True, blank=True, on_delete=models.CASCADE, related_name="+")
     include_staff = models.BooleanField(default=True)
     include_players = models.BooleanField(default=True)
     include_parents = models.BooleanField(default=False)
@@ -144,7 +146,7 @@ class AudienceRule(UUIDModel):
 class ChatSettings(UUIDModel):
     """One row per club (``ChatSettings.current()``)."""
 
-    retention_months = models.PositiveSmallIntegerField(_("keep messages for (months)"), default=24)
+    retention_months = models.PositiveSmallIntegerField(_("keep messages for (months)"), default=24, help_text=_("0 keeps messages forever."))
 
     @classmethod
     def current(cls) -> ChatSettings:

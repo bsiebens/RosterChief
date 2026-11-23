@@ -16,11 +16,49 @@ from teams.models import StaffAssignment, TeamMembership
 log = logging.getLogger(__name__)
 
 
+def _reachable(ids: set) -> set:
+    """Who can actually be written to: members with a login; for those without one, their guardians that have a login. A minor with a login
+    stays only when a guardian with a login comes along (the minors rule: a child is not in a club-wide chat without a parent)."""
+    found = list(Member.objects.filter(pk__in=ids).select_related("user"))
+    out = set()
+    for m in found:
+        has_login = m.user_id is not None and m.user.is_active
+        guardians = set(Member.objects.filter(pk__in=guardian_ids_of(m), user__isnull=False, user__is_active=True).values_list("pk", flat=True)) if (not has_login or people.is_minor(m)) else set()
+        if has_login and (not people.is_minor(m) or guardians):
+            out.add(m.pk)
+        out |= guardians
+    return out
+
+
+def _desired_club(rule, season) -> tuple[set, set]:
+    """Club-wide rule: nobody is a chat admin through it (the creator is). Without a team: everybody reachable when all three groups are
+    on, else the staff / players / parents of any team (and club staff) this season."""
+    staff_ids = set(StaffAssignment.objects.filter(season=season).values_list("member_id", flat=True)) | set(Member.objects.filter(club_staff=True).values_list("pk", flat=True))
+    player_ids = set(TeamMembership.objects.filter(season=season).values_list("member_id", flat=True))
+    if rule.include_staff and rule.include_players and rule.include_parents:
+        wanted = set(Member.objects.values_list("pk", flat=True))
+    else:
+        wanted = (staff_ids if rule.include_staff else set()) | (player_ids if rule.include_players else set())
+        if rule.include_parents:
+            for child in Member.objects.filter(pk__in=player_ids):
+                wanted |= guardian_ids_of(child)
+    return _reachable(wanted), set()
+
+
 def desired(rule) -> tuple[set, set]:
     """``(member ids, staff ids)`` the rule wants in the chat right now."""
     season = people.current_season()
     if season is None:
         return set(), set()
+    if rule.team_id is None:
+        return _desired_club(rule, season)
+    if rule.conversation.kind == Conversation.Kind.GROUP:  # a club-wide chat narrowed to teams
+        ids, _staff = _desired_team(rule, season)
+        return _reachable(ids), set()
+    return _desired_team(rule, season)
+
+
+def _desired_team(rule, season) -> tuple[set, set]:
     staff = set(StaffAssignment.objects.filter(team=rule.team, season=season).values_list("member_id", flat=True)) if rule.include_staff else set()
     player_ids = set(TeamMembership.objects.filter(team=rule.team, season=season).values_list("member_id", flat=True))
     players = player_ids if rule.include_players else set()
@@ -35,7 +73,7 @@ def desired(rule) -> tuple[set, set]:
 def sync(conversation) -> dict:
     """Bring a team chat's roster-sourced participants in line with its rules. Returns ``{"added": n, "left": n}``."""
     wanted, staff = set(), set()
-    for rule in conversation.rules.select_related("team"):
+    for rule in conversation.rules.select_related("team", "conversation"):
         ids, staff_ids = desired(rule)
         wanted |= ids
         staff |= staff_ids

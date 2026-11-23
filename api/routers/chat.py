@@ -14,11 +14,11 @@ from ninja import File, Router, Schema, UploadedFile
 from ninja.errors import HttpError
 
 from api.auth import CookieAuth, TokenAuth
-from chat.models import Conversation
+from chat.models import ChatSettings, Conversation
 from chat.services import access, conversations, messages, moderation, people, present
 from members.models import Member
 from members.services import access as member_access
-from members.services.errors import NotAllowed
+from members.services.errors import Invalid, NotAllowed
 
 router = Router(auth=[TokenAuth(door=False), CookieAuth(door=False)])
 
@@ -56,11 +56,13 @@ class Include(Schema):
 
 class ConversationIn(Schema):
     kind: Literal["team", "group", "direct"]
-    mode: Literal["discussion", "announcement"] = "discussion"
+    mode: Literal["discussion", "announcement"] | None = None  # default: discussion, announcement for a club-wide audience
     title: str = ""
     member_ids: list[uuid.UUID] = []
     team_id: uuid.UUID | None = None
     include: Include | None = None
+    audience: Literal["club"] | None = None  # kind "group" only: the whole club instead of member_ids, narrowed by include and team_ids
+    team_ids: list[uuid.UUID] = []
 
 
 class ConversationPatch(Schema):
@@ -107,7 +109,8 @@ def list_conversations(request):
 def create_conversation(request, payload: ConversationIn):
     user, me = gate(request)
     conversation, created = conversations.create(
-        user, me, kind=payload.kind, mode=payload.mode, title=payload.title, member_ids=payload.member_ids, team_id=payload.team_id, include=payload.include.dict() if payload.include else None
+        user, me, kind=payload.kind, mode=payload.mode, title=payload.title, member_ids=payload.member_ids, team_id=payload.team_id, include=payload.include.dict() if payload.include else None,
+        audience=payload.audience, team_ids=payload.team_ids,
     )
     return (201 if created else 200), present.conversation_out(conversation, me)
 
@@ -222,12 +225,51 @@ def find_people(request, q: str = "", limit: int = 20):
 
 
 @router.get("/teams", response=dict, summary="Teams I can start a team chat for", operation_id="chat_teams")
-def my_teams(request):
+def my_teams(request, club: int = 0):
+    """``club=1``: every team, for people who may announce (the team picker of a club-wide chat)."""
     from teams.models import Team
 
     user, _me = gate(request)
-    qs = Team.objects.all() if member_access.can_moderate_chat(user) else Team.objects.filter(pk__in=member_access.staffed_team_ids(user))
+    qs = Team.objects.all() if member_access.can_moderate_chat(user) or (club and member_access.can_announce_chat(user)) else Team.objects.filter(pk__in=member_access.staffed_team_ids(user))
     return {"results": [{"id": t.pk, "name": t.name} for t in qs.order_by("ordering", "name")]}
+
+
+# --- settings (chat.moderate or club admin) ---------------------------------------------------------------------------------
+
+
+class SettingsIn(Schema):
+    retention_months: int | None = None  # 1..120; 0 or null keeps messages forever
+
+
+def gate_settings(request):
+    from authorization.permissions import is_club_admin
+
+    user, me = gate(request)
+    if not (member_access.can_moderate_chat(user) or is_club_admin(user)):
+        raise NotAllowed("You may not change the chat settings.")
+    return user, me
+
+
+def _settings_out(settings) -> dict:
+    return {"retention_months": settings.retention_months or None}
+
+
+@router.get("/settings", response=dict, summary="Chat settings of the club", operation_id="chat_settings")
+def get_settings(request):
+    gate_settings(request)
+    return _settings_out(ChatSettings.current())
+
+
+@router.put("/settings", response=dict, summary="Change the chat settings (retention in months, 1..120; 0 or null = keep forever)", operation_id="chat_settings_update")
+def put_settings(request, payload: SettingsIn):
+    gate_settings(request)
+    months = payload.retention_months or 0
+    if not 0 <= months <= 120:
+        raise Invalid("Choose between 1 and 120 months, or leave it empty to keep messages forever.", errors={"retention_months": ["Choose between 1 and 120 months."]})
+    settings = ChatSettings.current()
+    settings.retention_months = months
+    settings.save(update_fields=["retention_months", "modified"])
+    return _settings_out(settings)
 
 
 # --- moderation (chat.moderate) ---------------------------------------------------------------------------------------------

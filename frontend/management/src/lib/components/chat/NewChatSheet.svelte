@@ -16,7 +16,9 @@
 		oncreated: (c: Conversation) => void;
 	} = $props();
 
-	let kind = $state<ConversationKind>('direct');
+	type Choice = ConversationKind | 'club';
+	let kind = $state<Choice>('direct');
+	let clubTeams = $state<string[]>([]);
 	let mode = $state<ConversationMode>('discussion');
 	let title = $state('');
 	let teamId = $state('');
@@ -26,6 +28,9 @@
 	let error = $state('');
 	let busy = $state(false);
 
+	/** The kinds on offer; people who may announce also get "Whole club" (a group chat for everybody, kept in step with the club). */
+	const choices = $derived<Choice[]>(canAnnounce && kinds.includes('group') ? [...kinds, 'club'] : kinds);
+
 	// On every opening: start clean on the first kind on offer; the teams load the first time they are needed.
 	$effect(() => {
 		if (!open) return;
@@ -34,18 +39,20 @@
 		title = '';
 		teamId = '';
 		include = { staff: true, players: true, parents: false };
+		clubTeams = [];
 		people = [];
 		error = '';
 	});
 	$effect(() => {
-		if (open && kind === 'team' && teams === null) {
-			chatApi.teams().then((res) => (teams = res.ok ? (res.data?.results ?? []) : []));
+		if (open && (kind === 'team' || kind === 'club') && teams === null) {
+			chatApi.teams(kind === 'club').then((res) => (teams = res.ok ? (res.data?.results ?? []) : []));
 		}
 	});
 
-	const icons = { team: Users, group: MessageSquare, direct: User };
+	const icons = { team: Users, group: MessageSquare, direct: User, club: Megaphone };
 	const problem = $derived(
-		kind === 'team' ? (!teamId ? t('chat.new.need_team') : !include.staff && !include.players && !include.parents ? t('chat.new.need_include') : '')
+		kind === 'club' ? (!title.trim() ? t('chat.new.need_title') : !include.staff && !include.players && !include.parents ? t('chat.new.need_include') : '')
+		: kind === 'team' ? (!teamId ? t('chat.new.need_team') : !include.staff && !include.players && !include.parents ? t('chat.new.need_include') : '')
 		: kind === 'group' ? (!title.trim() ? t('chat.new.need_title') : !people.length ? t('chat.new.need_people') : '')
 		: !people.length ? t('chat.new.need_people') : ''
 	);
@@ -56,9 +63,14 @@
 			error = problem;
 			return;
 		}
-		const body: NewConversation = { kind };
+		const body: NewConversation = { kind: kind === 'club' ? 'group' : kind };
 		if (canAnnounce && kind !== 'direct') body.mode = mode;
-		if (kind === 'team') {
+		if (kind === 'club') {
+			body.audience = 'club';
+			body.title = title.trim();
+			body.include = { ...include };
+			if (clubTeams.length) body.team_ids = [...clubTeams];
+		} else if (kind === 'team') {
 			body.team_id = teamId;
 			body.include = { ...include };
 			if (title.trim()) body.title = title.trim();
@@ -81,11 +93,11 @@
 
 <Modal bind:open title={t('chat.new')} closable>
 	<form class="grid gap-4" onsubmit={create}>
-		{#if kinds.length > 1}
+		{#if choices.length > 1}
 			<div class="grid grid-flow-col auto-cols-fr gap-1.5" role="radiogroup" aria-label={t('chat.new.kind')}>
-				{#each kinds as k (k)}
+				{#each choices as k (k)}
 					{@const Icon = icons[k]}
-					<button type="button" role="radio" aria-checked={kind === k} class="portal-person compact flex-col gap-1 py-2 {kind === k ? 'bg-club text-club-content' : ''}" onclick={() => { kind = k; error = ''; }}>
+					<button type="button" role="radio" aria-checked={kind === k} class="portal-person compact flex-col gap-1 py-2 {kind === k ? 'bg-club text-club-content' : ''}" onclick={() => { kind = k; error = ''; if (k === 'club') { mode = 'announcement'; include = { staff: true, players: true, parents: true }; } else mode = 'discussion'; }}>
 						<Icon size={17} aria-hidden="true" />{t(`chat.new.${k}`)}
 					</button>
 				{/each}
@@ -109,6 +121,30 @@
 				<input class="input w-full font-normal" bind:value={title} maxlength="120" />
 				<span class="text-xs font-normal text-muted">{t('chat.new.title_team_help')}</span>
 			</label>
+		{:else if kind === 'club'}
+			<label class="grid gap-1 text-sm font-semibold text-ink">{t('chat.new.title')}
+				<input class="input w-full font-normal" bind:value={title} maxlength="120" />
+			</label>
+			<p class="text-xs text-muted">{t('chat.new.club_help')}</p>
+			<fieldset class="grid gap-2">
+				<legend class="mb-1 text-sm font-semibold text-ink">{t('chat.new.include')}</legend>
+				{#each [['staff', 'chat.new.staff'], ['players', 'chat.new.players'], ['parents', 'chat.new.parents']] as const as [key, label] (key)}
+					<label class="flex items-center justify-between gap-3 text-sm text-ink">{t(label)}<input type="checkbox" class="toggle" bind:checked={include[key]} /></label>
+				{/each}
+			</fieldset>
+			<fieldset class="grid gap-1.5">
+				<legend class="mb-1 text-sm font-semibold text-ink">{t('chat.new.club_teams')}</legend>
+				<p class="text-xs text-muted">{t('chat.new.club_teams_help')}</p>
+				{#if teams === null}
+					<p class="text-sm text-muted" role="status">{t('chat.loading')}</p>
+				{:else}
+					<div class="grid max-h-40 gap-1 overflow-y-auto">
+						{#each teams as team (team.id)}
+							<label class="flex items-center gap-2 text-sm text-ink"><input type="checkbox" value={team.id} bind:group={clubTeams} />{team.name}</label>
+						{/each}
+					</div>
+				{/if}
+			</fieldset>
 		{:else if kind === 'group'}
 			<label class="grid gap-1 text-sm font-semibold text-ink">{t('chat.new.title')}
 				<input class="input w-full font-normal" bind:value={title} maxlength="120" />

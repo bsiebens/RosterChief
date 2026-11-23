@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { BellOff, Paperclip, Search } from '@lucide/svelte';
+	import { BellOff, Megaphone, Paperclip, Search } from '@lucide/svelte';
 	import { listStamp, type Conversation } from '#lib/chat.ts';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import ChatAvatar from './ChatAvatar.svelte';
@@ -52,6 +52,7 @@
 						<span class="min-w-0 flex-1">
 							<span class="flex items-baseline gap-2">
 								<b class="min-w-0 flex-1 truncate text-ink {c.unread ? 'font-extrabold' : 'font-semibold'} {c.muted ? 'text-muted' : ''}">{c.title}</b>
+								{#if c.audience === 'club'}<Megaphone size={12} class="shrink-0 text-club" aria-label={t('chat.audience.club')} />{/if}
 								{#if c.muted}<BellOff size={12} class="shrink-0 text-muted" aria-label={t('chat.list.muted')} />{/if}
 								<span class="shrink-0 font-mono text-[10px] text-muted">{listStamp(c.last_message?.created ?? c.updated, lang)}</span>
 							</span>

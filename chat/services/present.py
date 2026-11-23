@@ -6,7 +6,7 @@ from django.db.models import Count, F, IntegerField, OuterRef, Subquery
 from django.db.models.functions import Coalesce
 from django.urls import reverse
 
-from chat.models import REACTION_EMOJI, Conversation, Message, MessageAttachment, MessageReaction, Participant
+from chat.models import REACTION_EMOJI, AudienceRule, Conversation, Message, MessageAttachment, MessageReaction, Participant
 from chat.services import access, people
 from members.models import Member
 
@@ -85,6 +85,7 @@ def conversations_out(conversations, member, *, moderator_view: bool = False) ->
     for c in conversations:
         if c.pk in last:
             last_docs[c.pk] = message_out(last[c.pk], member, c)
+    club_wide = set(AudienceRule.objects.filter(conversation_id__in=ids, conversation__kind=Conversation.Kind.GROUP).values_list("conversation_id", flat=True))
     out = []
     for c in conversations:
         mine = own.get(c.pk)
@@ -98,6 +99,7 @@ def conversations_out(conversations, member, *, moderator_view: bool = False) ->
                 "kind": c.kind,
                 "mode": c.mode,
                 "title": title,
+                "audience": "club" if c.pk in club_wide else None,
                 "team": {"id": c.team_id, "name": c.team.name} if c.team_id else None,
                 "participant_count": counts.get(c.pk, 0),
                 "last_message": last_docs.get(c.pk),

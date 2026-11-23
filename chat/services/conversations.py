@@ -75,10 +75,17 @@ def _people(ids, *, exclude=None) -> list:
 
 
 @transaction.atomic
-def create(user, me: Member, *, kind, mode="discussion", title="", member_ids=(), team_id=None, include=None) -> tuple[Conversation, bool]:
+def create(user, me: Member, *, kind, mode=None, title="", member_ids=(), team_id=None, include=None, audience=None, team_ids=()) -> tuple[Conversation, bool]:
     """Returns ``(conversation, created)``. Raises ``Invalid`` / ``NotAllowed``."""
     if kind not in Conversation.Kind.values:
         raise Invalid("Unknown kind.", errors={"kind": ["Unknown kind."]})
+    if audience not in (None, "club"):
+        raise Invalid("Unknown audience.", errors={"audience": ["Unknown audience."]})
+    if audience == "club":
+        if kind != Conversation.Kind.GROUP:
+            raise Invalid("A club-wide audience is for a group chat.", errors={"audience": ["A club-wide audience is for a group chat."]})
+        return _create_club(user, me, mode=mode or Conversation.Mode.ANNOUNCEMENT, title=title, include=include, team_ids=team_ids)
+    mode = mode or Conversation.Mode.DISCUSSION
     if mode not in Conversation.Mode.values:
         raise Invalid("Unknown mode.", errors={"mode": ["Unknown mode."]})
     title = (title or "").strip()
@@ -114,6 +121,32 @@ def create(user, me: Member, *, kind, mode="discussion", title="", member_ids=()
     AudienceRule.objects.create(conversation=c, team=team, include_staff=bool(include.get("staff", True)), include_players=bool(include.get("players", True)), include_parents=bool(include.get("parents", False)))
     from chat.services import roster
 
+    roster.sync(c)
+    return c, True
+
+
+def _create_club(user, me: Member, *, mode, title, include, team_ids) -> tuple[Conversation, bool]:
+    """A group chat for the whole club (or the chosen teams): rules keep the participants in step like a team chat does."""
+    from chat.services import roster
+
+    if not member_access.can_announce_chat(user):
+        raise NotAllowed("You may not start club-wide chats.")
+    if mode not in Conversation.Mode.values:
+        raise Invalid("Unknown mode.", errors={"mode": ["Unknown mode."]})
+    title = (title or "").strip()
+    if not title:
+        raise Invalid("A group chat needs a title.", errors={"title": ["A group chat needs a title."]})
+    include = {"staff": True, "players": True, "parents": True, **(include or {})}
+    if not (include["staff"] or include["players"] or include["parents"]):
+        raise Invalid("Choose at least one group of people.", errors={"include": ["Choose at least one group of people."]})
+    team_ids = list(dict.fromkeys(team_ids or []))
+    teams = list(Team.objects.filter(pk__in=team_ids))
+    if len(teams) != len(team_ids):
+        raise Invalid("Unknown team.", errors={"team_ids": ["Unknown team."]})
+    c = Conversation.objects.create(kind=Conversation.Kind.GROUP, mode=mode, title=title[:150], created_by=me)
+    _add(c, me, is_admin=True)
+    for team in teams or [None]:
+        AudienceRule.objects.create(conversation=c, team=team, include_staff=bool(include["staff"]), include_players=bool(include["players"]), include_parents=bool(include["parents"]))
     roster.sync(c)
     return c, True
 
