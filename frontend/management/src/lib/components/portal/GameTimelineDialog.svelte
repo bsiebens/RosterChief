@@ -32,8 +32,8 @@
 	{#if open}
 		<div class="relative isolate overflow-hidden bg-sidebar-bg text-sidebar-fg">
 			<EventBackdrop src={background} />
-			{#if crest}<img class="pointer-events-none absolute -top-6 -z-10 h-56 w-56 object-contain opacity-15 {home ? '-left-8' : '-right-8'}" src={crest} alt="" />{/if}
-			{#if opponentCrest}<img class="pointer-events-none absolute -top-6 -z-10 h-56 w-56 object-contain opacity-15 {home ? '-right-8' : '-left-8'}" src={opponentCrest} alt="" />{/if}
+			{#if crest}<img class="pointer-events-none absolute -top-6 -z-10 h-56 w-56 object-contain opacity-30 {home ? '-left-8' : '-right-8'}" src={crest} alt="" />{/if}
+			{#if opponentCrest}<img class="pointer-events-none absolute -top-6 -z-10 h-56 w-56 object-contain opacity-30 {home ? '-right-8' : '-left-8'}" src={opponentCrest} alt="" />{/if}
 			<div class="flex items-center gap-3 px-5 pt-3 font-mono text-xs tracking-[.14em] text-sidebar-fg-dim uppercase">
 				<span class="min-w-0 flex-1 truncate">{title}</span>
 				{#if game.final}<span class="rounded-full border border-sidebar-chip px-2 py-0.5 text-[10px] font-bold text-sidebar-fg">{t('portal.final')}</span>{/if}
