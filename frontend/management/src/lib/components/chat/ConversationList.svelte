@@ -47,7 +47,7 @@
 		<ul class="min-h-0 flex-1 divide-y divide-rule overflow-y-auto" aria-label={t('chat.list.label')}>
 			{#each shown as c (c.id)}
 				<li>
-					<a class="flex items-center gap-3 px-3 py-3 no-underline hover:bg-paper {selectedId === c.id ? 'bg-paper' : ''} {c.unread && !c.muted ? 'shadow-[inset_4px_0_0_var(--color-club)]' : ''} {c.muted ? 'opacity-70' : ''}" href={hrefFor(c.id)} aria-current={selectedId === c.id ? 'page' : undefined} data-sveltekit-noscroll>
+					<a class="flex items-center gap-3 px-3 py-3 no-underline hover:bg-paper {selectedId === c.id ? 'bg-paper' : ''} {c.unread && !c.muted ? 'shadow-[inset_4px_0_0_var(--color-club)]' : ''} {c.muted ? 'opacity-70' : ''}" href={hrefFor(c.id)} aria-current={selectedId === c.id ? 'page' : undefined} data-sveltekit-reset="false">
 						<ChatAvatar conversation={c} />
 						<span class="min-w-0 flex-1">
 							<span class="flex items-baseline gap-2">

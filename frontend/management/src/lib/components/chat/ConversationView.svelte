@@ -99,6 +99,7 @@
 <div class="flex h-full min-h-0">
 	<section class="flex min-w-0 flex-1 flex-col bg-white" aria-label={c?.title ?? t('chat.title')}>
 		{#if poller.loading}
+			{#if onback}<div class="border-b border-line p-2 md:hidden"><button type="button" class="btn btn-ghost btn-sm" onclick={onback}>{t('chat.back')}</button></div>{/if}
 			<div class="m-auto flex items-center gap-2 text-sm text-muted" role="status"><LoaderCircle class="animate-spin" size={16} aria-hidden="true" />{t('chat.loading')}</div>
 		{:else if !c}
 			<div class="m-auto grid justify-items-center gap-3 p-6 text-center" role="alert">

@@ -134,8 +134,8 @@ export const showRoleLabel = (p: Person) => (p.role === 'staff' || p.role === 'a
 export function bubbleClass(role: ChatRole): string {
 	if (role === 'staff') return 'bg-club text-club-content';
 	if (role === 'admin') return 'bg-ink text-white';
-	if (role === 'parent') return 'bg-sky-100 text-ink';
-	return 'bg-slate-200 text-ink';
+	if (role === 'parent') return 'bg-sky-100 text-slate-900';
+	return 'bg-slate-200 text-slate-900';
 }
 
 export const isImage = (a: Attachment) => a.content_type.startsWith('image/');

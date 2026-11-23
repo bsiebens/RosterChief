@@ -76,7 +76,7 @@
 				<div bind:this={menu} class="relative shrink-0">
 					<button type="button" class="grid size-7 place-items-center rounded-full text-muted hover:bg-paper hover:text-ink" aria-label={t('chat.msg.menu')} aria-haspopup="menu" aria-expanded={menuOpen} onclick={() => (menuOpen = !menuOpen)}><Ellipsis size={16} aria-hidden="true" /></button>
 					{#if menuOpen}
-						<div class="absolute z-20 mt-1 w-48 rounded-lg border border-line bg-white py-1 shadow-lg {mine ? 'right-0' : 'left-0'}" role="menu">
+						<div class="absolute bottom-full z-20 mb-1 w-48 rounded-lg border border-line bg-white py-1 shadow-lg {mine ? 'left-0' : 'right-0'}" role="menu">
 							{#if canReply}<button type="button" role="menuitem" class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-ink hover:bg-paper" onclick={() => { menuOpen = false; onreplyprivately?.(message); }}><MessageCircleReply size={15} aria-hidden="true" />{t('chat.msg.reply_privately')}</button>{/if}
 							{#if canReport}<button type="button" role="menuitem" class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-ink hover:bg-paper" onclick={() => { menuOpen = false; onreport?.(message); }}><Flag size={15} aria-hidden="true" />{t('chat.msg.report')}</button>{/if}
 							{#if canRemove}<button type="button" role="menuitem" class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-danger hover:bg-paper" onclick={() => { menuOpen = false; ondelete?.(message); }}><Trash2 size={15} aria-hidden="true" />{t('chat.msg.delete')}</button>{/if}
