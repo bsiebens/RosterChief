@@ -167,6 +167,11 @@ def delete_manual_team(team: TournamentTeam):
     are ``SET_NULL``), same as a withdrawal leaves them.
     """
     team = TournamentTeam.objects.select_for_update().get(pk=team.pk)
+    registration = team.registration
+    if registration is not None and registration.auto_created:
+        # made behind the scenes for a team entered by hand (its private page or its chat), nobody ever applied: it goes with the team
+        registration.delete()
+        team = TournamentTeam.objects.select_for_update().get(pk=team.pk)
     if team.registration_id is not None:
         raise TeamDeletionError(_("This team came from a registration -- withdraw it instead of deleting it, so its own status page can still show why."))
     if team.is_home_team:

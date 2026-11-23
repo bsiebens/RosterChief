@@ -127,10 +127,10 @@
 								</div>
 							</td>
 							<td class="w-10 text-center">
-								<button class="btn btn-outline btn-warning btn-xs btn-square" type="button" disabled={!canManage || !!team.withdrawn_at || !team.registration_id} title={t('tn.teams.withdraw')} aria-label={t('tn.teams.withdraw_named', { name: team.name })} onclick={() => { withdrawing = team; withdrawReason = ''; run.clear(); withdrawOpen = true; }}><UserMinus size={13} aria-hidden="true" /></button>
+								<button class="btn btn-outline btn-warning btn-xs btn-square" type="button" disabled={!canManage || !!team.withdrawn_at || !team.from_application} title={t('tn.teams.withdraw')} aria-label={t('tn.teams.withdraw_named', { name: team.name })} onclick={() => { withdrawing = team; withdrawReason = ''; run.clear(); withdrawOpen = true; }}><UserMinus size={13} aria-hidden="true" /></button>
 							</td>
 							<td class="w-10 text-center">
-								<button class="btn btn-outline btn-error btn-xs btn-square" type="button" disabled={!canManage || !!team.registration_id || team.is_home_team} title={t('common.delete')} aria-label={t('tn.teams.delete_named', { name: team.name })} onclick={() => { deleting = team; run.clear(); deleteOpen = true; }}><Trash2 size={13} aria-hidden="true" /></button>
+								<button class="btn btn-outline btn-error btn-xs btn-square" type="button" disabled={!canManage || team.from_application || team.is_home_team} title={t('common.delete')} aria-label={t('tn.teams.delete_named', { name: team.name })} onclick={() => { deleting = team; run.clear(); deleteOpen = true; }}><Trash2 size={13} aria-hidden="true" /></button>
 							</td>
 						</tr>
 					{/each}

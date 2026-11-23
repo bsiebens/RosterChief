@@ -101,6 +101,7 @@ export type TeamDoc = {
 	payment_status: 'unpaid' | 'deposit_received' | 'fully_paid';
 	withdrawn_at: string | null;
 	withdrawal_reason: string;
+	from_application?: boolean;
 	registration_id: string | null;
 	player_count: number;
 	staff_count: number;

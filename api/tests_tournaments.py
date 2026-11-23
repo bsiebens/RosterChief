@@ -825,6 +825,7 @@ class TournamentApiTests(TestCase):
         self.assertIn("Added by hand", [x["team"] for x in self.as_("operate", "get", f"/{t.pk}/messages").json()["threads"]])  # a team without an application has a thread too
         hand.refresh_from_db()
         self.assertIsNotNone(hand.registration_id)
+        self.assertEqual(self.as_("manage", "delete", f"/teams/{hand.pk}").status_code, 204)  # the behind-the-scenes application goes with the team
         thread = self.as_("operate", "get", f"/{t.pk}/messages/{rows['threads'][0]['registration_id']}").json()
         self.assertEqual([m["body"] for m in thread["messages"]], ["Can we play later on Sunday?"])
         self.assertEqual(self.as_("operate", "get", f"/{t.pk}/message-unread").json()["unread"], 0)

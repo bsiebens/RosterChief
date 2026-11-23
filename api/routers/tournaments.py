@@ -348,7 +348,7 @@ def _private_registration(team: TournamentTeam) -> TournamentRegistration:
         raise Invalid("A club team has no outside contact person.", {"detail": ["A club team has no outside contact person."]}, code="not_foreign")
     registration = TournamentRegistration.objects.create(
         tournament=team.tournament, foreign_name=team.foreign_name, foreign_contact_name=team.foreign_contact_name, foreign_contact_email=team.foreign_contact_email,
-        foreign_contact_phone=team.foreign_contact_phone, foreign_primary_color=team.foreign_primary_color, foreign_secondary_color=team.foreign_secondary_color, status=TournamentRegistration.Status.APPROVED,
+        foreign_contact_phone=team.foreign_contact_phone, foreign_primary_color=team.foreign_primary_color, foreign_secondary_color=team.foreign_secondary_color, status=TournamentRegistration.Status.APPROVED, auto_created=True,
     )  # fmt: skip
     team_access.reset_password(registration)  # never an open link: the contact gets the password when the link is sent
     team.registration = registration

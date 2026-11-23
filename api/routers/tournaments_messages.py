@@ -23,8 +23,13 @@ class MessageIn(Schema):
 
 
 def _author(request) -> str:
+    """The sender's name as the club knows them (their member record), never the login email."""
+    from members.models import Member
+
     user = request.user
-    return (getattr(user, "get_full_name", lambda: "")() or getattr(user, "email", "") or "Organiser")[:150]
+    member = Member.objects.filter(user=user).first()
+    name = member.get_full_name() if member else ""
+    return (name or getattr(user, "get_full_name", lambda: "")() or getattr(user, "first_name", "") or "Organiser")[:150]
 
 
 def _registration(tournament, registration_id) -> TournamentRegistration:
