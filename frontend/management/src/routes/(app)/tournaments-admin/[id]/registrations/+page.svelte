@@ -58,28 +58,28 @@
 							{#if r.status === 'rejected' && r.rejection_reason}<p class="text-sm text-error">{r.rejection_reason}</p>{/if}
 						</div>
 						<div class="flex flex-wrap items-center gap-2">
-							<button class="btn btn-ghost btn-sm gap-1" type="button" aria-expanded={expanded === r.id} onclick={() => (expanded = expanded === r.id ? null : r.id)}>
+							<button class="btn btn-ghost btn-xs gap-1" type="button" aria-expanded={expanded === r.id} onclick={() => (expanded = expanded === r.id ? null : r.id)}>
 								{t('tn.reg.players', { n: r.players.length })} <ChevronDown size={14} class={expanded === r.id ? 'rotate-180' : ''} />
 							</button>
-							{#if r.is_foreign && r.status !== 'rejected'}<TeamAccessButtons kind="registration" id={r.id} contact={{ name: r.contact_name, email: r.contact_email, phone: r.contact_phone }} canManage={tn.can_manage} />{/if}
+							{#if r.is_foreign && r.status !== 'rejected'}<TeamAccessButtons kind="registration" id={r.id} contact={{ name: r.contact_name, email: r.contact_email, phone: r.contact_phone }} canManage={tn.can_manage} compact />{/if}
 							{#if r.status === 'pending'}
-								<button class="btn btn-primary btn-sm gap-1" type="button" disabled={run.busy} onclick={() => approve(r)}><Check size={14} /> {t('tn.reg.approve')}</button>
-								<button class="btn btn-outline btn-error btn-sm gap-1" type="button" disabled={run.busy} onclick={() => { rejecting = r; reason = ''; run.clear(); rejectOpen = true; }}><X size={14} /> {t('tn.reg.reject')}</button>
+								<button class="btn btn-primary btn-xs gap-1" type="button" disabled={run.busy} onclick={() => approve(r)}><Check size={13} /> {t('tn.reg.approve')}</button>
+								<button class="btn btn-outline btn-error btn-xs gap-1" type="button" disabled={run.busy} onclick={() => { rejecting = r; reason = ''; run.clear(); rejectOpen = true; }}><X size={13} /> {t('tn.reg.reject')}</button>
 							{:else if r.tournament_team_id}
-								<a class="btn btn-outline btn-sm" href="/tournaments-admin/{tn.id}/teams/{r.tournament_team_id}">{t('tn.reg.open_team')}</a>
+								<a class="btn btn-outline btn-xs" href="/tournaments-admin/{tn.id}/teams/{r.tournament_team_id}">{t('tn.reg.open_team')}</a>
 							{/if}
 						</div>
 					</div>
 					{#if expanded === r.id}
 						{#if r.players.length}
 							<div class="overflow-x-auto">
-								<table class="table table-sm">
-									<thead><tr><th>#</th><th>{t('tn.roster.name')}</th><th>{t('tn.roster.role')}</th><th>{t('tn.roster.dob')}</th><th>{t('tn.roster.dietary')}</th></tr></thead>
+								<table class="table table-sm [&_td]:align-middle [&_th]:align-middle">
+									<thead><tr><th class="w-12">#</th><th>{t('tn.roster.name')}</th><th>{t('tn.roster.role')}</th><th>{t('tn.roster.dob')}</th><th>{t('tn.roster.dietary')}</th></tr></thead>
 									<tbody>
 										{#each r.players as p (p.id)}
 											<tr>
 												<td class="font-mono text-xs">{p.jersey_number ?? '—'}</td>
-												<td>{p.name}{#if p.age_flagged} <span class="badge badge-warning badge-xs">{t('tn.roster.age_flag')}</span>{/if}</td>
+												<td><div class="flex items-center gap-2"><span>{p.name}</span>{#if p.age_flagged}<span class="badge badge-warning badge-sm shrink-0 whitespace-nowrap">{t('tn.roster.age_flag')}</span>{/if}</div></td>
 												<td>{t(`tn.role.${p.role}`)}{p.position_label ? ` · ${p.position_label}` : ''}</td>
 												<td class="font-mono text-xs">{fmtDate(p.date_of_birth)}</td>
 												<td class="text-xs">{p.dietary_restrictions || '—'}</td>

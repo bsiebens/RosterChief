@@ -107,6 +107,8 @@ export default {
 		'tn.link.confirm': 'Email the private link and a new password to {email}? With them the team can edit the roster, upload the logo and message the organisers.',
 		'tn.link.confirm_unknown': 'This team has no contact email yet.',
 		'tn.link.sent': 'The link and a new password were sent to {email}.',
+		'tn.teams.col.actions': 'Team page',
+		'tn.teams.withdraw_named': 'Withdraw {name}',
 	},
 	nl: {
 		'ts.final_standings': 'Eindklassement',
@@ -215,6 +217,8 @@ export default {
 		'tn.link.confirm': 'De privélink en een nieuw wachtwoord mailen naar {email}? Hiermee kan de ploeg de kern aanpassen, het logo uploaden en de organisatie berichten.',
 		'tn.link.confirm_unknown': 'Deze ploeg heeft nog geen e-mailadres.',
 		'tn.link.sent': 'De link en een nieuw wachtwoord zijn verstuurd naar {email}.',
+		'tn.teams.col.actions': 'Ploegpagina',
+		'tn.teams.withdraw_named': '{name} terugtrekken',
 	},
 	fr: {
 		'ts.final_standings': 'Classement final',
@@ -323,5 +327,7 @@ export default {
 		'tn.link.confirm': 'Envoyer le lien privé et un nouveau mot de passe à {email} ? Avec eux, l’équipe peut modifier son effectif, téléverser son logo et écrire aux organisateurs.',
 		'tn.link.confirm_unknown': 'Cette équipe n’a pas encore d’e-mail.',
 		'tn.link.sent': 'Le lien et un nouveau mot de passe ont été envoyés à {email}.',
+		'tn.teams.col.actions': 'Page équipe',
+		'tn.teams.withdraw_named': 'Retirer {name}',
 	}
 };

@@ -20,7 +20,7 @@
 		canManage = false
 	}: { kind: 'team' | 'registration'; id: string; contact: { name?: string; email?: string; phone?: string }; compact?: boolean; canManage?: boolean } = $props();
 	const root = $derived(kind === 'team' ? `/tournaments/teams/${id}` : `/tournaments/registrations/${id}`);
-	const size = $derived(compact ? 'btn-xs' : '');
+	const size = $derived(compact ? 'btn-xs btn-square' : '');
 	const icon = $derived(compact ? 13 : 16);
 
 	let copied = $state(false);
@@ -81,15 +81,15 @@
 </script>
 
 {#if kind === 'team'}
-	<button class="btn btn-outline {size} gap-1.5" type="button" onclick={copy} title={t('tn.link.copy_title')}>
-		{#if copied}<Check size={icon} aria-hidden="true" /> {t('tn.link.copied')}{:else}<Link2 size={icon} aria-hidden="true" /> {t('tn.link.copy')}{/if}
+	<button class="btn btn-outline {size} gap-1.5" type="button" onclick={copy} title={t('tn.link.copy_title')} aria-label={t('tn.link.copy_title')}>
+		{#if copied}<Check size={icon} aria-hidden="true" />{#if !compact} {t('tn.link.copied')}{/if}{:else}<Link2 size={icon} aria-hidden="true" />{#if !compact} {t('tn.link.copy')}{/if}{/if}
 	</button>
 {/if}
-<button class="btn btn-outline {size} gap-1.5" type="button" onclick={() => { error = ''; sentTo = ''; sendOpen = true; }} title={t('tn.link.send_title')}>
-	<KeyRound size={icon} aria-hidden="true" /> {t('tn.link.send')}
+<button class="btn btn-outline {size} gap-1.5" type="button" onclick={() => { error = ''; sentTo = ''; sendOpen = true; }} title={t('tn.link.send_title')} aria-label={t('tn.link.send_title')}>
+	<KeyRound size={icon} aria-hidden="true" />{#if !compact} {t('tn.link.send')}{/if}
 </button>
 {#if canManage}
-	<button class="btn btn-outline {size} gap-1.5" type="button" onclick={openEdit} title={t('tn.link.contact_title')}><UserPen size={icon} aria-hidden="true" /> {t('tn.link.contact')}</button>
+	<button class="btn btn-outline {size} gap-1.5" type="button" onclick={openEdit} title={t('tn.link.contact_title')} aria-label={t('tn.link.contact_title')}><UserPen size={icon} aria-hidden="true" />{#if !compact} {t('tn.link.contact')}{/if}</button>
 {/if}
 
 <Modal bind:open={sendOpen} title={t('tn.link.send_title')}>

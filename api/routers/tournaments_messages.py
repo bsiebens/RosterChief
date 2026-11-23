@@ -42,6 +42,10 @@ def _mail(registration, body, request) -> None:
 def threads(request, tournament_id: uuid.UUID):
     c.gate_operate(request)
     t = c.get_tournament(tournament_id)
+    from api.routers.tournaments import _private_registration
+
+    for team in t.teams.filter(registration__isnull=True, team__isnull=True, withdrawn_at__isnull=True):  # teams the organisers added by hand can be written to too
+        _private_registration(team)
     regs = TournamentRegistration.objects.filter(tournament=t).exclude(status=TournamentRegistration.Status.REJECTED).annotate(
         unread=Count("messages", filter=Q(messages__sender=TournamentMessage.Sender.TEAM, messages__read_by_organisers=False)), last=Max("messages__created")
     ).order_by(F("last").desc(nulls_last=True), "foreign_name")  # fmt: skip

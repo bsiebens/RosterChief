@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { FileDown, Plus, Trash2, Users } from '@lucide/svelte';
+	import { ClipboardList, FileDown, ImageUp, Plus, Trash2, UserMinus, Users } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import NoticeAlert from '#lib/components/NoticeAlert.svelte';
 	import TeamAccessButtons from '#lib/components/tournaments/TeamAccessButtons.svelte';
@@ -85,7 +85,9 @@
 						<th class="hidden md:table-cell">{t('tn.teams.col.contact')}</th>
 						<th class="text-right">{t('tn.teams.col.people')}</th>
 						<th>{t('tn.teams.col.payment')}</th>
-						<th></th>
+						<th class="text-right">{t('tn.teams.col.actions')}</th>
+						<th class="w-10 text-center">{t('tn.teams.withdraw')}</th>
+						<th class="w-10 text-center">{t('common.delete')}</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -112,23 +114,23 @@
 									<span class="badge badge-sm badge-ghost">{t(`tn.pay.${team.payment_status}`)}</span>
 								{/if}
 							</td>
-							<td class="text-right whitespace-nowrap">
+							<td class="whitespace-nowrap">
 								<div class="flex items-center justify-end gap-1">
-									<a class="btn btn-outline btn-xs" href="{TBASE}/{tn.id}/teams/{team.id}">{t('tn.teams.roster')}</a>
-									{#if canOperate && team.is_foreign && !team.withdrawn_at}<TeamAccessButtons kind="team" id={team.id} contact={{ name: team.contact_name, email: team.contact_email, phone: team.contact_phone }} {canManage} compact />{/if}
+									<a class="btn btn-outline btn-xs btn-square" href="{TBASE}/{tn.id}/teams/{team.id}" title={t('tn.teams.roster')} aria-label={t('tn.teams.roster')}><ClipboardList size={13} aria-hidden="true" /></a>
 									{#if canOperate}
-										<label class="btn btn-outline btn-xs focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-club">
-											{t('tn.teams.logo')}
+										<label class="btn btn-outline btn-xs btn-square focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-club" title={t('tn.teams.logo')}>
+											<ImageUp size={13} aria-hidden="true" /><span class="sr-only">{t('tn.teams.logo')}</span>
 											<input type="file" accept="image/*" class="sr-only" onchange={(e) => { uploadLogo(team, e.currentTarget.files?.[0]); e.currentTarget.value = ''; }} />
 										</label>
 									{/if}
-									{#if canManage && !team.withdrawn_at}
-										<button class="btn btn-outline btn-warning btn-xs" type="button" onclick={() => { withdrawing = team; withdrawReason = ''; run.clear(); withdrawOpen = true; }}>{t('tn.teams.withdraw')}</button>
-									{/if}
-									{#if canManage && !team.registration_id && !team.is_home_team}
-										<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('tn.teams.delete_named', { name: team.name })} onclick={() => { deleting = team; run.clear(); deleteOpen = true; }}><Trash2 size={13} /></button>
-									{/if}
+									{#if canOperate && team.is_foreign && !team.withdrawn_at}<TeamAccessButtons kind="team" id={team.id} contact={{ name: team.contact_name, email: team.contact_email, phone: team.contact_phone }} {canManage} compact />{/if}
 								</div>
+							</td>
+							<td class="w-10 text-center">
+								<button class="btn btn-outline btn-warning btn-xs btn-square" type="button" disabled={!canManage || !!team.withdrawn_at || !team.registration_id} title={t('tn.teams.withdraw')} aria-label={t('tn.teams.withdraw_named', { name: team.name })} onclick={() => { withdrawing = team; withdrawReason = ''; run.clear(); withdrawOpen = true; }}><UserMinus size={13} aria-hidden="true" /></button>
+							</td>
+							<td class="w-10 text-center">
+								<button class="btn btn-outline btn-error btn-xs btn-square" type="button" disabled={!canManage || !!team.registration_id || team.is_home_team} title={t('common.delete')} aria-label={t('tn.teams.delete_named', { name: team.name })} onclick={() => { deleting = team; run.clear(); deleteOpen = true; }}><Trash2 size={13} aria-hidden="true" /></button>
 							</td>
 						</tr>
 					{/each}

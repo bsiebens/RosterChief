@@ -821,6 +821,10 @@ class TournamentApiTests(TestCase):
         self.assertEqual(self.as_("operate", "get", f"/{t.pk}/message-unread").json()["unread"], 1)
         rows = self.as_("operate", "get", f"/{t.pk}/messages").json()
         self.assertEqual((rows["unread_total"], len(rows["threads"])), (1, 2))
+        hand = self.foreign(t, "Added by hand")
+        self.assertIn("Added by hand", [x["team"] for x in self.as_("operate", "get", f"/{t.pk}/messages").json()["threads"]])  # a team without an application has a thread too
+        hand.refresh_from_db()
+        self.assertIsNotNone(hand.registration_id)
         thread = self.as_("operate", "get", f"/{t.pk}/messages/{rows['threads'][0]['registration_id']}").json()
         self.assertEqual([m["body"] for m in thread["messages"]], ["Can we play later on Sunday?"])
         self.assertEqual(self.as_("operate", "get", f"/{t.pk}/message-unread").json()["unread"], 0)
