@@ -1,7 +1,7 @@
 <script lang="ts">
-    import {page} from '$app/state';
+    import {navigating, page} from '$app/state';
     import {goto} from '$app/navigation';
-    import {CircleUser, FileWarning, FlaskConical, KeyRound, LogOut, MailX, ShieldCheck, Wrench} from '@lucide/svelte';
+    import {CircleUser, FileWarning, FlaskConical, KeyRound, LoaderCircle, LogOut, MailX, ShieldCheck, Wrench} from '@lucide/svelte';
     import {auth} from '#lib/api.ts';
     import {NAV} from '#lib/nav.ts';
     import JobStatus from '#lib/components/JobStatus.svelte';
@@ -15,6 +15,9 @@
     const version = $derived(a.status === 'authenticated' ? a.me.version : '');
     const tabs = $derived(NAV.filter((t) => !t.superuser || isSuper));
     const active = (href: string) => (href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(href));
+
+    // The jobs screens load slowly; the page stays put until the server answers, so say so.
+    const loadingJobs = $derived(navigating.to?.url.pathname.startsWith('/jobs') ?? false);
 
     let menu: HTMLDetailsElement | undefined = $state();
 
@@ -82,7 +85,15 @@
         {/each}
     </div>
 
-    <main class="flex-1 overflow-y-auto">
+    <main class="relative flex-1 overflow-y-auto" aria-busy={loadingJobs}>
+        {#if loadingJobs}
+            <div class="absolute inset-0 z-10 flex items-center justify-center bg-paper/70" role="status" data-testid="jobs-loading">
+                <div class="flex items-center gap-3 rounded border border-edge bg-white px-4 py-3 text-sm text-slate shadow-lg">
+                    <LoaderCircle size={20} class="animate-spin text-ice" aria-hidden="true"/>
+                    Loading jobs…
+                </div>
+            </div>
+        {/if}
         <div class="mx-auto flex w-full max-w-[1440px] flex-col gap-4 px-7 py-6">
             {#if data.switches?.maintenance.is_active}
                 <div class="flex items-center gap-3 rounded border border-danger-border bg-danger-bg px-4 py-3 text-sm text-club-dark" role="alert" data-testid="maintenance-banner">
