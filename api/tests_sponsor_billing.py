@@ -161,7 +161,7 @@ class SponsorBillingTests(ChargesBase):
         self.assertIsNotNone(self.sponsor.suspended_at)
         self.assertNotIn(self.sponsor, Sponsor.active())
         self.assertEqual(billing.sponsor_status(self.sponsor)["status"], "suspended")
-        listed = [s for s in self.call("get", "/sponsor-management", who="owner").json() if s["id"] == str(self.sponsor.pk)][0]
+        listed = next(s for s in self.call("get", "/sponsor-management", who="owner").json() if s["id"] == str(self.sponsor.pk))
         self.assertEqual((listed["status"], listed["billing"]["status"]), ("suspended", "suspended"))
         # a partial payment is not enough; paying the arrears reactivates at once (the payment hook), without waiting for the daily job
         self.pay(row, "50.00")

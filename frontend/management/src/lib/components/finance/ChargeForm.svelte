@@ -25,10 +25,14 @@
 		notes = $bindable(''),
 		invoiceText = $bindable(''),
 		paymentInstructions = $bindable(''),
+		outside = $bindable(false),
+		payerName = $bindable(''),
+		payerEmail = $bindable(''),
+		allowOutside = false,
 		defaultInstructions = '',
 		errors = {},
 		tried = false
-	}: { memberId?: string; memberName?: string; lines: LineDraft[]; dueDate?: string; notes?: string; invoiceText?: string; paymentInstructions?: string; defaultInstructions?: string; errors?: Record<string, string>; tried?: boolean } = $props();
+	}: { memberId?: string; memberName?: string; lines: LineDraft[]; dueDate?: string; notes?: string; invoiceText?: string; paymentInstructions?: string; outside?: boolean; payerName?: string; payerEmail?: string; allowOutside?: boolean; defaultInstructions?: string; errors?: Record<string, string>; tried?: boolean } = $props();
 
 	let changing = $state(false);
 	const showName = $derived(!!memberName && !!memberId && !changing);
@@ -40,7 +44,16 @@
 <div class="grid content-start gap-5">
 	<section class="card card-body card-hl gap-3" aria-labelledby="chg-member">
 		<h2 id="chg-member" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><UserRound size={16} aria-hidden="true" /> {t('chg.form.member')}</h2>
-		{#if showName}
+		{#if allowOutside}
+			<label class="flex items-center gap-2 text-sm"><input type="checkbox" class="checkbox checkbox-sm" bind:checked={outside} /> {t('chg.form.outside')}</label>
+		{/if}
+		{#if outside}
+			<p class="text-xs text-muted">{t('chg.form.outside_help')}</p>
+			<div class="grid gap-3 sm:grid-cols-2">
+				<Field label={t('chg.form.payer_name')} name="payer_name" bind:value={payerName} maxlength={150} error={errors['payer.name'] ?? (tried && !payerName.trim() ? t('chg.form.payer_required') : undefined)} />
+				<Field label={t('chg.form.payer_email')} name="payer_email" type="email" bind:value={payerEmail} maxlength={254} error={errors['payer.email'] ?? (tried && !payerEmail.includes('@') ? t('chg.form.payer_required') : undefined)} />
+			</div>
+		{:else if showName}
 			<div class="flex flex-wrap items-center gap-3">
 				<span class="font-semibold text-ink">{memberName}</span>
 				<button class="btn btn-outline btn-sm" type="button" onclick={() => ((changing = true), (memberId = ''))}>{t('chg.form.change')}</button>
