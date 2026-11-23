@@ -20,6 +20,10 @@ export type SponsorAgreement = {
 	description: string;
 	lead_days: number;
 	grace_days: number;
+	warn_days: number;
+	keep_active: boolean;
+	keep_active_until: string | null;
+	suspended_at: string | null;
 	installments: Installment[];
 	billing: SponsorBilling;
 };
@@ -29,6 +33,7 @@ export type SponsorAgreementIn = {
 	description: string;
 	lead_days: number;
 	grace_days: number;
+	warn_days: number;
 	installments: { id?: string; due_date: string; amount: string }[];
 };
 

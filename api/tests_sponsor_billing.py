@@ -4,6 +4,7 @@ makes a sponsor inactive and active again. Plus the one-off invoice for someone 
 import datetime
 from decimal import Decimal
 
+from django.core import mail
 from django.utils import timezone
 
 from api.tests_charges import ChargesBase
@@ -152,11 +153,11 @@ class SponsorBillingTests(ChargesBase):
         billing.invoice_due(TODAY)
         row = self.installments()[0]
         self.make_overdue(row, 10)  # late, but within the grace period
-        self.assertEqual(billing.enforce_grace(TODAY), {"suspended": 0, "reactivated": 0})
+        self.assertEqual(billing.enforce_grace(TODAY), {"suspended": 0, "reactivated": 0, "warned": 0})
         self.assertIn(self.sponsor, Sponsor.active())
         self.make_overdue(row, 15)  # past it
-        self.assertEqual(billing.enforce_grace(TODAY), {"suspended": 1, "reactivated": 0})
-        self.assertEqual(billing.enforce_grace(TODAY), {"suspended": 0, "reactivated": 0})  # once
+        self.assertEqual(billing.enforce_grace(TODAY), {"suspended": 1, "reactivated": 0, "warned": 0})
+        self.assertEqual(billing.enforce_grace(TODAY), {"suspended": 0, "reactivated": 0, "warned": 0})  # once
         self.sponsor.refresh_from_db()
         self.assertIsNotNone(self.sponsor.suspended_at)
         self.assertNotIn(self.sponsor, Sponsor.active())
@@ -182,12 +183,12 @@ class SponsorBillingTests(ChargesBase):
         self.assertIsNotNone(self.sponsor.suspended_at)
         SponsorInstallment.objects.filter(pk=row.pk).update(due_date=days(20))  # the schedule moved (invoice date too)
         Invoice.objects.filter(order=row.order).update(due_date=days(20))
-        self.assertEqual(billing.enforce_grace(TODAY), {"suspended": 0, "reactivated": 1})
+        self.assertEqual(billing.enforce_grace(TODAY), {"suspended": 0, "reactivated": 1, "warned": 0})
         self.sponsor.refresh_from_db()
         self.assertIsNone(self.sponsor.suspended_at)
         # a sponsor that is past its end date stays ended whatever the payments say
         other = Sponsor.objects.create(name="Old", start_date=days(-300), end_date=days(-10))
-        self.assertEqual(billing.enforce_grace(TODAY), {"suspended": 0, "reactivated": 0})
+        self.assertEqual(billing.enforce_grace(TODAY), {"suspended": 0, "reactivated": 0, "warned": 0})
         self.assertNotIn(other, Sponsor.active())
 
     def test_a_late_invoice_gets_its_grace_from_the_day_it_is_made(self):
@@ -197,8 +198,77 @@ class SponsorBillingTests(ChargesBase):
         self.assertEqual(billing.invoice_due(TODAY), 1)
         row.refresh_from_db()
         self.assertEqual(billing.due_date_of(row), TODAY)
-        self.assertEqual(billing.enforce_grace(TODAY), {"suspended": 0, "reactivated": 0})
-        self.assertEqual(billing.enforce_grace(days(8)), {"suspended": 1, "reactivated": 0})
+        self.assertEqual(billing.enforce_grace(TODAY), {"suspended": 0, "reactivated": 0, "warned": 0})
+        self.assertEqual(billing.enforce_grace(days(8)), {"suspended": 1, "reactivated": 0, "warned": 0})
+
+    # ------------------------------------------------------------------------------------------ notices, heads-up and override
+
+    def inbox_count(self):
+        from notifications.models import InboxNotification
+
+        return InboxNotification.objects.filter(title__contains="Acme Bakery").count()
+
+    def contact_mails(self):
+        return [m for m in mail.outbox if "ann@acme.test" in m.to and "sponsorship" in m.subject.lower()]
+
+    def overdue_row(self, ago, **extra):
+        self.agreement(rows=((10, "100.00"),), grace_days=14, **extra)
+        billing.invoice_due(TODAY)
+        row = self.installments()[0]
+        self.make_overdue(row, ago)
+        return row
+
+    def test_suspension_and_reactivation_notify_once_per_state_change(self):
+        row = self.overdue_row(15, warn_days=0)
+        mail.outbox.clear()
+        billing.enforce_grace(TODAY)
+        billing.enforce_grace(TODAY)  # the next daily run: nothing new
+        self.assertEqual([m.subject for m in self.contact_mails()], ["Your sponsorship of the club is paused"])
+        self.assertIn("unpaid", self.contact_mails()[0].body)
+        self.assertEqual(self.inbox_count(), 1)  # the owner, once
+        self.sponsor.refresh_from_db()
+        self.assertIsNotNone(self.sponsor.agreement.suspension_notified_at)
+        self.pay(row, "100.00")
+        billing.enforce_grace(TODAY)
+        self.assertEqual([m.subject for m in self.contact_mails()], ["Your sponsorship of the club is paused", "Your sponsorship of the club is active again"])
+        self.assertEqual(self.inbox_count(), 2)
+        self.assertIsNotNone(Sponsor.objects.get(pk=self.sponsor.pk).agreement.reactivation_notified_at)
+
+    def test_the_heads_up_goes_out_once_per_installment_before_the_suspension(self):
+        row = self.overdue_row(10)  # 4 days of grace left, warn_days defaults to 3
+        mail.outbox.clear()
+        self.assertEqual(billing.enforce_grace(TODAY)["warned"], 0)
+        self.make_overdue(row, 12)  # 2 days left
+        self.assertEqual(billing.enforce_grace(TODAY)["warned"], 1)
+        self.assertEqual(billing.enforce_grace(TODAY)["warned"], 0)
+        self.assertEqual([m.subject for m in self.contact_mails()], ["Your sponsorship will be paused soon"])
+        self.assertEqual(self.inbox_count(), 1)
+        self.assertIsNone(Sponsor.objects.get(pk=self.sponsor.pk).suspended_at)
+
+    def test_keep_active_stops_the_suspension_and_is_audited(self):
+        from members.models import AuditEntry
+
+        self.overdue_row(20)
+        r = self.call("put", f"/sponsor-management/{self.sponsor.pk}/agreement/keep-active", who="owner", data={"keep_active": True})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.json()["keep_active"])
+        mail.outbox.clear()
+        self.assertEqual(billing.enforce_grace(TODAY), {"suspended": 0, "reactivated": 0, "warned": 0})
+        self.assertIn(self.sponsor, Sponsor.active())
+        self.assertEqual(self.contact_mails(), [])
+        self.assertTrue(AuditEntry.objects.filter(action="sponsor.keep_active", target_id=str(self.sponsor.pk)).exists())
+        # an override that ran out no longer protects
+        self.call("put", f"/sponsor-management/{self.sponsor.pk}/agreement/keep-active", who="owner", data={"keep_active": True, "until": str(days(-1))})
+        self.assertIsNotNone(Sponsor.objects.get(pk=self.sponsor.pk).suspended_at)  # judged again at once
+        # switching it on again reactivates
+        self.call("put", f"/sponsor-management/{self.sponsor.pk}/agreement/keep-active", who="owner", data={"keep_active": True})
+        self.assertIsNone(Sponsor.objects.get(pk=self.sponsor.pk).suspended_at)
+
+    def test_only_sponsor_managers_can_set_the_override(self):
+        self.overdue_row(1)
+        r = self.call("put", f"/sponsor-management/{self.sponsor.pk}/agreement/keep-active", who="charges", data={"keep_active": True})
+        self.assertEqual(r.status_code, 403, r.content)
+        self.assertFalse(Sponsor.objects.get(pk=self.sponsor.pk).agreement.keep_active)
 
 
 class ExternalInvoiceTests(ChargesBase):

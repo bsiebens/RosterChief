@@ -70,6 +70,14 @@ class SponsorAgreement(UUIDModel):
     lead_days = models.PositiveSmallIntegerField(_("invoice days before the date"), default=30)
     #: The sponsor becomes inactive when an installment is unpaid more than this many days past its date.
     grace_days = models.PositiveSmallIntegerField(_("grace period in days"), default=14)
+    #: Heads-up: this many days before the grace period ends the contact is emailed and the sponsor managers are told (once per installment). 0: off.
+    warn_days = models.PositiveSmallIntegerField(_("heads-up days before suspension"), default=3)
+    #: Manual override: while on (and not past ``keep_active_until``) the daily job does not suspend the sponsor, and a suspended one is reactivated.
+    keep_active = models.BooleanField(_("keep active anyway"), default=False)
+    keep_active_until = models.DateField(_("keep active until"), null=True, blank=True)
+    #: When the contact was last mailed that the sponsor was paused / shown again (one mail per state change).
+    suspension_notified_at = models.DateTimeField(null=True, blank=True, editable=False)
+    reactivation_notified_at = models.DateTimeField(null=True, blank=True, editable=False)
     #: The login-less member the invoices are addressed to (made from the contact); reset when the contact changes.
     payer = models.ForeignKey("members.Member", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
 
@@ -80,6 +88,10 @@ class SponsorAgreement(UUIDModel):
     def __str__(self):
         return f"{self.sponsor}"
 
+    def keeps_active(self, today=None) -> bool:
+        today = today or timezone.localdate()
+        return self.keep_active and (self.keep_active_until is None or self.keep_active_until >= today)
+
 
 class SponsorInstallment(UUIDModel):
     """One payment of an agreement, due on a fixed date. Its invoice is a shop charge (``order``); its status follows that order's payments."""
@@ -88,6 +100,8 @@ class SponsorInstallment(UUIDModel):
     due_date = models.DateField(_("due date"))
     amount = models.DecimalField(_("amount"), max_digits=10, decimal_places=2)
     order = models.ForeignKey("shop.Order", on_delete=models.SET_NULL, null=True, blank=True, related_name="sponsor_installments")
+    #: When the suspension heads-up for this installment went out (once).
+    warned_at = models.DateTimeField(null=True, blank=True, editable=False)
 
     class Meta:
         verbose_name = _("sponsor installment")

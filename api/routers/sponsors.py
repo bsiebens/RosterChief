@@ -1,6 +1,6 @@
 """Club sponsorship management. The legacy public sponsors endpoint remains read-only."""
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -57,6 +57,7 @@ class AgreementIn(Schema):
     description: str = Field("", max_length=150)
     lead_days: int = Field(30, ge=0, le=365)
     grace_days: int = Field(14, ge=0, le=365)
+    warn_days: int = Field(3, ge=0, le=365)
     installments: list[InstallmentIn] = Field(min_length=1, max_length=billing.MAX_INSTALLMENTS)
 
 
@@ -81,8 +82,18 @@ class AgreementOut(Schema):
     description: str
     lead_days: int
     grace_days: int
+    warn_days: int
+    #: The manual override: not suspended while on (until ``keep_active_until`` when set).
+    keep_active: bool
+    keep_active_until: date | None
+    suspended_at: datetime | None
     installments: list[InstallmentOut]
     billing: BillingOut
+
+
+class KeepActiveIn(Schema):
+    keep_active: bool
+    until: date | None = None
 
 
 def _require_club(request):
@@ -157,7 +168,8 @@ def _agreement_out(sponsor) -> dict | None:
         })  # fmt: skip
     return {
         "sponsor_id": sponsor.pk, "contact_name": agreement.contact_name, "contact_email": agreement.contact_email, "description": agreement.description,
-        "lead_days": agreement.lead_days, "grace_days": agreement.grace_days, "installments": rows, "billing": billing.sponsor_status(sponsor, today),
+        "lead_days": agreement.lead_days, "grace_days": agreement.grace_days, "warn_days": agreement.warn_days,
+        "keep_active": agreement.keep_active, "keep_active_until": agreement.keep_active_until, "suspended_at": sponsor.suspended_at, "installments": rows, "billing": billing.sponsor_status(sponsor, today),
     }  # fmt: skip
 
 
@@ -175,6 +187,14 @@ def save_agreement(request, sponsor_id: UUID, payload: AgreementIn):
     sponsor = get_object_or_404(Sponsor, pk=sponsor_id)
     values = payload.dict(exclude={"installments"})
     billing.save_agreement(sponsor, values, [{"id": row.id, "due_date": row.due_date, "amount": Decimal(row.amount)} for row in payload.installments])
+    return _agreement_out(sponsor)
+
+
+@router.put("/{sponsor_id}/agreement/keep-active", response=AgreementOut, summary="Keep the sponsor active even when installments are unpaid (optionally until a date)", operation_id="set_sponsor_keep_active")
+def set_keep_active(request, sponsor_id: UUID, payload: KeepActiveIn):
+    _require_club(request)
+    sponsor = get_object_or_404(Sponsor, pk=sponsor_id)
+    billing.set_keep_active(request.user, sponsor, payload.keep_active, payload.until)
     return _agreement_out(sponsor)
 
 

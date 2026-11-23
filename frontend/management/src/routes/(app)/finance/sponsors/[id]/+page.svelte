@@ -23,6 +23,10 @@
 	// svelte-ignore state_referenced_locally
 	let graceDays = $state(data.agreement?.grace_days ?? 14);
 	// svelte-ignore state_referenced_locally
+	let warnDays = $state(data.agreement?.warn_days ?? 3);
+	// svelte-ignore state_referenced_locally
+	let keepUntil = $state(data.agreement?.keep_active_until ?? '');
+	// svelte-ignore state_referenced_locally
 	let rows = $state<Row[]>(fromAgreement());
 	let genTotal = $state('');
 	let genCount = $state(4);
@@ -46,6 +50,7 @@
 			description: description.trim(),
 			lead_days: Number(leadDays) || 0,
 			grace_days: Number(graceDays) || 0,
+			warn_days: Number(warnDays) || 0,
 			installments: rows.map((r) => ({ ...(r.id ? { id: r.id } : {}), due_date: r.due_date, amount: String(r.amount) }))
 		})
 	);
@@ -59,6 +64,14 @@
 		const kept = rows.filter((r) => r.locked);
 		rows = [...kept, ...schedule(Number(genTotal), Number(genCount), genFirst, Number(genEvery)).map((r) => ({ key: ++seq, ...r, locked: false }))];
 	};
+	// The heads-up state: an unpaid installment whose grace period has at most warn_days days left.
+	const daysLeft = $derived.by(() => {
+		const a = data.agreement;
+		if (!a || data.sponsor.status === 'suspended' || a.warn_days <= 0 || a.keep_active) return null;
+		const left = a.installments.filter((i) => i.status === 'overdue').map((i) => a.grace_days - i.overdue_days + 1);
+		const soonest = Math.min(...left);
+		return left.length && soonest <= a.warn_days ? Math.max(soonest, 1) : null;
+	});
 	const status = $derived(data.agreement?.billing ?? data.sponsor.billing);
 
 	usePageHeader(() => ({ title: data.sponsor.name, context: t('spb.title'), actions }));
@@ -80,10 +93,22 @@
 		</div>
 	</section>
 
+	{#if daysLeft !== null}<Alert kind="warning">{t('spb.warning', { n: daysLeft })}</Alert>{/if}
 	{#if form && 'done' in form && form.done}<Alert kind="success">{t(`spb.done.${form.done}`)}</Alert>{/if}
 	{#if sendFailure}<Alert kind="error">{sendFailure}</Alert>{/if}
 
 	{#if data.agreement}
+		<section class="card card-body gap-3" aria-labelledby="spb-keep">
+			<h2 id="spb-keep" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('spb.keep.title')}</h2>
+			<p class="text-xs text-muted">{t('spb.keep.help')}</p>
+			{#if data.agreement.keep_active}<p class="text-sm font-semibold text-success">{data.agreement.keep_active_until ? t('spb.keep.active_until', { date: day(data.agreement.keep_active_until) }) : t('spb.keep.active')}</p>{/if}
+			<form method="POST" action="?/keep" class="flex flex-wrap items-end gap-3" use:enhance={() => { busy = true; return async ({ update }) => { await update({ reset: false }); busy = false; }; }}>
+				<input type="hidden" name="keep_active" value={data.agreement.keep_active ? '0' : '1'} />
+				{#if !data.agreement.keep_active}<label class="grid gap-1"><span class="text-xs font-semibold text-muted">{t('spb.keep.until')}</span><input class="input input-bordered" type="date" name="until" bind:value={keepUntil} /></label>{/if}
+				<button class="btn btn-outline gap-2" type="submit" disabled={busy}>{data.agreement.keep_active ? t('spb.keep.off') : t('spb.keep.on')}</button>
+			</form>
+		</section>
+
 		<section class="card" aria-labelledby="spb-installments">
 			<div class="card-h"><CalendarPlus size={17} aria-hidden="true" /><h2 id="spb-installments">{t('spb.installments')}</h2></div>
 			<div class="overflow-x-auto">
@@ -143,6 +168,7 @@
 				<label class="grid gap-1 sm:col-span-2"><span class="text-xs font-semibold text-muted">{t('spb.description')}</span><input class="input input-bordered w-full" maxlength="150" placeholder={t('spb.description_ph')} bind:value={description} /></label>
 				<label class="grid gap-1"><span class="text-xs font-semibold text-muted">{t('spb.lead_days')}</span><input class="input input-bordered w-full" type="number" min="0" max="365" bind:value={leadDays} /><span class="text-xs text-muted">{t('spb.lead_help')}</span></label>
 				<label class="grid gap-1"><span class="text-xs font-semibold text-muted">{t('spb.grace_days')}</span><input class="input input-bordered w-full" type="number" min="0" max="365" bind:value={graceDays} /><span class="text-xs text-muted">{t('spb.grace_help')}</span></label>
+				<label class="grid gap-1"><span class="text-xs font-semibold text-muted">{t('spb.warn_days')}</span><input class="input input-bordered w-full" type="number" min="0" max="365" bind:value={warnDays} /><span class="text-xs text-muted">{t('spb.warn_help')}</span></label>
 			</div>
 		</section>
 

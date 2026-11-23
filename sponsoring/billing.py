@@ -105,6 +105,7 @@ def save_agreement(sponsor: Sponsor, values: dict, installments: list[dict]) -> 
         agreement.contact_name, agreement.contact_email = name, email
         agreement.description = (values.get("description") or "").strip()[:150]
         agreement.lead_days, agreement.grace_days = values.get("lead_days", 30), values.get("grace_days", 14)
+        agreement.warn_days = values.get("warn_days", agreement.warn_days)
         agreement.save()
         existing = {str(i.pk): i for i in agreement.installments.select_related("order")}
         keep = set()
@@ -197,36 +198,84 @@ def invoice_due(today: datetime.date | None = None) -> int:
 # ------------------------------------------------------------------------------------------------- grace period
 
 
+def _oldest_late(agreement, today):
+    """The overdue installment furthest past its due date as ``(installment, due_date, overdue_days)``, or None."""
+    rows = [(i, due_date_of(i), status_of(i, today)) for i in agreement.installments.select_related("order")]
+    rows = [(i, d, s["overdue_days"]) for i, d, s in rows if s["status"] == "overdue"]
+    return max(rows, key=lambda r: r[2], default=None)
+
+
 def evaluate(sponsor: Sponsor, today: datetime.date | None = None) -> bool | None:
-    """Suspend the sponsor when an installment is unpaid past the grace period, reactivate it when none is. Returns True when it was suspended
-    just now, False when reactivated, None for no change."""
+    """Suspend the sponsor when an installment is unpaid past the grace period, reactivate it when none is (or the agreement's override keeps it
+    active). Returns True when it was suspended just now, False when reactivated, None for no change. Each change notifies once (``notices``)."""
+    from sponsoring import notices
+
     today = today or timezone.localdate()
     sponsor = Sponsor.objects.select_related("agreement").get(pk=sponsor.pk)
     agreement = getattr(sponsor, "agreement", None)
-    if agreement is None:
-        late = False
-    else:
-        late = any(s["status"] == "overdue" and s["overdue_days"] > agreement.grace_days for s in (status_of(i, today) for i in agreement.installments.select_related("order")))
+    oldest = _oldest_late(agreement, today) if agreement is not None and not agreement.keeps_active(today) else None
+    late = oldest is not None and oldest[2] > agreement.grace_days
     if late and sponsor.suspended_at is None:
         sponsor.suspended_at = timezone.now()
         sponsor.save(update_fields=["suspended_at", "modified"])
+        notices.send_suspended(agreement, oldest[0], oldest[1])
         return True
     if not late and sponsor.suspended_at is not None:
         sponsor.suspended_at = None
         sponsor.save(update_fields=["suspended_at", "modified"])
+        if agreement is not None:
+            notices.send_reactivated(agreement)
         return False
     return None
 
 
+def warn_due(today: datetime.date | None = None) -> int:
+    """The heads-up: an installment still unpaid when fewer than ``warn_days`` days of its grace period are left gets one email to the contact and
+    one notice to the managers (once per installment). Not for a suspended, kept-active or ended sponsor. Returns how many were warned."""
+    from sponsoring import notices
+
+    today = today or timezone.localdate()
+    n = 0
+    for agreement in SponsorAgreement.objects.select_related("sponsor").filter(warn_days__gt=0, sponsor__suspended_at__isnull=True):
+        if agreement.keeps_active(today) or (agreement.sponsor.end_date and agreement.sponsor.end_date < today):
+            continue
+        for installment in agreement.installments.select_related("order").filter(warned_at__isnull=True):
+            state = status_of(installment, today)
+            left = agreement.grace_days - state["overdue_days"]
+            if state["status"] == "overdue" and 0 <= left < agreement.warn_days:
+                notices.send_heads_up(agreement, installment, due_date_of(installment), left + 1)
+                n += 1
+    return n
+
+
+def set_keep_active(actor, sponsor: Sponsor, keep: bool, until: datetime.date | None = None) -> SponsorAgreement:
+    """Turn the manual override on or off (optionally until a date), audit who did it and judge the sponsor again."""
+    from members.services import access, audit
+
+    access.require_sponsors(actor)
+    agreement = getattr(Sponsor.objects.select_related("agreement").get(pk=sponsor.pk), "agreement", None)
+    if agreement is None:
+        raise Invalid("There is no agreement.", {"keep_active": ["Add an agreement first."]})
+    until = until if keep else None
+    changes = audit.diff(agreement, {"keep_active": keep, "keep_active_until": until})
+    agreement.keep_active, agreement.keep_active_until = keep, until
+    agreement.save(update_fields=["keep_active", "keep_active_until", "modified"])
+    if changes:
+        audit.record(actor, "sponsor.keep_active", target=sponsor, target_label=sponsor.name, changes=changes)
+    evaluate(sponsor)
+    return agreement
+
+
 def enforce_grace(today: datetime.date | None = None) -> dict:
-    """The daily job: ``evaluate`` every sponsor with an agreement (and any suspended one). Returns the numbers suspended and reactivated."""
-    out = {"suspended": 0, "reactivated": 0}
+    """The daily job: ``evaluate`` every sponsor with an agreement (and any suspended one), then send the heads-ups. Returns the numbers."""
+    out = {"suspended": 0, "reactivated": 0, "warned": 0}
     for sponsor in Sponsor.objects.filter(Q(agreement__isnull=False) | Q(suspended_at__isnull=False)):
         result = evaluate(sponsor, today)
         if result is True:
             out["suspended"] += 1
         elif result is False:
             out["reactivated"] += 1
+    out["warned"] = warn_due(today)
     return out
 
 

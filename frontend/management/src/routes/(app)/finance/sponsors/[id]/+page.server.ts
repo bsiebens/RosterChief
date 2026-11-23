@@ -24,6 +24,13 @@ export const actions: Actions = {
 		const res = await api<SponsorAgreement>('PUT', `${endpoint}/${params.id}/agreement`, { body, f: fetch });
 		return res.ok ? { done: 'save' } : failed('save', res);
 	},
+	/** The manual "keep active anyway" override, optionally until a date. */
+	keep: async ({ request, params, fetch }) => {
+		const form = await request.formData();
+		const body = { keep_active: form.get('keep_active') === '1', until: String(form.get('until') ?? '') || null };
+		const res = await api<SponsorAgreement>('PUT', `${endpoint}/${params.id}/agreement/keep-active`, { body, f: fetch });
+		return res.ok ? { done: 'keep' } : failed('keep', res);
+	},
 	/** Send the installment's invoice (again when it is already out). */
 	send: async ({ request, params, fetch }) => {
 		const id = String((await request.formData()).get('installment_id') ?? '');
