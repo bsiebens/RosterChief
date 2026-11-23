@@ -17,7 +17,7 @@
 	} = $props();
 
 	type Choice = ConversationKind | 'club';
-	let kind = $state<Choice>('direct');
+	let kind = $state<Choice>('team'); // reset to the first kind on offer every time the dialog opens (below)
 	let clubTeams = $state<string[]>([]);
 	let mode = $state<ConversationMode>('discussion');
 	let title = $state('');
@@ -25,6 +25,7 @@
 	let include = $state({ staff: true, players: true, parents: false });
 	let people = $state<Person[]>([]);
 	let teams = $state<TeamOption[] | null>(null);
+	let groups = $state<TeamOption[]>([]);
 	let error = $state('');
 	let busy = $state(false);
 
@@ -45,7 +46,7 @@
 	});
 	$effect(() => {
 		if (open && (kind === 'team' || kind === 'club') && teams === null) {
-			chatApi.teams(kind === 'club').then((res) => (teams = res.ok ? (res.data?.results ?? []) : []));
+			chatApi.teams(kind === 'club').then((res) => { teams = res.ok ? (res.data?.results ?? []) : []; groups = res.ok ? (res.data?.groups ?? []) : []; });
 		}
 	});
 
@@ -71,7 +72,8 @@
 			body.include = { ...include };
 			if (clubTeams.length) body.team_ids = [...clubTeams];
 		} else if (kind === 'team') {
-			body.team_id = teamId;
+			if (teamId.startsWith('g:')) body.group_id = teamId.slice(2);
+			else body.team_id = teamId;
 			body.include = { ...include };
 			if (title.trim()) body.title = title.trim();
 		} else {
@@ -97,7 +99,7 @@
 			<div class="grid grid-flow-col auto-cols-fr gap-1.5" role="radiogroup" aria-label={t('chat.new.kind')}>
 				{#each choices as k (k)}
 					{@const Icon = icons[k]}
-					<button type="button" role="radio" aria-checked={kind === k} class="portal-person compact flex-col gap-1 py-2 {kind === k ? 'bg-club text-club-content' : ''}" onclick={() => { kind = k; error = ''; if (k === 'club') { mode = 'announcement'; include = { staff: true, players: true, parents: true }; } else mode = 'discussion'; }}>
+					<button type="button" role="radio" aria-checked={kind === k} class="portal-person compact flex-col justify-center gap-1.5 py-3! {kind === k ? 'border-club! bg-club! text-club-content!' : ''}" onclick={() => { kind = k; error = ''; if (k === 'club') { mode = 'announcement'; include = { staff: true, players: true, parents: true }; } else mode = 'discussion'; }}>
 						<Icon size={17} aria-hidden="true" />{t(`chat.new.${k}`)}
 					</button>
 				{/each}
@@ -108,7 +110,9 @@
 			<label class="grid gap-1 text-sm font-semibold text-ink">{t('chat.new.team_pick')}
 				<select class="select w-full font-normal" bind:value={teamId} disabled={teams === null}>
 					<option value="">{teams === null ? t('chat.loading') : t('chat.new.team_none')}</option>
-					{#each teams ?? [] as team (team.id)}<option value={team.id}>{team.name}</option>{/each}
+					{#if groups.length}<optgroup label={t('chat.new.pick_teams')}>{#each teams ?? [] as team (team.id)}<option value={team.id}>{team.name}</option>{/each}</optgroup>
+					<optgroup label={t('chat.new.pick_groups')}>{#each groups as g (g.id)}<option value={`g:${g.id}`}>{g.name}</option>{/each}</optgroup>
+					{:else}{#each teams ?? [] as team (team.id)}<option value={team.id}>{team.name}</option>{/each}{/if}
 				</select>
 			</label>
 			<fieldset class="grid gap-2">

@@ -60,6 +60,7 @@ class ConversationIn(Schema):
     title: str = ""
     member_ids: list[uuid.UUID] = []
     team_id: uuid.UUID | None = None
+    group_id: uuid.UUID | None = None  # kind "team" only: a members group instead of a team
     include: Include | None = None
     audience: Literal["club"] | None = None  # kind "group" only: the whole club instead of member_ids, narrowed by include and team_ids
     team_ids: list[uuid.UUID] = []
@@ -110,7 +111,7 @@ def create_conversation(request, payload: ConversationIn):
     user, me = gate(request)
     conversation, created = conversations.create(
         user, me, kind=payload.kind, mode=payload.mode, title=payload.title, member_ids=payload.member_ids, team_id=payload.team_id, include=payload.include.dict() if payload.include else None,
-        audience=payload.audience, team_ids=payload.team_ids,
+        audience=payload.audience, team_ids=payload.team_ids, group_id=payload.group_id,
     )
     return (201 if created else 200), present.conversation_out(conversation, me)
 
@@ -231,7 +232,13 @@ def my_teams(request, club: int = 0):
 
     user, _me = gate(request)
     qs = Team.objects.all() if member_access.can_moderate_chat(user) or (club and member_access.can_announce_chat(user)) else Team.objects.filter(pk__in=member_access.staffed_team_ids(user))
-    return {"results": [{"id": t.pk, "name": t.name} for t in qs.order_by("ordering", "name")]}
+    groups = []
+    if not club:  # the groups you administer (everything for moderators): a team-style chat can follow a group too
+        from members.models import Group
+
+        gqs = Group.objects.all() if member_access.can_moderate_chat(user) else Group.objects.filter(pk__in=member_access.admin_group_ids(user))
+        groups = [{"id": g.pk, "name": g.name} for g in gqs.order_by("name")]
+    return {"results": [{"id": t.pk, "name": t.name} for t in qs.order_by("ordering", "name")], "groups": groups}
 
 
 # --- settings (chat.moderate or club admin) ---------------------------------------------------------------------------------

@@ -3,11 +3,11 @@
 	import { chatApi, errorText } from '#lib/chat.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 
-	/** The chat settings of the club: how long messages are kept (people who may moderate). */
+	/** The chat settings of the club: how long messages are kept (people who may moderate). `onsaved` closes the dialog. */
+	let { onsaved }: { onsaved?: () => void } = $props();
 	let months = $state<number | null>(null);
 	let loaded = $state(false);
 	let error = $state('');
-	let saved = $state(false);
 	let busy = $state(false);
 
 	onMount(async () => {
@@ -21,7 +21,6 @@
 
 	async function save(e: SubmitEvent) {
 		e.preventDefault();
-		saved = false;
 		if (problem || busy) {
 			error = problem;
 			return;
@@ -32,7 +31,7 @@
 		busy = false;
 		if (res.ok && res.data) {
 			months = res.data.retention_months;
-			saved = true;
+			onsaved?.();
 		} else error = errorText(res, t('chat.err.generic'));
 	}
 </script>
@@ -42,11 +41,10 @@
 		<p class="text-sm text-muted" role="status">{t('chat.loading')}</p>
 	{:else}
 		<label class="grid gap-1 text-sm font-semibold text-ink">{t('chat.settings.retention')}
-			<input class="input w-40 font-normal" type="number" min="1" max="120" step="1" inputmode="numeric" bind:value={months} oninput={() => (saved = false)} placeholder={t('chat.settings.forever')} />
+			<input class="input w-full font-normal" type="number" min="1" max="120" step="1" inputmode="numeric" bind:value={months} placeholder={t('chat.settings.forever')} />
 			<span class="text-xs font-normal text-muted">{t('chat.settings.retention_help')}</span>
 		</label>
 		{#if error}<p class="text-sm text-danger" role="alert">{error}</p>{/if}
-		{#if saved}<p class="text-sm text-ink" role="status">{t('chat.settings.saved')}</p>{/if}
 		<div><button class="btn btn-primary" type="submit" disabled={busy}>{t('chat.settings.save')}</button></div>
 	{/if}
 </form>

@@ -10,7 +10,7 @@ from django.utils import timezone
 from chat.models import AudienceRule, Conversation, Participant
 from chat.services import people
 from formbuilder.services.audience import guardian_ids_of
-from members.models import Member
+from members.models import GroupMembership, Member
 from teams.models import StaffAssignment, TeamMembership
 
 log = logging.getLogger(__name__)
@@ -50,12 +50,26 @@ def desired(rule) -> tuple[set, set]:
     season = people.current_season()
     if season is None:
         return set(), set()
+    if rule.group_id is not None:
+        return _desired_group(rule)
     if rule.team_id is None:
         return _desired_club(rule, season)
     if rule.conversation.kind == Conversation.Kind.GROUP:  # a club-wide chat narrowed to teams
         ids, _staff = _desired_team(rule, season)
         return _reachable(ids), set()
     return _desired_team(rule, season)
+
+
+def _desired_group(rule) -> tuple[set, set]:
+    """A members group: its admins count as staff (and chat admins), the other members as players; parents are the guardians of the members."""
+    rows = list(GroupMembership.objects.filter(group_id=rule.group_id).values_list("member_id", "is_admin"))
+    staff = {m for m, admin in rows if admin} if rule.include_staff else set()
+    members = {m for m, admin in rows if not admin} if rule.include_players else set()
+    parents = set()
+    if rule.include_parents:
+        for child in Member.objects.filter(pk__in=[m for m, _a in rows]):
+            parents |= guardian_ids_of(child)
+    return _reachable(staff | members | parents), staff & _reachable(staff)
 
 
 def _desired_team(rule, season) -> tuple[set, set]:
