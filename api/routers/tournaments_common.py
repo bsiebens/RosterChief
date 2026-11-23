@@ -13,6 +13,7 @@ from ninja.errors import HttpError
 from members.services import access
 from members.services.errors import Invalid
 from tournaments.models import Match, MatchAttribute, MatchAttributeValue, MatchEvent, Tournament, TournamentField, TournamentGroup, TournamentRosterRole, TournamentStage, TournamentTeam
+from tournaments.services import billing
 from tournaments.services.scheduling import ATTR_PREFIX, stage_tiebreakers
 
 
@@ -134,7 +135,7 @@ def team_out(team: TournamentTeam, tournament: Tournament, entries=None) -> dict
         "is_home_team": team.team_id is not None and team.team_id == tournament.home_team_id,
         "contact_name": team.foreign_contact_name, "contact_email": team.foreign_contact_email, "contact_phone": team.foreign_contact_phone,
         "seed": team.seed, "payment_status": team.payment_status, "withdrawn_at": team.withdrawn_at, "withdrawal_reason": team.withdrawal_reason,
-        "registration_id": team.registration_id, "from_application": team.registration_id is not None and not team.registration.auto_created, "event_id": team.event_id,
+        "registration_id": team.registration_id, "from_application": team.registration_id is not None and not team.registration.auto_created, "invoices": billing.state(team) if team.team_id is None else None, "event_id": team.event_id,
         "player_count": sum(1 for e in entries if e.role == TournamentRosterRole.PLAYER),
         "staff_count": sum(1 for e in entries if e.role == TournamentRosterRole.STAFF),
         "has_age_flag": any(tournament.birth_year_out_of_range(effective_dob(e)) for e in entries),

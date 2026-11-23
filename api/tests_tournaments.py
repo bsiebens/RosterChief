@@ -909,6 +909,36 @@ class TournamentApiTests(TestCase):
         self.assertEqual(mail.outbox[-1].to, ["sam@x.test"])
         self.assertEqual(self.as_("manage", "patch", f"/registrations/{rid}/contact", {"contact_name": "S", "contact_email": "bad"}).status_code, 422)
 
+    def test_guest_team_fees_are_invoiced_in_finance_and_the_status_follows_the_payments(self):
+        from decimal import Decimal
+
+        from shop.models import Order
+        from shop.services import payments
+
+        t = self.make(status="published", entry_fee_amount="100", deposit_amount="30", lunch_mode="optional", lunch_price_per_day="10")
+        body = {"kind": "foreign", "foreign_name": "Visitors", "foreign_contact_name": "Vic Visitor", "foreign_contact_email": "vic@x.test"}
+        r = self.as_("manage", "post", f"/{t.pk}/teams", body)
+        self.assertEqual(r.status_code, 201, r.content)
+        doc = r.json()
+        team = TournamentTeam.objects.get(pk=doc["id"])
+        self.assertEqual((doc["invoices"]["deposit"]["total"], doc["payment_status"]), ("30.00", "unpaid"))  # the deposit invoice exists straight away
+        self.assertEqual(self.as_("manage", "patch", f"/teams/{team.pk}/payment", {"payment_status": "fully_paid"}).status_code, 409)  # no hand-setting once finance has it
+        dep = Order.objects.get(pk=doc["invoices"]["deposit"]["id"])
+        payments.record_payment(dep, amount=Decimal("30"), method="bank_transfer")
+        team.refresh_from_db()
+        self.assertEqual(team.payment_status, "deposit_received")
+        # the roster is final: lunches go into the balance invoice (entry fee minus the deposit, plus 3 person-days)
+        TournamentRosterEntry.objects.create(tournament_team=team, foreign_first_name="A", foreign_last_name="B", role="player", lunch_days=["2026-09-19", "2026-09-20"])
+        TournamentRosterEntry.objects.create(tournament_team=team, foreign_first_name="C", foreign_last_name="D", role="player", lunch_days=["2026-09-19"])
+        r = self.as_("manage", "post", f"/teams/{team.pk}/invoices/balance")
+        self.assertEqual(r.status_code, 200, r.content)
+        bal = Order.objects.get(pk=r.json()["invoices"]["balance"]["id"])
+        self.assertEqual(bal.total, Decimal("100"))  # 70 left of the fee + 3 x 10 lunch
+        self.assertEqual(self.as_("manage", "post", f"/teams/{team.pk}/invoices/balance").json()["invoices"]["balance"]["id"], str(bal.pk))  # once
+        payments.record_payment(bal, amount=Decimal("100"), method="cash")
+        team.refresh_from_db()
+        self.assertEqual(team.payment_status, "fully_paid")
+
     def test_public_endpoints_are_404_without_feature(self):
         t = self.make(status="published")
         self.features = Entitlements({})

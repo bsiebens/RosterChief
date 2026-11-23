@@ -740,6 +740,11 @@ class TournamentTeam(UUIDModel):
     #: machinery here (see Tournament.deposit_amount's own docstring for
     #: why), just a staff-tracked status against those two reference amounts.
     payment_status = models.CharField(_("payment status"), max_length=20, choices=PaymentStatus.choices, default=PaymentStatus.UNPAID)
+    #: Invoices in the club's finance (shop charges). With them the payment status follows the payments (``tournaments.services.billing``);
+    #: without them it is set by hand. ``deposit_order`` is the deposit, ``balance_order`` the rest (entry fee and lunches) once the roster is final.
+    deposit_order = models.ForeignKey("shop.Order", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("deposit invoice"))
+    balance_order = models.ForeignKey("shop.Order", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("balance invoice"))
+    payer = models.ForeignKey("members.Member", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("invoiced to"), help_text=_("The contact person of an outside team, as a member record without membership."))
 
     class Meta:
         verbose_name = _("tournament team")

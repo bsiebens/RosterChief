@@ -45,6 +45,19 @@ def sync_payment_status(order) -> None:
     from shop.services import invoices
 
     invoices.invalidate_cache(order)
+    _tell_tournaments(order)
+
+
+def _tell_tournaments(order) -> None:
+    """A tournament team's payment status follows its invoices: tell the tournaments app that this order changed (never breaks a payment)."""
+    try:
+        from tournaments.services import billing
+
+        billing.on_order_changed(order)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("shop.tournament_sync_failed")
 
 
 def _open_order(order) -> None:

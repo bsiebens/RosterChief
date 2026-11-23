@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Check, ChevronDown, ClipboardList, X } from '@lucide/svelte';
+	import TeamLogo from '#lib/components/tournaments/TeamLogo.svelte';
 	import TeamAccessButtons from '#lib/components/tournaments/TeamAccessButtons.svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Modal from '#lib/components/Modal.svelte';
@@ -43,7 +44,7 @@
 			{#each data.rows as r (r.id)}
 				<section class="card card-body gap-3">
 					<div class="flex flex-wrap items-center gap-3">
-						<span class="size-5 shrink-0 rounded-full border border-line" style:background={r.primary_color || undefined} aria-hidden="true"></span>
+						<TeamLogo name={r.name} logoUrl={r.logo_url} color={r.primary_color} size="size-10" text="text-sm" />
 						<div class="min-w-0 flex-1">
 							<div class="flex flex-wrap items-center gap-2">
 								<strong class="font-display text-ink">{r.name}</strong>

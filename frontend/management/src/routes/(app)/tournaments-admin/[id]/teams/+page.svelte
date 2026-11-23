@@ -2,6 +2,7 @@
 	import { ClipboardList, FileDown, ImageUp, Plus, Trash2, UserMinus, Users } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import NoticeAlert from '#lib/components/NoticeAlert.svelte';
+	import TeamInvoiceButton from '#lib/components/tournaments/TeamInvoiceButton.svelte';
 	import TeamAccessButtons from '#lib/components/tournaments/TeamAccessButtons.svelte';
 	import TeamLogo from '#lib/components/tournaments/TeamLogo.svelte';
 	import Field from '#lib/components/Field.svelte';
@@ -106,7 +107,9 @@
 							<td class="hidden text-xs md:table-cell">{team.contact_name}{team.contact_email ? ` · ${team.contact_email}` : ''}</td>
 							<td class="text-right font-mono text-xs">{team.player_count} + {team.staff_count}</td>
 							<td>
-								{#if canManage && !team.withdrawn_at && !team.is_home_team}
+								{#if team.invoices?.managed}
+									<span class="badge badge-sm {team.payment_status === 'fully_paid' ? 'badge-success' : team.payment_status === 'deposit_received' ? 'badge-info' : 'badge-warning'}" title={t('tn.inv.follows')}>{t(`tn.pay.${team.payment_status}`)}</span>
+								{:else if canManage && !team.withdrawn_at && !team.is_home_team}
 									<select class="select select-sm w-40" aria-label={t('tn.teams.payment_for', { name: team.name })} value={team.payment_status} disabled={run.busy} onchange={(e) => setPayment(team, e.currentTarget.value)}>
 										{#each data.paymentStatuses as s (s)}<option value={s}>{t(`tn.pay.${s}`)}</option>{/each}
 									</select>
@@ -123,6 +126,7 @@
 											<input type="file" accept="image/*" class="sr-only" onchange={(e) => { uploadLogo(team, e.currentTarget.files?.[0]); e.currentTarget.value = ''; }} />
 										</label>
 									{/if}
+									{#if canManage && team.is_foreign && !team.withdrawn_at}<TeamInvoiceButton teamId={team.id} invoices={team.invoices} {canManage} />{/if}
 									{#if canOperate && team.is_foreign && !team.withdrawn_at}<TeamAccessButtons kind="team" id={team.id} contact={{ name: team.contact_name, email: team.contact_email, phone: team.contact_phone }} {canManage} compact />{/if}
 								</div>
 							</td>

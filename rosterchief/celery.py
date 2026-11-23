@@ -46,5 +46,6 @@ app.conf.beat_schedule = {
     "registration-send-payment-reminders": {"task": "registration.send_payment_reminders", "schedule": crontab(hour=8, minute=15)},  # daily: payments falling due in 10 / 5 days, for the people who handle payments
     "shop-send-charge-reminders": {"task": "shop.send_charge_reminders", "schedule": crontab(hour=8, minute=0)},  # daily: overdue charge invoices
     "tournaments-send-due-alerts": {"task": "tournaments.send_due_alerts", "schedule": crontab()},  # every minute: games and blocks starting within 5 minutes
+    "tournaments-invoice-due-balances": {"task": "tournaments.invoice_due_balances", "schedule": crontab(hour=7, minute=0)},  # daily: balance invoices of guest teams a week before the tournament
     "billing-archive-overdue": {"task": "billing.archive_overdue_clubs", "schedule": crontab(hour=6, minute=0)},
 }

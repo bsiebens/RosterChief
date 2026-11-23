@@ -32,7 +32,7 @@ from notifications import gateways
 from notifications.models import PushSettings
 from sponsoring.models import Sponsor
 from tournaments.models import Match, ScheduleBlock, Tournament, TournamentFollower, TournamentMessage, TournamentRegistration, TournamentRegistrationPlayer, TournamentRosterEntry, TournamentRosterRole, TournamentTeam
-from tournaments.services import notifications, team_access
+from tournaments.services import billing, notifications, team_access
 from tournaments.services.messages import message_out, notify_organisers, thread_for_team, unread_for_team
 from tournaments.sports import is_ice_hockey
 
@@ -369,13 +369,8 @@ def _roster_closed(r: TournamentRegistration) -> bool:
 
 def _lunch_totals(t: Tournament, rows) -> tuple[Decimal, Decimal]:
     """(mandatory lunch total, total lunch cost) for the people in ``rows`` at the tournament's price per day."""
-    if t.lunch_mode == Tournament.LunchMode.NONE:
-        return Decimal("0"), Decimal("0")
-    price = t.lunch_price_per_day or Decimal("0")
-    if t.lunch_mode == Tournament.LunchMode.MANDATORY:
-        total = price * len(t.date_range()) * len(rows)
-        return total, total
-    return Decimal("0"), price * sum(len(r.lunch_days or []) for r in rows)
+    mandatory, total, _days = billing.lunch_totals(t, rows)
+    return mandatory, total
 
 
 def _amount_owed(t: Tournament, lunch_total: Decimal, team: TournamentTeam) -> Decimal:

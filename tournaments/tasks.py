@@ -36,3 +36,24 @@ def send_due_alerts() -> str:
         except Exception:  # one club's problem (or a club without the tournaments tables) must not stop the others
             log.exception("tournaments.due_alerts_failed", extra={"club": club.slug})
     return f"sent {sent} alert(s)"
+
+
+@shared_task(name="tournaments.invoice_due_balances")
+def invoice_due_balances() -> str:
+    """Send the balance invoice (entry fee minus deposit, plus lunches) of guest teams of tournaments that start within a week, in every
+    active club with the tournaments tables. Scheduled daily."""
+    import logging
+
+    from django_tenants.utils import get_public_schema_name, get_tenant_model, schema_context
+
+    from .services import billing
+
+    log = logging.getLogger(__name__)
+    sent = 0
+    for club in get_tenant_model().objects.filter(archived_at__isnull=True).exclude(schema_name=get_public_schema_name()):
+        try:
+            with schema_context(club.schema_name):
+                sent += billing.invoice_due_balances()
+        except Exception:
+            log.exception("tournaments.balance_invoices_failed", extra={"club": club.slug})
+    return f"invoiced {sent} balance(s)"

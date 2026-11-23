@@ -102,6 +102,7 @@ export type TeamDoc = {
 	withdrawn_at: string | null;
 	withdrawal_reason: string;
 	from_application?: boolean;
+	invoices?: { billable: boolean; managed: boolean; deposit: any; balance: any; can_deposit: boolean; can_balance: boolean } | null;
 	registration_id: string | null;
 	player_count: number;
 	staff_count: number;

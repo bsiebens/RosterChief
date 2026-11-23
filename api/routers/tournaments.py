@@ -2,6 +2,7 @@
 and payments need ``tournaments.manage_tournaments``; entering a team by hand needs ``tournaments.operate_tournaments`` (the manage
 tier includes it). Permission (403) is checked before the ``tournaments`` feature (404). Rules live in ``tournaments.services``."""
 
+import logging
 import uuid
 
 from django.core.exceptions import ValidationError
@@ -19,7 +20,7 @@ from members.services import access
 from members.services.errors import Invalid
 from teams.models import Team
 from tournaments.models import Tournament, TournamentDay, TournamentRegistration, TournamentTeam
-from tournaments.services import notifications, team_access
+from tournaments.services import billing, notifications, team_access
 from tournaments.services import registration as svc
 from tournaments.sports import is_ice_hockey
 
@@ -217,6 +218,7 @@ def approve(request, registration_id: uuid.UUID):
         raise Conflict(str(error), "already_decided") from error
     r = _registration(registration_id)
     notifications.send_registration_decision_email(r, request=request)
+    _deposit_invoice(team, request)
     return {**registration_out(r, r.tournament), "tournament_team_id": team.pk}
 
 
@@ -315,6 +317,9 @@ def create_team(request, tournament_id: uuid.UUID, payload: ManualTeamIn):
             },
         )  # fmt: skip
     created = _team(created.pk)
+    if created.team_id is None:
+        _deposit_invoice(created, request)  # an outside team added by hand owes the deposit like one that applied
+        created = _team(created.pk)
     return 201, c.team_out(created, t)
 
 
@@ -330,10 +335,39 @@ def team_logo(request, team_id: uuid.UUID, logo: File[UploadedFile]):
     return c.team_out(team, team.tournament)
 
 
+def _deposit_invoice(team: TournamentTeam, request) -> None:
+    """The deposit invoice for a team that was just accepted. Best effort: a missing contact email or finance setting never undoes the approval
+    (the Invoices button on the team can make it again)."""
+    try:
+        billing.ensure_deposit_invoice(team, request.user)
+    except Exception:
+        logging.getLogger(__name__).exception("tournaments.deposit_invoice_failed")
+
+
+@router.post("/teams/{team_id}/invoices/{which}", summary="Create the deposit or balance invoice of a guest team in finance", operation_id="tournaments_team_invoice")
+def team_invoice(request, team_id: uuid.UUID, which: str):
+    c.gate_manage(request)
+    team = _team(team_id)
+    if which not in ("deposit", "balance") or not billing.billable(team):
+        raise Invalid("Only guest teams are invoiced.", {"detail": ["Only guest teams are invoiced."]}, code="not_billable")
+    try:
+        order = billing.ensure_deposit_invoice(team, request.user) if which == "deposit" else billing.ensure_balance_invoice(team, request.user)
+    except Invalid:
+        raise
+    except Conflict:
+        raise
+    if order is None:
+        raise Invalid("There is nothing to invoice.", {"detail": ["There is nothing to invoice."]}, code="nothing_due")
+    team = _team(team_id)
+    return {"invoices": billing.state(team), "payment_status": team.payment_status}
+
+
 @router.patch("/teams/{team_id}/payment", summary="Set a team's payment status", operation_id="tournaments_team_payment")
 def team_payment(request, team_id: uuid.UUID, payload: PaymentIn):
     c.gate_manage(request)
     team = _team(team_id)
+    if billing.managed(team):
+        raise Conflict("This team's payment follows its invoices in finance.", "managed_by_invoices")
     team.payment_status = payload.payment_status
     team.save(update_fields=["payment_status"])
     return c.team_out(team, team.tournament)
