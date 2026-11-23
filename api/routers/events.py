@@ -39,6 +39,7 @@ from api.schemas_events import (
     CheckInIn,
     ClaimIn,
     EventDetailOut,
+    GameScoreIn,
     EventFormOut,
     EventIn,
     EventOptionsOut,
@@ -602,6 +603,26 @@ def update_game(request, event_id: uuid.UUID):
             raise Invalid("This club has no data source for this game's competition.", {"event": ["No data source for this competition."]})
     except game_timeline.CompetitionFetchError as error:
         raise Invalid(str(error), {"event": [str(error)]}) from error
+    return _detail(request, event)
+
+
+@router.post("/{event_id}/score", response=EventDetailOut, summary="Set the score and the live flag of a game by hand", operation_id="set_game_score")
+def set_game_score(request, event_id: uuid.UUID, payload: GameScoreIn):
+    """For games nobody feeds from a competition (or to correct one): both scores or neither, plus the live flag. Whoever may edit the event.
+    A game that is fetched from its competition is overwritten by the next fetch."""
+    event = _event(event_id)
+    if not access.can_manage_event(request.user, event):
+        raise NotAllowed("You may not change this game.")
+    if event.kind != Event.EventKind.GAME:
+        raise Invalid("Only games have a score.", {"event": ["Only games have a score."]})
+    ours, theirs = payload.score_for, payload.score_against
+    if (ours is None) != (theirs is None):
+        raise Invalid("Fill in both scores, or leave both empty.", {"score_for": ["Fill in both scores, or leave both empty."]})
+    for name, value in (("score_for", ours), ("score_against", theirs)):
+        if value is not None and not 0 <= value <= 999:
+            raise Invalid("A score is between 0 and 999.", {name: ["A score is between 0 and 999."]})
+    event.score_for, event.score_against, event.is_live = ours, theirs, payload.is_live
+    event.save(update_fields=["score_for", "score_against", "is_live", "modified"])
     return _detail(request, event)
 
 

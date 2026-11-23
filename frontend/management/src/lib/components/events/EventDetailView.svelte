@@ -58,6 +58,25 @@
     let updating = $state(false);
     const canUpdate = $derived(past && ev.has_game_source && (ev.can_edit || ev.can_manage_attendance));
     let cancelOpen = $state(false);
+    let scoreOpen = $state(false);
+    const canScore = $derived(ev.kind === 'game' && ev.can_edit && !ev.cancelled);
+    let scoreFor = $state('');
+    let scoreAgainst = $state('');
+    let scoreLive = $state(false);
+    function openScore() {
+        scoreFor = ev.score_for === null ? '' : String(ev.score_for);
+        scoreAgainst = ev.score_against === null ? '' : String(ev.score_against);
+        scoreLive = ev.is_live;
+        scoreOpen = true;
+    }
+    const submitScore = () => {
+        busy = true;
+        return async ({update, result}: { update: (o?: { reset?: boolean }) => Promise<void>; result: { type: string } }) => {
+            await update({reset: false});
+            busy = false;
+            if (result.type === 'success') scoreOpen = false;
+        };
+    };
     let busy = $state(false);
     const submit = () => {
         busy = true;
@@ -100,6 +119,9 @@
   <div class={data.coachView ? 'hidden md:contents' : 'contents'}>
     {#if ev.kind === 'game' && !ev.cancelled}
         <FollowButton kind="event" id={ev.id}/>
+    {/if}
+    {#if canScore && !data.coachView}
+        <button class="btn btn-outline gap-2" type="button" onclick={openScore}><Flag size={16}/> {t('events.score.edit')}</button>
     {/if}
     {#if canUpdate && !data.coachView}
         <form method="POST" action="?/updateGame" use:enhance={() => { updating = true; return async ({ update }) => { await update({ reset: false }); updating = false; }; }}>
@@ -205,6 +227,9 @@
                 </button>
             </div>
         {/if}
+        {#if canScore}
+            <button class="btn btn-outline min-h-11 w-full gap-2" type="button" onclick={openScore}><Flag size={16} aria-hidden="true"/> {t('events.score.edit')}</button>
+        {/if}
         {#if canUpdate}
             <form method="POST" action="?/updateGame&view=coach" use:enhance={() => { updating = true; return async ({ update }) => { await update({ reset: false }); updating = false; }; }}>
                 <button class="btn btn-outline min-h-11 w-full gap-2" type="submit" disabled={updating}><RefreshCw size={16} class={updating ? 'animate-spin' : ''} aria-hidden="true"/> {t('events.update_game')}</button>
@@ -254,6 +279,12 @@
     {/if}
     {#if form?.updateError}
         <Alert kind="error">{form.updateError}</Alert>
+    {/if}
+    {#if form?.scoreError}
+        <Alert kind="error">{form.scoreError}</Alert>
+    {/if}
+    {#if form?.scoreSaved}
+        <Alert kind="success">{t('events.score.saved')}</Alert>
     {/if}
     {#if form?.updated}
         <Alert kind="success">{t('events.update_game_done')}</Alert>
@@ -438,6 +469,25 @@
         {/if}
     {/if}
 </div>
+
+<Modal bind:open={scoreOpen} title={t('events.score.title')}>
+    <form method="POST" action="?/saveScore" class="grid gap-3" use:enhance={submitScore}>
+        <p class="text-sm text-muted">{t('events.score.help')}</p>
+        <div class="grid grid-cols-2 gap-3">
+            <label class="grid gap-1 text-sm font-semibold text-ink">{t('events.score.ours')}
+                <input class="input w-full font-normal" type="number" name="score_for" min="0" max="999" inputmode="numeric" bind:value={scoreFor}/>
+            </label>
+            <label class="grid gap-1 text-sm font-semibold text-ink">{ev.opponent?.name ?? t('events.opponent')}
+                <input class="input w-full font-normal" type="number" name="score_against" min="0" max="999" inputmode="numeric" bind:value={scoreAgainst}/>
+            </label>
+        </div>
+        <label class="flex cursor-pointer items-center gap-2 text-sm"><input type="checkbox" class="checkbox" name="is_live" bind:checked={scoreLive}/> {t('events.score.live')}</label>
+        <div class="modal-action mt-2 flex justify-end gap-2">
+            <button class="btn btn-outline" type="button" onclick={() => (scoreOpen = false)}>{t('common.back')}</button>
+            <button class="btn btn-primary gap-2" type="submit" disabled={busy}><Flag size={16}/> {t('events.score.save')}</button>
+        </div>
+    </form>
+</Modal>
 
 <Modal bind:open={cancelOpen} title={ev.cancelled ? t('events.reactivate_title') : t('events.cancel_title')}>
     <form method="POST" action={ev.cancelled ? '?/uncancel' : '?/cancel'} class="grid gap-3" use:enhance={submit}>

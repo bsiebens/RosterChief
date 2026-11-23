@@ -328,6 +328,28 @@ class FixtureImportsApiTests(FixtureApiTestBase):
         self.assertEqual((denied.status_code, queued.status_code), (403, 202))
         delay.assert_called_once_with(str(self.team.pk))
 
+    def test_score_and_live_flag_can_be_set_by_hand(self):
+        event = self.played_game()
+        path = f"/events/{event.pk}/score"
+        ok = self.call("post", path, data={"score_for": 3, "score_against": 1, "is_live": True})
+        self.assertEqual((ok.status_code, ok.json()["score_for"], ok.json()["score_against"], ok.json()["is_live"]), (200, 3, 1, True))
+        event.refresh_from_db()
+        self.assertEqual((event.score_for, event.score_against, event.is_live), (3, 1, True))
+        half = self.call("post", path, data={"score_for": 2, "score_against": None})
+        self.assertEqual(half.status_code, 422)
+        negative = self.call("post", path, data={"score_for": -1, "score_against": 0})
+        self.assertEqual(negative.status_code, 422)
+        coach = self.call("post", path, self.coach_user, {"score_for": 4, "score_against": 4})
+        self.assertEqual(coach.status_code, 200)  # the head coach of the team may edit its games
+        with schema_context(self.club.schema_name):
+            fan = Member.objects.create(first_name="Fay", last_name="Fan", email="fan@fiapi.test")
+        fan_user, _ = grant_login(self.club, fan)
+        self.assertEqual(self.call("post", path, fan_user, {"score_for": 9, "score_against": 9}).status_code, 403)
+        cleared = self.call("post", path, data={"score_for": None, "score_against": None, "is_live": False})
+        self.assertEqual((cleared.status_code, cleared.json()["score_for"], cleared.json()["is_live"]), (200, None, False))
+        training = Event.objects.create(title="Practice", kind=Event.EventKind.TRAINING, start=timezone.now())
+        self.assertEqual(self.call("post", f"/events/{training.pk}/score", data={"score_for": 1, "score_against": 0}).status_code, 422)
+
     def test_game_sheet_endpoint(self):
         from events.models import GameTimeline
         from events.tests_game_stats import DOCUMENT

@@ -93,6 +93,14 @@ class EventRowOut(Schema):
     can_manage_attendance: bool
 
 
+class GameScoreIn(Schema):
+    """Both scores (ours first) or neither, and whether the game is being played right now."""
+
+    score_for: int | None = None
+    score_against: int | None = None
+    is_live: bool = False
+
+
 class RecurrenceValues(Schema):
     frequency: str | None = None
     interval: int | None = None
