@@ -28,7 +28,8 @@ from shop.services import charges as charge_svc
 router = Router(auth=AUTHENTICATORS)
 
 Kind = Order.Kind
-InvoiceType = Literal["all", "registration", "shop", "charge"]
+#: ``orders`` is shop and charge invoices together: everything that is not a registration (the Payments page lists those itself).
+InvoiceType = Literal["all", "registration", "shop", "charge", "orders"]
 Status = Literal["all", "draft", "open", "overdue", "paid", "cancelled"]
 ZERO = Decimal("0")
 
@@ -62,6 +63,8 @@ class TypeSummaryOut(Schema):
     cancelled: int
     open_amount: Money
     overdue_amount: Money
+    invoiced_amount: Money = ZERO
+    received_amount: Money = ZERO
 
 
 class InvoiceListOut(Schema):
@@ -179,7 +182,7 @@ def _batch_row(batch) -> dict:
 def list_invoices(request, type: InvoiceType = "all", status: Status = "all", q: str = "", limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
     kinds = _allowed(request)
     today = timezone.localdate()
-    wanted = [k for k in kinds if type in ("all", k)]
+    wanted = [k for k in kinds if type in ("all", k) or (type == "orders" and k in ("shop", "charge"))]
     want = offset + limit
     candidates, count = [], 0
     for kind in wanted:

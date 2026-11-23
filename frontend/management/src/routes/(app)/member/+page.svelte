@@ -211,7 +211,8 @@
 		if (result.ok && result.data && extras) extras = { ...extras, follow: result.data };
 		await invalidateAll();
 	}
-	const totalOpen = $derived(filteredFees.reduce((sum, fee) => sum + Number(fee.balance), 0));
+	// Everything still owed: registration balances plus open invoices (charges, tournament fees, shop orders): the same sum as the Home card.
+	const totalOpen = $derived(filteredFees.reduce((sum, fee) => sum + Number(fee.balance), 0) + openCharges.reduce((sum, charge) => sum + Number(charge.due), 0));
 	const totalPaid = $derived(filteredFees.reduce((sum, fee) => sum + Number(fee.paid), 0));
 	const nextDue = $derived(
 		filteredFees
@@ -329,7 +330,7 @@
 
 {#snippet payments()}
 	<div class="grid gap-3 md:grid-cols-3">
-		<div class="card p-4"><span class="font-mono text-[11px] tracking-[.14em] text-muted uppercase">{t('portal.pay_open')}</span><p class="mt-1 font-display text-3xl leading-none font-extrabold text-ink tabular-nums">{money(String(totalOpen))}</p><p class="mt-1 text-xs text-muted">{t('portal.pay_across', { n: filteredFees.length })}</p></div>
+		<div class="card p-4"><span class="font-mono text-[11px] tracking-[.14em] text-muted uppercase">{t('portal.pay_open')}</span><p class="mt-1 font-display text-3xl leading-none font-extrabold text-ink tabular-nums">{money(String(totalOpen))}</p><p class="mt-1 text-xs text-muted">{t('portal.pay_across', { n: filteredFees.length + openCharges.length })}</p></div>
 		<div class="card p-4"><span class="font-mono text-[11px] tracking-[.14em] text-muted uppercase">{t('portal.pay_next')}</span>{#if nextDue}<p class="mt-1 font-display text-3xl leading-none font-extrabold text-ink">{day(nextDue.due_date)}</p><p class="mt-1 text-xs {nextDue.late ? 'text-danger' : 'text-muted'}">{money(nextDue.remaining)}</p>{:else}<p class="mt-1 font-display text-3xl leading-none font-extrabold text-ink">–</p>{/if}</div>
 		<div class="card p-4"><span class="font-mono text-[11px] tracking-[.14em] text-muted uppercase">{t('portal.pay_paid')}</span><p class="mt-1 font-display text-3xl leading-none font-extrabold text-ink tabular-nums">{money(String(totalPaid))}</p></div>
 	</div>

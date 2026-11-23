@@ -162,19 +162,23 @@ def order_stats(base, today: datetime.date) -> dict:
     Shared by the charges list and the central invoices list. ``open`` includes the overdue ones."""
     open_q, overdue_q = open_filters(today)
     cancelled = Q(fulfillment_status=Order.FulfillmentStatus.CANCELLED)
+    invoiced_q = Q(invoice__isnull=False) & ~cancelled
     totals = base.aggregate(
         drafts=Count("pk", filter=Q(invoice__isnull=True) & ~cancelled),
         open=Count("pk", filter=open_q), overdue=Count("pk", filter=overdue_q),
         paid=Count("pk", filter=Q(invoice__isnull=False, payment_status=Order.PaymentStatus.PAID) & ~cancelled),
         cancelled=Count("pk", filter=cancelled),
         open_total=Sum("total", filter=open_q), overdue_total=Sum("total", filter=overdue_q),
+        invoiced_total=Sum("total", filter=invoiced_q),
     )  # fmt: skip
     confirmed = Q(payments__status=Payment.PaymentStatus.CONFIRMED)
     open_paid = base.filter(open_q).aggregate(v=Sum("payments__amount", filter=confirmed))["v"] or Decimal("0")
     overdue_paid = base.filter(overdue_q).aggregate(v=Sum("payments__amount", filter=confirmed))["v"] or Decimal("0")
+    invoiced_paid = base.filter(invoiced_q).aggregate(v=Sum("payments__amount", filter=confirmed))["v"] or Decimal("0")
     return {
         "drafts": totals["drafts"], "open": totals["open"], "overdue": totals["overdue"], "paid": totals["paid"], "cancelled": totals["cancelled"],
         "open_amount": (totals["open_total"] or Decimal("0")) - open_paid, "overdue_amount": (totals["overdue_total"] or Decimal("0")) - overdue_paid,
+        "invoiced_amount": totals["invoiced_total"] or Decimal("0"), "received_amount": invoiced_paid,
     }  # fmt: skip
 
 
