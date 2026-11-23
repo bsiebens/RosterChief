@@ -1,13 +1,14 @@
 <script lang="ts">
 	import { Clock, Zap, Bug, CircleDot, CirclePause, LoaderCircle, ShieldUser, Target, Timer } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import EventBackdrop from '#lib/components/portal/EventBackdrop.svelte';
 	import EventGameRoster from '#lib/components/events/EventGameRoster.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { api } from '#lib/management-api.ts';
 	import { formatDateTime, type GameSheet, type GameSheetRow } from '#lib/events/types.ts';
 
 	/** The game sheet: a scoreboard with the line score, a few totals, and a two-sided timeline (ours left, theirs right). */
-	let { sheet, eventId, canDebug = false, ourLogo = '', theirLogo = '' }: { sheet: GameSheet; eventId: string; canDebug?: boolean; ourLogo?: string; theirLogo?: string } = $props();
+	let { sheet, eventId, canDebug = false, ourLogo = '', theirLogo = '', background = null }: { sheet: GameSheet; eventId: string; canDebug?: boolean; ourLogo?: string; theirLogo?: string; background?: string | null } = $props();
 	const lineup = $derived(sheet.lineup);
 
 	// -- admins: what the live detection recorded, and whether it was pushed (for debugging) --
@@ -44,6 +45,7 @@
 <div class="grid gap-3">
 	<!-- Scoreboard -->
 	<section class="card relative isolate overflow-hidden border-ink bg-ink text-white">
+		{#if background}<EventBackdrop src={background} />{/if}
 		<!-- Each side's logo as a big, light grayscale watermark behind its name (transparency kept). -->
 		{#if ourLogo}<img src={ourLogo} alt="" aria-hidden="true" class="pointer-events-none absolute top-1/2 -left-10 -z-10 h-[200%] w-auto max-w-none -translate-y-1/2 object-contain opacity-[0.16] [filter:grayscale(1)_brightness(1.7)]" />{/if}
 		{#if theirLogo}<img src={theirLogo} alt="" aria-hidden="true" class="pointer-events-none absolute top-1/2 -right-6 -z-10 h-[150%] w-auto max-w-none -translate-y-1/2 object-contain opacity-[0.16] [filter:grayscale(1)_brightness(1.7)]" />{/if}
@@ -61,7 +63,7 @@
 		</div>
 		{#if sheet.period_scores.length}
 			<ul class="flex flex-wrap justify-center gap-px border-t border-white/10 bg-white/10">
-				{#each sheet.period_scores as p (p.label)}
+				{#each sheet.period_scores as p, i (i)}
 					<li class="min-w-24 flex-1 bg-ink px-4 py-1.5 text-center">
 						<span class="block font-mono text-[10px] tracking-[.1em] text-on-dark uppercase">{p.label}</span>
 						<span class="font-display text-xl font-extrabold tabular-nums">{p.score}</span>
@@ -128,7 +130,7 @@
 
 	<!-- Timeline: one dense line per event -->
 	<section class="card overflow-hidden">
-		{#each sheet.periods as period (period.label)}
+		{#each sheet.periods as period, pi (pi)}
 			<header class="flex items-center justify-between border-b border-line bg-subhead px-4 py-2 {period !== sheet.periods[0] ? 'border-t' : ''}">
 				<h3 class="font-display text-sm font-extrabold tracking-[.06em] text-ink uppercase flex items-center gap-2"><Clock size={16} class="shrink-0" aria-hidden="true" /> {period.title}</h3>
 				{#if period.score}<span class="font-mono text-xs font-bold text-ink">{period.score}</span>{/if}

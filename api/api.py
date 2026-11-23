@@ -218,7 +218,13 @@ def me(request):
         "admin_group_ids": [] if club.schema_name == get_public_schema_name() else sorted(str(i) for i in access.admin_group_ids(user)),
         "managed_team_ids": [] if club.schema_name == get_public_schema_name() else sorted(str(i) for i in access.managed_team_ids(user)),
         "features": sorted(request.features.enabled_codes()),
+        "event_background": _event_background_url(club),
     }
+
+
+def _event_background_url(club) -> str | None:
+    """The club's event card background (Settings), shown behind event cards and the game sheet scoreboard."""
+    return club.event_background.url if getattr(club, "event_background", None) else None
 
 
 def _logo_url(club) -> str | None:

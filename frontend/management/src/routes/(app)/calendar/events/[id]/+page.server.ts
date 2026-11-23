@@ -48,8 +48,21 @@ const updateGame = async ({ params, fetch }: RequestEvent) => {
 	return { updated: true };
 };
 
+const saveScore = async ({ request, params, fetch }: RequestEvent) => {
+	const form = await request.formData();
+	const num = (key: string) => {
+		const raw = String(form.get(key) ?? '').trim();
+		return raw === '' ? null : Number(raw);
+	};
+	const body = { score_for: num('score_for'), score_against: num('score_against'), is_live: form.get('is_live') === 'on' };
+	const res = await api('POST', `/events/${params.id}/score`, { body, f: fetch });
+	if (!res.ok) return fail(res.status >= 400 && res.status < 600 ? res.status : 500, { scoreError: res.fields.score_for || res.fields.score_against || res.fields.event || res.message || 'failed' });
+	return { scoreSaved: true };
+};
+
 export const actions: Actions = {
 	updateGame,
+	saveScore,
 	cancel: setCancelled(true),
 	uncancel: setCancelled(false)
 };

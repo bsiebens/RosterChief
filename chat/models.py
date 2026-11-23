@@ -138,6 +138,7 @@ class AudienceRule(UUIDModel):
 
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="rules")
     team = models.ForeignKey("teams.Team", null=True, blank=True, on_delete=models.CASCADE, related_name="+")
+    group = models.ForeignKey("members.Group", null=True, blank=True, on_delete=models.CASCADE, related_name="+", help_text="A chat for a members group: its admins are the staff, the other members the players.")
     include_staff = models.BooleanField(default=True)
     include_players = models.BooleanField(default=True)
     include_parents = models.BooleanField(default=False)

@@ -7,6 +7,7 @@
 	import { chatApi } from '#lib/chat.ts';
 	import { chatList } from '#lib/chat.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
+	import NoticeAlert from '#lib/components/NoticeAlert.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import FilterTabs from '#lib/components/FilterTabs.svelte';
 	import ListFilterBar from '#lib/components/ListFilterBar.svelte';
@@ -37,6 +38,7 @@
 	const tab = $derived(canModerate && page.url.searchParams.get('tab') === 'moderation' ? 'moderation' : 'chats');
 	let reportCount = $state(0);
 	let settingsOpen = $state(false);
+	let notice = $state('');
 	const tabList = $derived([
 		{ key: 'chats', label: t('chat.tab.chats') },
 		{ key: 'moderation', label: t('chat.tab.moderation'), count: reportCount, warn: true }
@@ -70,6 +72,7 @@
 <div class={canModerate ? '-mx-7 -my-6 flex flex-col' : ''}>
 {#if canModerate}{@render tabBar()}{/if}
 <div class={canModerate ? 'px-7 py-6' : ''}>
+{#if notice}<div class="mb-4"><NoticeAlert message={notice} onhide={() => (notice = '')} /></div>{/if}
 {#if tab === 'moderation'}
 	<ModerationPanel {heightClass} bind:openCount={reportCount} />
 {:else}
@@ -98,6 +101,6 @@
 
 {#if canModerate}
 	<Modal bind:open={settingsOpen} title={t('chat.settings.title')} closable onclose={() => (settingsOpen = false)}>
-		{#if settingsOpen}<SettingsPanel />{/if}
+		{#if settingsOpen}<SettingsPanel onsaved={() => { settingsOpen = false; notice = t('chat.settings.saved'); }} />{/if}
 	</Modal>
 {/if}

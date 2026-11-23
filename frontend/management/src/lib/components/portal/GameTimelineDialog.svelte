@@ -21,7 +21,7 @@
 	const count = (type: string, ours: boolean) => rows.filter((row) => row.type === type && row.ours === ours).length;
 	// The scoreboard reads home team first, like a game sheet: when we are the away team our side moves to the right and every "ours–theirs" score flips
 	const home = $derived(game.is_home !== false);
-	const flip = (value: string) => (home ? value : value.replace(/^\s*(.*?)\s*([–-])\s*(.*?)\s*$/, '$3$2$1'));
+	const flip = (value?: string | null) => (!value ? '' : home ? value : value.replace(/^\s*(.*?)\s*([–-])\s*(.*?)\s*$/, '$3$2$1'));
 	const [scoreLeft, scoreRight] = $derived(flip(game.score || '–').split(/[–-]/).map((part) => part.trim()));
 	const leftLabel = $derived(home ? game.ours_label : game.theirs_label);
 	const rightLabel = $derived(home ? game.theirs_label : game.ours_label);
@@ -44,7 +44,7 @@
 			</div>
 			{#if game.period_scores.length}
 				<div class="grid border-t border-sidebar-hairline text-center" style="grid-template-columns: repeat({game.period_scores.length}, minmax(0, 1fr))">
-					{#each game.period_scores as period, i (period.label)}
+					{#each game.period_scores as period, i (i)}
 						<div class="py-2 {i ? 'border-l border-sidebar-hairline' : ''}"><p class="font-mono text-[11px] text-sidebar-fg-dim">{period.label}</p><p class="flex items-baseline justify-center gap-2 font-display text-xl font-extrabold">{#each flip(period.score).split(/[–-]/) as part, n (n)}{#if n}<span class="text-sidebar-fg-faint" aria-hidden="true">–</span>{/if}<span>{part.trim()}</span>{/each}</p></div>
 					{/each}
 				</div>
@@ -55,7 +55,7 @@
 			<span class="inline-flex items-baseline gap-3"><b class="text-xl text-ink">{count('penalty', true)}</b><span class="text-xs tracking-[.1em] text-muted uppercase">{t('portal.penalties')}</span><b class="text-xl text-muted">{count('penalty', false)}</b></span>
 		</div>
 		<div class="grid gap-5 p-5">
-			{#each game.periods as period (period.label)}
+			{#each game.periods as period, pi (pi)}
 				<section>
 					<h3 class="mb-1 flex items-center gap-2 border-b border-line pb-1 font-display text-sm font-extrabold tracking-[.06em] text-ink uppercase">{period.title}{#if period.score}<span class="font-mono text-xs font-normal text-muted">{flip(period.score)}</span>{/if}</h3>
 					{#if period.rows.length}

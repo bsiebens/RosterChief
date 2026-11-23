@@ -52,6 +52,8 @@ export type NewConversation = {
 	title?: string;
 	member_ids?: string[];
 	team_id?: string;
+	/** kind 'team' only: a members group you administer instead of a team. */
+	group_id?: string;
 	include?: { staff: boolean; players: boolean; parents: boolean };
 	/** kind 'group' only: the whole club (narrowed by `include` and `team_ids`) instead of `member_ids`. */
 	audience?: 'club';
@@ -89,7 +91,7 @@ export const chatApi = {
 	react: (id: string, emoji: string) => api<{ reactions: Reaction[] }>('POST', `${B}/messages/${id}/reactions`, { body: { emoji } }),
 	report: (id: string, reason: string) => api('POST', `${B}/messages/${id}/report`, { body: { reason } }),
 	people: (q: string) => api<{ results: Person[] }>('GET', `${B}/people`, { query: { q, limit: 20 } }),
-	teams: (club = false) => api<{ results: TeamOption[] }>('GET', `${B}/teams`, club ? { query: { club: 1 } } : {}),
+	teams: (club = false) => api<{ results: TeamOption[]; groups?: TeamOption[] }>('GET', `${B}/teams`, club ? { query: { club: 1 } } : {}),
 	settings: () => api<ChatSettings>('GET', `${B}/settings`),
 	saveSettings: (retention_months: number | null) => api<ChatSettings>('PUT', `${B}/settings`, { body: { retention_months } }),
 	reports: () => api<{ results: Report[] }>('GET', `${B}/moderation/reports`),
@@ -109,7 +111,7 @@ export function chatEnabled(me: { features: string[]; can_use_chat?: boolean } |
  * the person may announce (the API still has the last word and answers with an error otherwise).
  */
 export function chatKinds(me: { is_club_admin?: boolean; can_announce_chat?: boolean } | null | undefined, staffSide: boolean): ConversationKind[] {
-	return staffSide || me?.is_club_admin || me?.can_announce_chat ? ['team', 'group', 'direct'] : ['direct'];
+	return staffSide || me?.is_club_admin || me?.can_announce_chat ? ['team', 'group', 'direct'] : ['group', 'direct'];
 }
 
 // ---- messages ------------------------------------------------------------------------------------------------

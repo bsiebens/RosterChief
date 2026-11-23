@@ -20,6 +20,10 @@ def can_create_team_chat(user, team) -> bool:
     return team.pk in member_access.staffed_team_ids(user) or member_access.can_moderate_chat(user)
 
 
+def can_create_group_chat(user, group) -> bool:
+    return group.pk in member_access.admin_group_ids(user) or member_access.can_moderate_chat(user)
+
+
 def may_announce(user, conversation_or_team) -> bool:
     """Announcement mode on a team chat: staff of that team or ``chat.announce``; anywhere else only ``chat.announce``."""
     team = conversation_or_team.team if isinstance(conversation_or_team, Conversation) else conversation_or_team
@@ -75,7 +79,7 @@ def _people(ids, *, exclude=None) -> list:
 
 
 @transaction.atomic
-def create(user, me: Member, *, kind, mode=None, title="", member_ids=(), team_id=None, include=None, audience=None, team_ids=()) -> tuple[Conversation, bool]:
+def create(user, me: Member, *, kind, mode=None, title="", member_ids=(), team_id=None, include=None, audience=None, team_ids=(), group_id=None) -> tuple[Conversation, bool]:
     """Returns ``(conversation, created)``. Raises ``Invalid`` / ``NotAllowed``."""
     if kind not in Conversation.Kind.values:
         raise Invalid("Unknown kind.", errors={"kind": ["Unknown kind."]})
@@ -108,6 +112,8 @@ def create(user, me: Member, *, kind, mode=None, title="", member_ids=(), team_i
             _add(c, m)
         safeguard_minors(c)
         return c, True
+    if group_id:
+        return _create_for_group(user, me, group_id=group_id, mode=mode, title=title, include=include)
     team = Team.objects.filter(pk=team_id).first() if team_id else None
     if team is None:
         raise Invalid("Pick a team.", errors={"team_id": ["Pick a team."]})
@@ -121,6 +127,26 @@ def create(user, me: Member, *, kind, mode=None, title="", member_ids=(), team_i
     AudienceRule.objects.create(conversation=c, team=team, include_staff=bool(include.get("staff", True)), include_players=bool(include.get("players", True)), include_parents=bool(include.get("parents", False)))
     from chat.services import roster
 
+    roster.sync(c)
+    return c, True
+
+
+def _create_for_group(user, me: Member, *, group_id, mode, title, include) -> tuple[Conversation, bool]:
+    """A team-style chat for a members group: the group's admins (and moderators) may start one; the roster sync keeps it in step."""
+    from chat.services import roster
+    from members.models import Group
+
+    group = Group.objects.filter(pk=group_id).first()
+    if group is None:
+        raise Invalid("Unknown group.", errors={"group_id": ["Unknown group."]})
+    if not can_create_group_chat(user, group):
+        raise NotAllowed("You may not start a chat for this group.")
+    if mode == Conversation.Mode.ANNOUNCEMENT and not (member_access.can_announce_chat(user) or group.pk in member_access.admin_group_ids(user)):
+        raise NotAllowed("You may not start announcement chats for this group.")
+    include = include or {}
+    c = Conversation.objects.create(kind=Conversation.Kind.TEAM, mode=mode, title=(title or group.name)[:150], created_by=me)
+    _add(c, me, is_admin=True)
+    AudienceRule.objects.create(conversation=c, group=group, include_staff=bool(include.get("staff", True)), include_players=bool(include.get("players", True)), include_parents=bool(include.get("parents", False)))
     roster.sync(c)
     return c, True
 

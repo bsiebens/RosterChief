@@ -123,17 +123,17 @@
 			{#if header.context}<span class="hidden font-mono text-xs text-muted sm:inline">{header.context}</span>{/if}
 			<!-- The badge and buttons are snippets owned by the page: while navigating away they can briefly read the next page's data
 			     and throw. The boundary swallows that (the next page sets its own header a moment later). -->
-			<svelte:boundary>
+			{#key header.badge}<svelte:boundary>
 				{#if header.badge}{@render header.badge()}{/if}
 				{#snippet failed()}{/snippet}
-			</svelte:boundary>
+			</svelte:boundary>{/key}
 			<div class="flex-1"></div>
-			<svelte:boundary>
+			{#key header.actions}<svelte:boundary>
 				{#if header.actions}
 					<div class="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">{@render header.actions()}</div>
 				{/if}
 				{#snippet failed()}{/snippet}
-			</svelte:boundary>
+			</svelte:boundary>{/key}
 			{#if headerBack.link}<a class="btn btn-outline gap-2" href={headerBack.link.href}><ArrowLeft size={16} aria-hidden="true" /> {headerBack.link.label}</a>{/if}
 			{#if management}<NotificationBell />{/if}
 			{#if portal}<div class="hidden md:block"><NotificationBell {portal} /></div>{/if}
