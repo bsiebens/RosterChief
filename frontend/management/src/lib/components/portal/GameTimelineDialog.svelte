@@ -2,6 +2,7 @@
 	import { Goal, ShieldHalf, Timer, X } from '@lucide/svelte';
 	import { formatDateTime } from '#lib/events/types.ts';
 	import { t } from '#lib/i18n.svelte.ts';
+	import EventBackdrop from './EventBackdrop.svelte';
 	import type { GameSheet } from '#lib/portal.ts';
 
 	/**
@@ -9,7 +10,7 @@
 	 * (crest behind it, final badge, when it was last updated), the score per period, the goal and penalty totals, then every goal, penalty and
 	 * goalie change in order by period.
 	 */
-	let { game, title, crest = null, open = $bindable(false) }: { game: GameSheet; title: string; crest?: string | null; open: boolean } = $props();
+	let { game, title, crest = null, opponentCrest = null, background = null, open = $bindable(false) }: { game: GameSheet; title: string; crest?: string | null; /** The other team's logo, behind its side of the scoreboard. */ opponentCrest?: string | null; /** The club's event background, greyscale under a dark gradient. */ background?: string | null; open: boolean } = $props();
 	let dialog: HTMLDialogElement | undefined = $state();
 	$effect(() => {
 		if (!dialog) return;
@@ -30,7 +31,9 @@
 <dialog bind:this={dialog} class="portal-modal" aria-label={t('portal.timeline_title')} onclose={() => (open = false)} onclick={(e) => { if (e.target === dialog) dialog?.close(); }}>
 	{#if open}
 		<div class="relative isolate overflow-hidden bg-sidebar-bg text-sidebar-fg">
-			{#if crest}<img class="pointer-events-none absolute -top-6 -left-8 -z-10 h-56 w-56 object-contain opacity-15" src={crest} alt="" />{/if}
+			<EventBackdrop src={background} />
+			{#if crest}<img class="pointer-events-none absolute -top-6 -z-10 h-56 w-56 object-contain opacity-15 {home ? '-left-8' : '-right-8'}" src={crest} alt="" />{/if}
+			{#if opponentCrest}<img class="pointer-events-none absolute -top-6 -z-10 h-56 w-56 object-contain opacity-15 {home ? '-right-8' : '-left-8'}" src={opponentCrest} alt="" />{/if}
 			<div class="flex items-center gap-3 px-5 pt-3 font-mono text-xs tracking-[.14em] text-sidebar-fg-dim uppercase">
 				<span class="min-w-0 flex-1 truncate">{title}</span>
 				{#if game.final}<span class="rounded-full border border-sidebar-chip px-2 py-0.5 text-[10px] font-bold text-sidebar-fg">{t('portal.final')}</span>{/if}
