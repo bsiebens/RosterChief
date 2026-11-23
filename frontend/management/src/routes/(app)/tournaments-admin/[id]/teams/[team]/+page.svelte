@@ -111,7 +111,7 @@
 					</h2>
 					{#if canOperate}<button class="btn btn-outline btn-sm gap-1" type="button" onclick={() => openForm(null, staff ? 'staff' : 'player')}><Plus size={14} /> {staff ? t('tn.roster.add_staff') : t('tn.roster.add_player')}</button>{/if}
 				</header>
-				<table class="table">
+				<table class="table [&_td]:align-middle [&_th]:align-middle">
 					<thead>
 						<tr>
 							{#if !staff}<th class="w-12">#</th>{/if}
@@ -128,7 +128,7 @@
 						{#each rows as p (p.id)}
 							<tr class="hover:bg-paper">
 								{#if !staff}<td class="font-mono text-xs">{p.jersey_number ?? '—'}</td>{/if}
-								<td>{p.name}{#if p.age_flagged} <span class="badge badge-warning badge-xs">{t('tn.roster.age_flag')}</span>{/if}</td>
+								<td><div class="flex items-center gap-2"><span class="font-semibold">{p.name}</span>{#if p.age_flagged}<span class="badge badge-warning badge-sm shrink-0 whitespace-nowrap" title={t('tn.roster.age_flag')}>{t('tn.roster.age_flag')}</span>{/if}</div></td>
 								<td>{p.position_label || '—'}</td>
 								{#if !staff}<td class="hidden font-mono text-xs md:table-cell">{fmtDate(p.date_of_birth)}</td>{/if}
 								<td class="hidden font-mono text-xs lg:table-cell">{p.license_number || '—'}</td>
