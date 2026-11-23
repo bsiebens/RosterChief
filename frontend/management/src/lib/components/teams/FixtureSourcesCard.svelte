@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
 	import { Download, Eye, LoaderCircle, RefreshCw, Trash2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Modal from '#lib/components/Modal.svelte';
-	import { checkSummary, rerunHref, type Check, type FixturePreview, type FixtureSource, type FixtureSources, type Recheck, type RecheckAll } from '#lib/fixtures.ts';
+	import { checkSummary, rerunHref, type Check, type FixtureGames, type FixtureGamesDeleted, type FixturePreview, type FixtureSource, type FixtureSources, type Recheck, type RecheckAll } from '#lib/fixtures.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { api } from '#lib/management-api.ts';
 	import { formatDateTime } from '#lib/members/detail-helpers.ts';
@@ -58,16 +58,29 @@
 		goto(rerunHref(teamId, s), { state: { fixturePreview: preview } });
 	}
 
-	// Forgetting a source (its games stay).
+	// Forgetting a source: its games stay, or (opt-in) its upcoming games without recorded data are deleted too.
 	let removing = $state<FixtureSource | null>(null);
 	let removeOpen = $state(false);
 	let removeBusy = $state(false);
 	let removeError = $state('');
+	let removeGames = $state<FixtureGames | null>(null);
+	let alsoDelete = $state(false);
+	let deletedNote = $state('');
+	async function askRemove(s: FixtureSource) {
+		removing = s;
+		removeError = '';
+		removeGames = null;
+		alsoDelete = false;
+		removeOpen = true;
+		const res = await api<FixtureGames>('GET', `/teams/${teamId}/fixture-sources/${s.id}/games`);
+		if (res.ok && res.data && removing?.id === s.id) removeGames = res.data;
+	}
 	async function remove() {
 		if (!removing) return;
 		removeBusy = true;
 		removeError = '';
-		const res = await api('DELETE', `/teams/${teamId}/fixture-sources/${removing.id}`);
+		const withGames = alsoDelete && !!removeGames?.deletable;
+		const res = await api<FixtureGamesDeleted>('DELETE', `/teams/${teamId}/fixture-sources/${removing.id}`, { query: withGames ? { delete_games: true } : {} });
 		removeBusy = false;
 		if (!res.ok && res.status !== 404) {
 			removeError = errorText(res);
@@ -77,6 +90,10 @@
 		sources = sources.filter((s) => s.id !== id);
 		delete rows[id];
 		removeOpen = false;
+		if (res.data) {
+			deletedNote = t('fixtures.games.deleted', { deleted: res.data.deleted, kept: res.data.kept_played + res.data.kept_with_data });
+			await invalidateAll();
+		}
 	}
 
 	const importHref = $derived(`/teams/${teamId}/import${seasonId ? `?season=${seasonId}` : ''}`);
@@ -99,6 +116,7 @@
 	</div>
 	<p class="text-sm text-muted">{t('teampage.fixtures.help')}</p>
 	{#if allError}<Alert kind="error">{allError}</Alert>{/if}
+	{#if deletedNote}<Alert kind="success">{deletedNote}</Alert>{/if}
 	{#if skipped.length}
 		<Alert kind="warning" title={t('fixtures.skipped')}>
 			{#each skipped as s (s.id)}<span class="block">{s.reason}</span>{/each}
@@ -142,7 +160,7 @@
 											{#if row?.busy}<LoaderCircle size={13} class="animate-spin" aria-hidden="true" />{:else}<RefreshCw size={13} aria-hidden="true" />{/if}
 											{t('teampage.fixtures.recheck')}
 										</button>
-										<button class="btn btn-outline btn-error btn-xs btn-square" type="button" title={t('fixtures.remove')} aria-label={t('fixtures.remove_named', { source: s.source, season: s.season_name })} onclick={() => ((removing = s), (removeError = ''), (removeOpen = true))}><Trash2 size={13} /></button>
+										<button class="btn btn-outline btn-error btn-xs btn-square" type="button" title={t('fixtures.remove')} aria-label={t('fixtures.remove_named', { source: s.source, season: s.season_name })} onclick={() => askRemove(s)}><Trash2 size={13} /></button>
 									</div>
 								</td>
 							{/if}
@@ -181,8 +199,19 @@
 <Modal bind:open={removeOpen} title={t('fixtures.remove')}>
 	{#if removeError}<div class="mb-3"><Alert kind="error">{removeError}</Alert></div>{/if}
 	<p class="text-sm">{t('fixtures.remove_body', { source: removing?.source ?? '', season: removing?.season_name ?? '', label: removing?.competition_label || '—' })}</p>
+	{#if removeGames}
+		<div class="mt-3 grid gap-2 text-sm">
+			{#if removeGames.deletable}
+				<label class="flex items-start gap-2"><input type="checkbox" class="checkbox checkbox-sm mt-0.5" bind:checked={alsoDelete} /> <span>{t('fixtures.games.delete', { n: removeGames.deletable })}</span></label>
+			{:else}
+				<p class="text-muted">{t('fixtures.games.none')}</p>
+			{/if}
+			{#if removeGames.played || removeGames.with_data}<p class="text-muted">{t('fixtures.games.keep', { played: removeGames.played, data: removeGames.with_data })}</p>{/if}
+			{#if alsoDelete}<Alert kind="warning">{t('fixtures.games.confirm', { n: removeGames.deletable })}</Alert>{/if}
+		</div>
+	{/if}
 	<div class="modal-action mt-4 flex justify-end gap-2">
 		<button class="btn btn-outline" type="button" onclick={() => (removeOpen = false)}>{t('common.cancel')}</button>
-		<button class="btn btn-error gap-2" type="button" disabled={removeBusy} onclick={remove}><Trash2 size={16} /> {t('fixtures.remove')}</button>
+		<button class="btn btn-error gap-2" type="button" disabled={removeBusy} onclick={remove}><Trash2 size={16} /> {alsoDelete && removeGames?.deletable ? t('fixtures.remove_games') : t('fixtures.remove')}</button>
 	</div>
 </Modal>

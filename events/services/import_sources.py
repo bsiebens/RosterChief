@@ -104,6 +104,89 @@ def remove_entry(team, entry: dict) -> bool:
     return True
 
 
+def linked_games(team, entry: dict):
+    """The games ``team``'s ``entry`` created: this team's games of the entry's competition stamped with the entry's
+    source id and label. A game with a blank or different source id (legacy, or another competition's) is not linked."""
+    from events.models import Event
+
+    try:
+        source_id = source_id_for(entry)
+    except ImportSourceError:
+        return Event.objects.none()
+    return Event.objects.filter(kind=Event.EventKind.GAME, teams=team, competition=entry.get("source", ""), external_source_id=source_id, competition_label=entry.get("competition_label", "")).distinct()
+
+
+def game_fate(event, now=None) -> str:
+    """What deleting a source's games does with ``event``: ``"delete"`` (an upcoming game nothing was recorded on),
+    ``"played"`` (kick-off passed, live, or a result) or ``"data"`` (still upcoming, but something worth keeping hangs on
+    it: answers, a published line-up, a timeline, moments, stats, files, task claims, assigned officials or another team).
+    Conservative: anything doubtful is kept."""
+    from events.models import GameTimeline
+
+    now = now or timezone.now()
+    if event.start <= now or event.is_live or event.score_for is not None or event.score_against is not None:
+        return "played"
+    timeline = getattr(event, "timeline", None)
+    lineup = getattr(event, "lineup", None)
+    has_data = (
+        event.teams.count() > 1
+        or event.groups.exists()
+        or event.invited_members.exists()
+        or event.attendances.exclude(status="no_response", showed_up=None).exists()
+        or (lineup is not None and (lineup.published_at is not None or lineup.selections.exists()))
+        or (timeline is not None and timeline.status != GameTimeline.Status.SCHEDULED)
+        or event.moments.exists()
+        or event.stats.exists()
+        or event.attachments.exists()
+        or event.tasks.filter(claims__isnull=False).exists()
+        or event.referees.exists()
+        or event.officials.exists()
+        or hasattr(event, "tournament")
+    )
+    return "data" if has_data else "delete"
+
+
+def game_counts(games, now=None) -> dict:
+    """``{"deletable": n, "played": n, "with_data": n}`` for an iterable of games."""
+    counts = {"deletable": 0, "played": 0, "with_data": 0}
+    now = now or timezone.now()
+    for event in games:
+        counts[{"delete": "deletable", "played": "played", "data": "with_data"}[game_fate(event, now)]] += 1
+    return counts
+
+
+def games_of_entries(team, entries) -> list:
+    """The distinct games linked to any of ``entries``."""
+    found = {}
+    for entry in entries:
+        for event in linked_games(team, entry):
+            found[event.pk] = event
+    return list(found.values())
+
+
+def delete_unplayed_games(actor, games) -> dict:
+    """Deletes the ``"delete"`` games of ``games`` the way ``events.services.events.delete_event`` does (the cascade
+    takes attendance, lineup, tasks and so on; the calendar feed and the app read the table, so nothing else dangles) and
+    writes one ``event.deleted`` audit entry each. Returns ``{"deleted", "kept_played", "kept_with_data"}``. The caller
+    wraps this in the transaction it shares with whatever else it changes."""
+    from events.services import events as events_svc
+
+    now = timezone.now()
+    out = {"deleted": 0, "kept_played": 0, "kept_with_data": 0}
+    for event in games:
+        fate = game_fate(event, now)
+        if fate == "played":
+            out["kept_played"] += 1
+        elif fate == "data":
+            out["kept_with_data"] += 1
+        else:
+            snap, pk, label = events_svc._state(event), event.pk, str(event)
+            event.delete()
+            events_svc._record_deleted(actor, "event.deleted", "event", pk, label, {**{k: {"from": events_svc.audit._json(v), "to": None} for k, v in snap.items()}, "scope": {"from": None, "to": "fixture_source"}})
+            out["deleted"] += 1
+    return out
+
+
 def sources_for(team, season=None) -> list[dict]:
     """``team``'s stored entries, optionally only ``season``'s, in a stable display order."""
     entries = [entry for entry in (team.import_sources or []) if entry.get("source") in SOURCES]

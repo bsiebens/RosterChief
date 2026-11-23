@@ -356,6 +356,9 @@
 	<form method="POST" action="?/delete" use:enhance={submit}>
 		{#if errorFor('delete')}<div class="mb-3"><Alert kind="error">{errorFor('delete')}</Alert></div>{/if}
 		<p class="text-sm">{t('teams.delete_body', { name: team.name })}</p>
+		{#if data.fixtureGames?.deletable}
+			<label class="mt-3 flex items-start gap-2 text-sm"><input type="checkbox" name="delete_games" class="checkbox checkbox-sm mt-0.5" /> <span>{t('teams.delete_games', { n: data.fixtureGames.deletable, kept: data.fixtureGames.played + data.fixtureGames.with_data })}</span></label>
+		{/if}
 		<div class="modal-action mt-4 flex justify-end gap-2">
 			<button class="btn btn-outline" type="button" onclick={() => (deleteOpen = false)}>{t('common.cancel')}</button>
 			<button class="btn btn-error gap-2" type="submit" disabled={busy}><Trash2 size={16} /> {t('teams.delete')}</button>

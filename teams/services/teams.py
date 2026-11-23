@@ -189,14 +189,22 @@ def reorder_teams(actor, ids: list) -> None:
 
 
 @transaction.atomic
-def delete_team(actor, team) -> None:
+def delete_team(actor, team, delete_games: bool = False) -> dict | None:
+    """Deletes the team. With ``delete_games`` the upcoming games of its fixture sources (nothing recorded on them) are
+    deleted first, in the same transaction, and ``{"deleted", "kept_played", "kept_with_data"}`` is returned; without
+    it the team's games stay (the team is just removed from them)."""
     require_settings(actor)
     snapshot, pk, label = audit.snapshot(team, FIELDS, deleted=True), team.pk, team.name
     msg = "This team can't be deleted because it has roster or staff history. Remove its players and staff from every season first."
     if team.roster.exists() or team.staff_assignments.exists():
         raise Invalid(msg, {"__all__": [msg]})
+    result = None
     try:
         with transaction.atomic():
+            if delete_games:
+                from events.services import import_sources
+
+                result = import_sources.delete_unplayed_games(actor, import_sources.games_of_entries(team, import_sources.sources_for(team)))
             team.delete()
     except ProtectedError, RestrictedError:
         msg = "This team can't be deleted because other records (such as events) still refer to it."
@@ -204,6 +212,7 @@ def delete_team(actor, team) -> None:
     entry = audit.record(actor, "team.deleted", changes=snapshot)
     entry.target_type, entry.target_id, entry.target_label = "team", str(pk), label[:255]
     entry.save(update_fields=["target_type", "target_id", "target_label", "modified"])
+    return result
 
 
 # -- detail ---------------------------------------------------------------------------------------------------
