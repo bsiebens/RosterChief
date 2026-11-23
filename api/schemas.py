@@ -61,6 +61,9 @@ class MeOut(Schema):
     can_manage_shop_invoices: bool = False
     can_manage_tournaments: bool = False
     can_operate_tournaments: bool = False
+    can_use_chat: bool = False
+    can_moderate_chat: bool = False
+    can_announce_chat: bool = False
     shop_vat_mode: str = "off"
     managed_team_ids: list[str] = []
     admin_group_ids: list[str] = []

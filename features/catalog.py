@@ -31,6 +31,7 @@ CATALOG: dict[str, FeatureDef] = {
         FeatureDef("shop", "Shop", "Enables the club shop"),
         FeatureDef("evaluations", "Evaluations", "Player evaluations: checklists, evaluation forms, results and evaluation meetings"),
         FeatureDef("tournaments", "Tournaments", "Host tournaments: team registration, fields and stages, scheduling, scores, standings, rosters, lunches, dressing rooms and volunteer shifts."),
+        FeatureDef("chat", "Chat", "Member chat: direct, group and team chats, announcements, with safeguards for minors."),
         FeatureDef("analytics", "Analytics", "Enables analytics for games played based on official gamesheets"),
         # One feature per competition a club can import fixtures from (see club.Competition.feature).
         FeatureDef("competition_rbihf", "RBIHF fixtures", "Import fixtures from the RBIHF competition."),

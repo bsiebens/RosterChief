@@ -36,6 +36,8 @@ CATALOG: dict[str, Perm] = {
         Perm("news.publish_newsitems", "Publish newsitems", admin=True),
         Perm("tournaments.manage_tournaments", "Manage tournaments (settings, registrations, teams, payments)", admin=True, feature="tournaments"),
         Perm("tournaments.operate_tournaments", "Operate tournaments (rosters, schedule, results, dressing rooms, shifts)", feature="tournaments"),
+        Perm("chat.moderate", "Moderate chat (see chats with minors, handle reports)", feature="chat"),
+        Perm("chat.announce", "Start club-wide announcement chats", feature="chat"),
         Perm("forms.manage_forms", "Manage forms"),
     ]
 }

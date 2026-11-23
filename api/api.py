@@ -16,6 +16,7 @@ from .auth import AUTHENTICATORS
 from .errors import register_error_handlers
 from .routers import analytics as analytics_router
 from .routers import calendar_data as calendar_data_router
+from .routers import chat as chat_router
 from .routers import club_settings as club_settings_router
 from .routers import evaluations as evaluations_router
 from .routers import event_subtypes as event_subtypes_router
@@ -124,6 +125,7 @@ api.add_router("/tournaments", tournaments_logistics_router.router, tags=["tourn
 api.add_router("/tournaments", tournaments_lunch_router.router, tags=["tournaments"])
 api.add_router("/dressing-rooms", tournaments_logistics_router.rooms_router, tags=["tournaments"])
 api.add_router("/public/tournaments", public_tournaments_router.router, tags=["public"])
+api.add_router("/chat", chat_router.router, tags=["chat"])
 api.add_router("/notifications", notifications_router.router, tags=["notifications"])
 api.add_router("/web-push", web_push_router.router, tags=["notifications"])
 api.add_router("/overview", overview_router.router, tags=["overview"])
@@ -174,6 +176,7 @@ def me(request):
     except ObjectDoesNotExist:
         raise PermissionDenied from None  # signed in, but not a user of this club
     tournaments_on = club.schema_name != get_public_schema_name() and request.features.has("tournaments")
+    chat_on = club.schema_name != get_public_schema_name() and request.features.has("chat")
     member = _member_profile(user, club)
     return {
         "id": str(user.pk),
@@ -204,6 +207,9 @@ def me(request):
         "can_manage_shop_invoices": shop_on and access.can_manage_shop_invoices(user),
         "can_manage_tournaments": tournaments_on and access.can_manage_tournaments(user),
         "can_operate_tournaments": tournaments_on and access.can_operate_tournaments(user),
+        "can_use_chat": chat_on and member is not None,
+        "can_moderate_chat": chat_on and access.can_moderate_chat(user),
+        "can_announce_chat": chat_on and access.can_announce_chat(user),
         "can_add_news": club.schema_name != get_public_schema_name() and access.can_add_news(user),
         # The shop's VAT setting, so the product form shows a VAT rate only while VAT is on ("off" when the club has no shop).
         "shop_vat_mode": ShopSettings.current().vat_mode if shop_on else "off",

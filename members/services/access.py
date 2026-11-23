@@ -456,7 +456,26 @@ def require_operate_tournaments(actor) -> None:
         raise NotAllowed("You are not allowed to operate tournaments.")
 
 
-SHOP_SUPERSET = "shop.manage_shop"
+CHAT_MODERATE = "chat.moderate"
+CHAT_ANNOUNCE = "chat.announce"
+
+
+def can_moderate_chat(user) -> bool:
+    """Platform owner, the club's Owner role or a holder of ``chat.moderate``: sees the chats with minors and handles reports (all audit-logged).
+    The club-has-the-feature check is done by the callers (routers, /me)."""
+    if user is None or not user.is_authenticated or not user.is_active:
+        return False
+    return is_platform_owner(user) or _is_club_owner(user) or user.has_perm(CHAT_MODERATE)
+
+
+def can_announce_chat(user) -> bool:
+    """Platform owner, the club's Owner role or a holder of ``chat.announce``: club-wide announcement chats."""
+    if user is None or not user.is_authenticated or not user.is_active:
+        return False
+    return is_platform_owner(user) or _is_club_owner(user) or user.has_perm(CHAT_ANNOUNCE)
+
+
+SHOP_SUPERSET ="shop.manage_shop"
 MANAGE_SHOP_PRODUCTS = "shop.manage_products"
 MANAGE_SHOP_INVENTORY = "shop.manage_inventory"
 MANAGE_SHOP_ORDERS = "shop.manage_orders"
