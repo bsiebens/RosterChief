@@ -117,11 +117,10 @@ export class ConversationPoller {
 	#timer: ReturnType<typeof setTimeout> | null = null;
 	#running = false;
 	#busy = false;
-	#ticks = 0;
 	#readSeq = 0;
 	#readBusy = false;
-	/** Every Nth poll fetches the latest page again, because `after=` never returns changes to older messages (reactions, deletions). */
-	static REFRESH_EVERY = 8;
+	/** The server's clock at the last answer: the next poll asks what changed (reactions, deletions) since then, besides the newer messages. */
+	#serverTime = '';
 
 	constructor(id: string) {
 		this.id = id;
@@ -162,6 +161,7 @@ export class ConversationPoller {
 			this.messages = mergeMessages([], res.data.messages);
 			this.conversation = res.data.conversation;
 			this.hasMoreBefore = res.data.has_more_before;
+			if (res.data.server_time) this.#serverTime = res.data.server_time;
 			this.error = '';
 		} else {
 			this.error = errorText(res, t('chat.err.load'));
@@ -172,14 +172,13 @@ export class ConversationPoller {
 	async poll() {
 		if (!this.#running || this.#busy || this.loading || !this.conversation) return;
 		this.#busy = true;
-		this.#ticks++;
-		const full = this.#ticks % ConversationPoller.REFRESH_EVERY === 0;
-		const res = await chatApi.messages(this.id, full ? { limit: 50 } : { after: lastSeq(this.messages) });
+		const res = await chatApi.messages(this.id, { after: lastSeq(this.messages), ...(this.#serverTime ? { changed_after: this.#serverTime } : {}) });
 		this.#busy = false;
 		if (!this.#running) return;
 		if (res.ok && res.data) {
-			this.messages = mergeMessages(this.messages, res.data.messages);
+			this.messages = mergeMessages(this.messages, [...res.data.messages, ...(res.data.changed ?? [])]);
 			this.conversation = res.data.conversation;
+			if (res.data.server_time) this.#serverTime = res.data.server_time;
 			this.#settle(res.data.messages);
 			this.error = '';
 		}

@@ -41,7 +41,7 @@ export type Conversation = {
 	updated: string;
 };
 export type Participant = { person: Person; is_admin: boolean; joined_at: string };
-export type MessagesPage = { messages: Message[]; conversation: Conversation; has_more_before: boolean };
+export type MessagesPage = { messages: Message[]; conversation: Conversation; has_more_before: boolean; server_time?: string; changed?: Message[] };
 export type Report = { id: string; message: Message; conversation_id: string; conversation_title: string; reporter: Person; reason: string; created: string; handled: boolean };
 export type TeamOption = { id: string; name: string };
 export type NewConversation = {
@@ -68,7 +68,7 @@ export const chatApi = {
 	conversations: (f?: Fetch) => api<{ results: Conversation[]; unread_total: number }>('GET', `${B}/conversations`, { f }),
 	create: (body: NewConversation) => api<Conversation>('POST', `${B}/conversations`, { body }),
 	detail: (id: string) => api<{ conversation: Conversation; participants: Participant[] }>('GET', `${B}/conversations/${id}`),
-	messages: (id: string, query: { after?: number; before?: number; limit?: number } = {}) => api<MessagesPage>('GET', `${B}/conversations/${id}/messages`, { query }),
+	messages: (id: string, query: { after?: number; before?: number; limit?: number; changed_after?: string } = {}) => api<MessagesPage>('GET', `${B}/conversations/${id}/messages`, { query }),
 	send: (id: string, body: { body: string; client_key: string; attachment_ids?: string[]; urgent?: boolean }) => api<Message>('POST', `${B}/conversations/${id}/messages`, { body }),
 	upload: (id: string, file: File) => {
 		const form = new FormData();

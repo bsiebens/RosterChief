@@ -127,4 +127,4 @@ export type AuthState =
 	/** Club staff without a second factor: only the security screens work. */
 	| { status: 'mfa_enrollment_required'; user: User }
 	/** `me` is set in club mode; on the bare domain (platform mode) it is null and `locals.myClubs` is used instead. */
-	| { status: 'authenticated'; user: User; me: Me | null; memberShopEnabled?: boolean };
+	| { status: 'authenticated'; user: User; me: Me | null; memberShopEnabled?: boolean; memberChatEnabled?: boolean };

@@ -12,11 +12,17 @@
 	type Row = { key: number; id?: string; due_date: string; amount: string; locked: boolean; source?: Installment };
 	let seq = 0;
 	const fromAgreement = (): Row[] => (data.agreement?.installments ?? []).map((i) => ({ key: ++seq, id: i.id, due_date: i.due_date, amount: i.amount, locked: !!i.order_id, source: i }));
+	// svelte-ignore state_referenced_locally
 	let contactName = $state(data.agreement?.contact_name ?? '');
+	// svelte-ignore state_referenced_locally
 	let contactEmail = $state(data.agreement?.contact_email ?? '');
+	// svelte-ignore state_referenced_locally
 	let description = $state(data.agreement?.description ?? '');
+	// svelte-ignore state_referenced_locally
 	let leadDays = $state(data.agreement?.lead_days ?? 30);
+	// svelte-ignore state_referenced_locally
 	let graceDays = $state(data.agreement?.grace_days ?? 14);
+	// svelte-ignore state_referenced_locally
 	let rows = $state<Row[]>(fromAgreement());
 	let genTotal = $state('');
 	let genCount = $state(4);

@@ -34,7 +34,8 @@
 	const season = $derived(parent ? page.data.home?.season : page.data.coach?.season);
 	const shopEnabled = $derived(parent && (data.me ? data.shopOpen === true : a.status === 'authenticated' && a.memberShopEnabled === true));
 	// Chat: the nav entries and the unread badges (one shared list poller, started while the shell is open).
-	const chatOn = $derived(chatEnabled(data.me));
+	// a parent-only account has no `me`: the portal access answer says whether chat is on for it
+	const chatOn = $derived(chatEnabled(data.me) || (!data.me && a.status === 'authenticated' && a.memberChatEnabled === true));
 	$effect(() => (chatOn ? chatList.acquire() : undefined));
 	let navOpen = $state(false);
 	afterNavigate(() => { navOpen = false; });
