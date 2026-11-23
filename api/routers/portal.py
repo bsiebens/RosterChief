@@ -199,10 +199,15 @@ def _shop_visible(request) -> bool:
     return request.features.has("shop") and is_shop_open()
 
 
+def _chat_visible(request) -> bool:
+    """The member app shows Chat while the club has the feature (the viewer has a member record by the time they get here)."""
+    return request.features.has("chat")
+
+
 @router.get("/access")
 def portal_access(request):
     _viewer(request)
-    return {"can_manage": access.can_access_management(request.user), "shop_enabled": _shop_visible(request)}
+    return {"can_manage": access.can_access_management(request.user), "shop_enabled": _shop_visible(request), "chat_enabled": _chat_visible(request)}
 
 
 @router.get("/home")
@@ -238,6 +243,7 @@ def portal_home(request):
         "viewer": viewer.pk,
         **_home_branding(request, timezone.localdate(now)),
         "shop_enabled": _shop_visible(request),
+        "chat_enabled": _chat_visible(request),
         "people": [{"id": member.pk, "name": str(member), "first_name": member.first_name, "photo_url": member.photo_url} for member in people.values()],
         "events": sorted(
             [_attendance(row, blockers.get(row.pk), counts) for row in events] + _requirement_rows(people, events, now),

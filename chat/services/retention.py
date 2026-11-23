@@ -5,7 +5,7 @@ import datetime
 
 from django.utils import timezone
 
-from chat.models import ChatSettings, Conversation, Message, MessageAttachment
+from chat.models import ChatSettings, Conversation, Message, MessageAttachment, MessageReport
 
 DAYS_PER_MONTH = 30.44
 
@@ -18,7 +18,7 @@ def cutoff(months=None, *, now=None) -> datetime.datetime:
 def apply(*, now=None) -> dict:
     now = now or timezone.now()
     limit = cutoff(now=now)
-    old = Message.objects.filter(created__lt=limit).exclude(reports__handled_at__isnull=True)
+    old = Message.objects.filter(created__lt=limit).exclude(pk__in=MessageReport.objects.filter(handled_at__isnull=True).values("message_id"))
     for attachment in MessageAttachment.objects.filter(message__in=old):
         attachment.file.delete(save=False)
     messages = old.count()

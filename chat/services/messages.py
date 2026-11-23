@@ -19,6 +19,14 @@ MAX_PER_MESSAGE = 10
 MAX_PAGE = 100
 
 
+def changed_since(conversation, changed_after, *, up_to=None):
+    """Messages whose reactions or deletion changed after ``changed_after`` (older than the polled ``after`` cursor, so never also in ``messages``)."""
+    qs = conversation.messages.select_related("author").filter(modified__gt=changed_after)
+    if up_to is not None:
+        qs = qs.filter(seq__lte=up_to)
+    return list(qs.order_by("seq")[:MAX_PAGE])
+
+
 def history(conversation, *, after=None, before=None, limit=50):
     """``(messages ascending by seq, has_more_before)``. No cursor: the latest ``limit``. Never touches read state."""
     limit = max(1, min(int(limit or 50), MAX_PAGE))
@@ -169,6 +177,7 @@ def toggle_reaction(me, user, message_id, emoji) -> Message:
     deleted, _ = MessageReaction.objects.filter(message=message, member=me, emoji=emoji).delete()
     if not deleted:
         MessageReaction.objects.create(message=message, member=me, emoji=emoji)
+    Message.objects.filter(pk=message.pk).update(modified=timezone.now())  # shows up in ``changed`` of the polls
     return message
 
 

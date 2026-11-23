@@ -4,10 +4,12 @@ Open to every signed-in person with a member record (players and parents too, so
 ``chat`` feature gate answers 404 when the club does not have it. Polling: ``GET /conversations`` for the list and
 ``GET /conversations/{id}/messages?after=<seq>`` for new messages; neither changes read state, ``POST .../read`` does."""
 
+import datetime
 import uuid
 from typing import Literal
 
 from django.db.models import Q
+from django.utils import timezone
 from ninja import File, Router, Schema, UploadedFile
 from ninja.errors import HttpError
 
@@ -146,11 +148,17 @@ def remove_participant(request, conversation_id: uuid.UUID, member_id: uuid.UUID
 
 
 @router.get("/conversations/{conversation_id}/messages", response=dict, summary="Messages, ascending by seq (poll with after=<seq>)", operation_id="chat_messages")
-def list_messages(request, conversation_id: uuid.UUID, after: int | None = None, before: int | None = None, limit: int = 50):
+def list_messages(request, conversation_id: uuid.UUID, after: int | None = None, before: int | None = None, limit: int = 50, changed_after: datetime.datetime | None = None):
+    """With ``changed_after`` (the ``server_time`` of the previous poll) the answer also has ``changed``: messages up to ``after`` whose
+    reactions or deletion changed since then, to replace in the client's list. ``server_time`` is always returned."""
     _user, me = gate(request)
     conversation, _mine = load(me, conversation_id)
+    now = timezone.now()
     rows, more = messages.history(conversation, after=after, before=before, limit=limit)
-    return {"messages": present.messages_out(rows, me, conversation), "conversation": present.conversation_out(conversation, me), "has_more_before": more}
+    out = {"messages": present.messages_out(rows, me, conversation), "conversation": present.conversation_out(conversation, me), "has_more_before": more, "server_time": now}
+    if changed_after is not None:
+        out["changed"] = present.messages_out(messages.changed_since(conversation, changed_after, up_to=after), me, conversation)
+    return out
 
 
 @router.post("/conversations/{conversation_id}/messages", response={200: dict, 201: dict}, summary="Post a message (idempotent on client_key)", operation_id="chat_message_send")

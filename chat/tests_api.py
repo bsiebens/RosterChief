@@ -195,6 +195,33 @@ class MessageTests(ChatTestBase):
         self.assertEqual(self.post("stranger", f"/conversations/{self.cid}/read", {"seq": 99}).json()["unread_total"], 0)
         self.assertEqual(self.get("p2", "/conversations").json()["unread_total"], 0)  # my own messages are read
 
+    def test_changed_after_returns_reactions_and_deletions_on_older_messages(self):
+        first = self.say("p2", self.cid, "one").json()["id"]
+        self.say("p2", self.cid, "two")
+        url = f"/conversations/{self.cid}/messages"
+        stamp = self.get("stranger", f"{url}?after=2&changed_after=2000-01-01T00:00:00Z").json()
+        self.assertEqual(stamp["messages"], [])
+        poll = stamp["server_time"]
+        self.post("plain", f"/messages/{first}/reactions", {"emoji": "🙏"})
+        self.say("p2", self.cid, "three")
+        doc = self.get("stranger", f"{url}?after=2&changed_after={poll}").json()
+        self.assertEqual([m["seq"] for m in doc["messages"]], [3])
+        self.assertEqual([m["id"] for m in doc["changed"]], [first])
+        self.assertEqual(doc["changed"][0]["reactions"][0]["emoji"], "🙏")
+        self.assertNotIn("changed", self.get("stranger", f"{url}?after=2").json())
+
+    def test_portal_access_exposes_chat_enabled(self):
+        from django.test import Client
+
+        from controlpanel.tests import login_session
+
+        def flag():
+            return Client().get("/api/v1/portal/access", HTTP_HOST=self.host, HTTP_X_SESSION_TOKEN=login_session(self.users["parent"])).json()["chat_enabled"]
+
+        self.assertTrue(flag())
+        self.features = WITHOUT
+        self.assertFalse(flag())
+
     def test_muted_chats_do_not_count_in_the_total(self):
         self.say("p2", self.cid)
         self.call("stranger", "patch", f"/conversations/{self.cid}", {"muted": True})

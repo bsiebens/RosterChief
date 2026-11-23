@@ -28,7 +28,6 @@ WITHOUT = Entitlements({})
 
 class ChatTestBase(TestCase):
     CLUB = "Chat FC"
-    SLUG_KEYS = ("coach", "p1", "p2", "parent", "stranger", "mod", "announcer", "plain")
 
     @classmethod
     def setUpClass(cls):
@@ -63,6 +62,7 @@ class ChatTestBase(TestCase):
             cls.m = {
                 "coach": make("coach", "Carl", "Coach", datetime.date(1980, 1, 1)),
                 "p1": make("p1", "Pia", "Player", today.replace(year=today.year - 12)),
+                "p3": make("p3", "Pip", "Player", today.replace(year=today.year - 11)),
                 "p2": make("p2", "Paul", "Player", datetime.date(1999, 5, 5)),
                 "parent": make("parent", "Pat", "Parent", datetime.date(1982, 2, 2)),
                 "stranger": make("stranger", "Sam", "Stranger", datetime.date(1990, 3, 3)),
@@ -76,6 +76,7 @@ class ChatTestBase(TestCase):
             family = Family.objects.create(name="Player")
             FamilyMembership.objects.create(family=family, member=cls.m["parent"], role=FamilyMembership.FamilyRole.PARENT)
             FamilyMembership.objects.create(family=family, member=cls.m["p1"], role=FamilyMembership.FamilyRole.CHILD)
+            FamilyMembership.objects.create(family=family, member=cls.m["p3"], role=FamilyMembership.FamilyRole.CHILD)
             roles = {"mod": create_role("Chat moderator", ["chat.moderate"]), "announcer": create_role("Chat announcer", ["chat.announce"])}
         for key, member in cls.m.items():
             user, _ = grant_login(cls.club, member)
