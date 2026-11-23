@@ -822,6 +822,21 @@ class TournamentApiTests(TestCase):
         self.assertEqual(theirs, ["Lunch is at 12:00"])  # one team never sees another team's thread
         self.assertEqual(self.as_("operate", "post", f"/{t.pk}/messages/{rid}", {"body": ""}).status_code, 422)
 
+    def test_events_follow_the_clock_direction(self):
+        t = self.make(status="in_progress")
+        a, b = self.foreign(t, "Alpha"), self.foreign(t, "Bravo")
+        stage = TournamentStage.objects.create(tournament=t, name="RR", format="round_robin")
+        m = Match.objects.create(stage=stage, round_number=1, sequence=0, home_team=a, away_team=b, status=Match.Status.COMPLETE, score_home=0, score_away=0)
+        for minute, second in ((4, 11), (12, 0), (8, 0)):  # entered in a mixed order
+            MatchEvent.objects.create(match=m, type="timeout", side="home", minute=minute, second=second)
+        times = lambda: [(e["minute"], e["second"]) for e in self.call("get", f"/{t.slug}/matches/{m.pk}", prefix="/public/tournaments").json()["periods"][0]["events"]]  # noqa: E731
+        t.clock_direction = "down"
+        t.save()
+        self.assertEqual(times(), [(12, 0), (8, 0), (4, 11)])  # time left: the most time left happened first
+        t.clock_direction = "up"
+        t.save()
+        self.assertEqual(times(), [(4, 11), (8, 0), (12, 0)])
+
     def test_public_endpoints_are_404_without_feature(self):
         t = self.make(status="published")
         self.features = Entitlements({})

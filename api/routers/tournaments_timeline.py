@@ -116,6 +116,14 @@ def delete_attribute(request, tournament_id: uuid.UUID, attribute_id: uuid.UUID)
 NEUTRAL_TYPES = (MatchEvent.Type.OTHER,)
 
 
+def chronological(match) -> list[MatchEvent]:
+    """The events of a match in the order they happened. The clock either counts up (earliest first) or down (time left: the most time
+    left came first), so the sort follows the tournament's clock direction; events without a time keep their entry order after the timed ones."""
+    rows = list(match.events.select_related("player_entry").all())
+    down = match.stage.tournament.clock_direction == "down"
+    return sorted(rows, key=lambda e: (e.minute is None, 0 if e.minute is None else (-1 if down else 1) * ((e.minute or 0) * 60 + (e.second or 0)), e.created))
+
+
 def event_out(event: MatchEvent) -> dict:
     d = event.details or {}
     return {
@@ -232,7 +240,7 @@ def events(request, match_id: uuid.UUID):
     tie = [match] if match.leg_number is None else sorted([m for m in [match.leg_of, *match.leg_of.first_legs.all()] if m is not None] if match.leg_of_id else [match, *match.first_legs.all()], key=lambda m: m.leg_number or 0)
     legs = [{"id": m.pk, "leg": m.leg_number, "status": m.status, "score_home": m.score_home, "score_away": m.score_away} for m in tie] if match.leg_number is not None else []
     return {
-        "legs": legs, "match": c.match_out(match), "events": [event_out(e) for e in match.events.select_related("player_entry").all()],
+        "legs": legs, "match": c.match_out(match), "events": [event_out(e) for e in chronological(match)],
         "sport": {"slug": sport.slug, "name": sport.name} if sport else None, "ice_hockey": hockey,
         "penalty_codes": [{"code": code, "name": name} for code, name in ICE_HOCKEY_PENALTIES] if hockey else [], "penalty_lengths": PENALTY_LENGTHS if hockey else [],
         "rosters": {"home": _roster(match.home_team), "away": _roster(match.away_team)},

@@ -23,7 +23,7 @@ from api.routers import tournaments_common as c
 from api.routers.public_registration import _address, _count, _too_many
 from api.routers.tournaments_competition import stages_doc, standings_doc
 from api.routers.tournaments_roster import check_birth_date, check_position, lunch_days_for
-from api.routers.tournaments_timeline import event_out
+from api.routers.tournaments_timeline import chronological, event_out
 from api.routers.web_push import _valid_keys
 from api.schemas_tournaments import PlayerRowIn, PlayersIn, PublicRegistrationIn
 from members.services.errors import Invalid
@@ -207,7 +207,7 @@ def game(request, slug: str, match_id: str):
     by_id = {m.pk: m for m in legs}
     return {
         "tournament": item(t), "ice_hockey": is_ice_hockey(getattr(connection.tenant, "sport", None)), "clock_direction": t.clock_direction,
-        "periods": [{"match": d, "events": [event_out(e) for e in by_id[d["id"]].events.select_related("player_entry").all()]} for d in docs],
+        "periods": [{"match": d, "events": [event_out(e) for e in chronological(by_id[d["id"]])]} for d in docs],
     }  # fmt: skip
 
 
