@@ -211,6 +211,17 @@ export function groupParticipants(list: Participant[]): { role: ChatRole; people
 	return order.map((role) => ({ role, people: list.filter((p) => p.person.role === role).sort((a, b) => a.person.name.localeCompare(b.person.name)) })).filter((g) => g.people.length);
 }
 
+/** The bubble of a message that is still on its way looks like one of mine; its role colour comes from my latest sent message. */
+export function pendingToMessage(p: PendingMessage, me: Person): Message {
+	return { id: `pending-${p.key}`, seq: Number.MAX_SAFE_INTEGER, author: me, body: p.body, attachments: p.attachments, created: p.created, edited: null, deleted: false, mine: true, urgent: p.urgent, reactions: [], client_key: p.key };
+}
+
+/** My own person, taken from my latest message (the API has no "me" for chat); a neutral one before I have posted. */
+export function myPerson(messages: Message[]): Person {
+	for (let i = messages.length - 1; i >= 0; i--) if (messages[i].mine) return messages[i].author;
+	return { member_id: '', name: '', role: 'other', role_label: '', photo_url: null };
+}
+
 export function splitName(name: string): { first: string; last: string } {
 	const parts = name.trim().split(/\s+/);
 	return { first: parts[0] ?? '', last: parts.length > 1 ? parts[parts.length - 1] : '' };
