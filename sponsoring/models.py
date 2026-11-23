@@ -26,6 +26,9 @@ class Sponsor(UUIDModel):
     url = models.URLField(_("URL"), blank=True)
     start_date = models.DateField(_("start date"), default=timezone.localdate)
     end_date = models.DateField(_("end date"), null=True, blank=True)
+    #: Set by the daily job when an installment stayed unpaid past the agreement's grace period; cleared when the arrears are paid. A suspended
+    #: sponsor is not active (not shown in the app or on public pages) although its dates still run.
+    suspended_at = models.DateTimeField(_("suspended at"), null=True, blank=True, editable=False)
 
     class Meta:
         verbose_name = _("sponsor")
@@ -52,4 +55,44 @@ class Sponsor(UUIDModel):
     @classmethod
     def active(cls, today=None):
         today = today or timezone.localdate()
-        return cls.objects.filter(start_date__lte=today).filter(Q(end_date__isnull=True) | Q(end_date__gte=today))
+        return cls.objects.filter(start_date__lte=today, suspended_at__isnull=True).filter(Q(end_date__isnull=True) | Q(end_date__gte=today))
+
+
+class SponsorAgreement(UUIDModel):
+    """What a sponsor pays: the contact it is invoiced at, the fixed-date installments (``SponsorInstallment``) and the grace period."""
+
+    sponsor = models.OneToOneField(Sponsor, on_delete=models.CASCADE, related_name="agreement")
+    contact_name = models.CharField(_("contact name"), max_length=150)
+    contact_email = models.EmailField(_("contact email"))
+    #: What the invoices say, for example "Sponsorship 2026-27"; the sponsor's name and the installment number are added.
+    description = models.CharField(_("description"), max_length=150, blank=True)
+    #: Each installment is invoiced this many days before its date.
+    lead_days = models.PositiveSmallIntegerField(_("invoice days before the date"), default=30)
+    #: The sponsor becomes inactive when an installment is unpaid more than this many days past its date.
+    grace_days = models.PositiveSmallIntegerField(_("grace period in days"), default=14)
+    #: The login-less member the invoices are addressed to (made from the contact); reset when the contact changes.
+    payer = models.ForeignKey("members.Member", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+
+    class Meta:
+        verbose_name = _("sponsor agreement")
+        verbose_name_plural = _("sponsor agreements")
+
+    def __str__(self):
+        return f"{self.sponsor}"
+
+
+class SponsorInstallment(UUIDModel):
+    """One payment of an agreement, due on a fixed date. Its invoice is a shop charge (``order``); its status follows that order's payments."""
+
+    agreement = models.ForeignKey(SponsorAgreement, on_delete=models.CASCADE, related_name="installments")
+    due_date = models.DateField(_("due date"))
+    amount = models.DecimalField(_("amount"), max_digits=10, decimal_places=2)
+    order = models.ForeignKey("shop.Order", on_delete=models.SET_NULL, null=True, blank=True, related_name="sponsor_installments")
+
+    class Meta:
+        verbose_name = _("sponsor installment")
+        verbose_name_plural = _("sponsor installments")
+        ordering = ["due_date", "created"]
+
+    def __str__(self):
+        return f"{self.agreement} {self.due_date}"

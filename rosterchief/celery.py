@@ -49,5 +49,6 @@ app.conf.beat_schedule = {
     "tournaments-invoice-due-balances": {"task": "tournaments.invoice_due_balances", "schedule": crontab(hour=7, minute=0)},  # daily: balance invoices of guest teams a week before the tournament
     "chat-sync-team-chats": {"task": "chat.sync_team_chats", "schedule": crontab(hour=2, minute=45)},  # nightly: team chat participants follow the rosters
     "chat-apply-retention": {"task": "chat.apply_retention", "schedule": crontab(hour=3, minute=15)},  # nightly: messages older than the retention go
+    "sponsoring-run-billing": {"task": "sponsoring.run_billing", "schedule": crontab(hour=7, minute=15)},  # daily: sponsor installments invoiced a lead time before their date, sponsors past their grace period made inactive
     "billing-archive-overdue": {"task": "billing.archive_overdue_clubs", "schedule": crontab(hour=6, minute=0)},
 }

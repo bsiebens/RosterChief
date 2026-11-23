@@ -68,23 +68,32 @@ def _people(viewer):
 
 
 def _charges(people):
-    """Sent, not cancelled charge invoices (a fine, a late fee) written for the viewer or a child they manage, newest first, with what was paid."""
+    """Sent, not cancelled invoices of the shop (an order with an invoice) and of charges (a fine, a late fee, a tournament fee) written for the viewer or a child
+    they manage, newest first, with what was paid. One list, so the open amounts of the Payments tab and Home agree."""
     paid = Coalesce(Sum("payments__amount", filter=Q(payments__status=Payment.PaymentStatus.CONFIRMED)), Value(Decimal("0")), output_field=DecimalField())
     return (
-        Order.objects.filter(kind=Order.Kind.CHARGE, purchaser_id__in=people, invoice__isnull=False)
-        .exclude(fulfillment_status=Order.FulfillmentStatus.CANCELLED)
-        .select_related("invoice").prefetch_related("lines").annotate(paid=paid).order_by("-invoice__issued_at")
+        Order.objects.filter(kind__in=[Order.Kind.CHARGE, Order.Kind.SHOP], purchaser_id__in=people, invoice__isnull=False)
+        .exclude(fulfillment_status=Order.FulfillmentStatus.CANCELLED).exclude(payment_status=Order.PaymentStatus.REFUNDED)
+        .select_related("invoice").prefetch_related("lines__product").annotate(paid=paid).order_by("-invoice__issued_at")
     )  # fmt: skip
+
+
+def _open_and_recent_charges(people, recent=20):
+    """Every invoice still owed (never cut off, however old) plus the latest paid ones."""
+    today = timezone.localdate()
+    open_rows = [_charge(order, today) for order in _charges(people).filter(payment_status__in=[Order.PaymentStatus.PENDING, Order.PaymentStatus.PARTIALLY_PAID])]
+    paid_rows = [_charge(order, today) for order in _charges(people).exclude(payment_status__in=[Order.PaymentStatus.PENDING, Order.PaymentStatus.PARTIALLY_PAID])[:recent]]
+    return open_rows + paid_rows
 
 
 def _charge(order, today):
     lines = list(order.lines.all())
-    summary = lines[0].description if lines else ""
+    summary = (lines[0].description or lines[0].product.name) if lines else ""
     if len(lines) > 1:
         summary = f"{summary} +{len(lines) - 1}"
     invoice = order.invoice
     return {
-        "id": order.pk, "number": invoice.number, "member_id": order.purchaser_id, "summary": summary, "total": str(order.total), "paid": str(order.paid),
+        "id": order.pk, "kind": order.kind, "number": invoice.number, "member_id": order.purchaser_id, "summary": summary, "total": str(order.total), "paid": str(order.paid),
         "due": str(max(Decimal("0"), order.total - order.paid)), "due_date": invoice.due_date, "status": charge_svc.status_for(order, invoice, today),
     }  # fmt: skip
 
@@ -270,7 +279,7 @@ def portal_home(request):
             for fee in fees
         ],
         "invoices": [{"id": invoice.pk, "number": invoice.invoice_number, "due": invoice.invoice_due_date} for invoice in invoices],
-        "charges": [_charge(order, timezone.localdate()) for order in _charges(people)[:20]],
+        "charges": _open_and_recent_charges(people),
         "payment_instructions": request.tenant.payment_instructions or "",
         "payments": sorted(
             ({"id": payment.pk, "member_id": fee.member_id, "season": fee.season.name, "amount": str(payment.amount), "method": payment.method, "paid_at": payment.paid_at} for fee in fees for payment in fee.payments.all()),

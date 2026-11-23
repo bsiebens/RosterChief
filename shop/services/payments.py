@@ -49,7 +49,7 @@ def sync_payment_status(order) -> None:
 
 
 def _tell_tournaments(order) -> None:
-    """A tournament team's payment status follows its invoices: tell the tournaments app that this order changed (never breaks a payment)."""
+    """A tournament team's payment status and a sponsor's standing follow their invoices: tell those apps that this order changed (never breaks a payment)."""
     try:
         from tournaments.services import billing
 
@@ -58,6 +58,14 @@ def _tell_tournaments(order) -> None:
         import logging
 
         logging.getLogger(__name__).exception("shop.tournament_sync_failed")
+    try:
+        from sponsoring import billing as sponsor_billing
+
+        sponsor_billing.on_order_changed(order)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("shop.sponsor_sync_failed")
 
 
 def _open_order(order) -> None:

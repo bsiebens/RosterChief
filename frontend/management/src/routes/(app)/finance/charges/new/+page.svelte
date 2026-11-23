@@ -12,6 +12,9 @@
 	let { data, form } = $props();
 
 	let memberId = $state('');
+	let outside = $state(false);
+	let payerName = $state('');
+	let payerEmail = $state('');
 	let lines = $state<LineDraft[]>([newLine()]);
 	let dueDate = $state('');
 	let notes = $state('');
@@ -21,10 +24,10 @@
 	let busy = $state(false);
 	let leaving = $state(false);
 
-	const dirty = $derived(!!memberId || !!notes || !!invoiceText || !!paymentInstructions || !!dueDate || lines.some((l) => l.description || l.unit_price));
+	const dirty = $derived(!!memberId || !!payerName || !!payerEmail || !!notes || !!invoiceText || !!paymentInstructions || !!dueDate || lines.some((l) => l.description || l.unit_price));
 	const payload = $derived(
 		JSON.stringify({
-			member_id: memberId,
+			...(outside ? { payer: { name: payerName.trim(), email: payerEmail.trim() } } : { member_id: memberId }),
 			lines: lines.map((l) => ({ description: l.description.trim(), quantity: Number(l.quantity) || 0, unit_price: String(l.unit_price) })),
 			due_date: dueDate || null,
 			notes,
@@ -32,7 +35,7 @@
 			payment_instructions: paymentInstructions
 		})
 	);
-	const complete = $derived(!!memberId && lines.every((l) => l.description.trim() && lineTotal(l) > 0));
+	const complete = $derived((outside ? !!payerName.trim() && payerEmail.includes('@') : !!memberId) && lines.every((l) => l.description.trim() && lineTotal(l) > 0));
 	const failure = $derived(form && 'op' in form ? String(form.message || t('common.error.generic')) : '');
 	const errors = $derived<Record<string, string>>(form && 'fields' in form ? ((form.fields as Record<string, string>) ?? {}) : {});
 
@@ -79,7 +82,7 @@
 	{#if failure}<Alert kind="error" title={t('chg.d.failed')}>{failure}</Alert>{/if}
 	<div class="grid items-start gap-5 xl:grid-cols-3">
 		<div class="xl:col-span-2">
-			<ChargeForm bind:memberId bind:lines bind:dueDate bind:notes bind:invoiceText bind:paymentInstructions defaultInstructions={data.defaultInstructions} {errors} {tried} />
+			<ChargeForm bind:memberId bind:outside bind:payerName bind:payerEmail allowOutside bind:lines bind:dueDate bind:notes bind:invoiceText bind:paymentInstructions defaultInstructions={data.defaultInstructions} {errors} {tried} />
 		</div>
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20">
 			<section class="card card-body card-hl gap-3">

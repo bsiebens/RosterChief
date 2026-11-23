@@ -31,9 +31,9 @@
 			});
 		// Finance: registrations waiting for review plus invoices with something still open; the Finance entry shows both added up.
 		if (me.can_manage_finance)
-			Promise.all([get('/api/v1/registrations?status=awaiting&limit=1'), get('/api/v1/registrations?status=confirmed&payment=open&limit=1'), get('/api/v1/finance/open-members?limit=1')]).then(([a, o, m]) => {
+			Promise.all([get('/api/v1/registrations?status=awaiting&limit=1'), get('/api/v1/registrations?status=confirmed&payment=open&limit=1'), get('/api/v1/finance/open-members?limit=1'), get('/api/v1/finance/invoices?type=orders&status=open&limit=1')]).then(([a, o, m, x]) => {
 				counts.registrations = a?.awaiting_count ?? 0;
-				counts.payments = (o?.count ?? 0) + (m?.count ?? 0);
+				counts.payments = (o?.count ?? 0) + (m?.count ?? 0) + (x?.count ?? 0);
 				counts.finance = counts.registrations + counts.payments;
 			});
 	});
