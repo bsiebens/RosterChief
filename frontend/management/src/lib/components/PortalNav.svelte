@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { ChartColumn, HandHeart, UserRound, Wallet, Bell } from '@lucide/svelte';
+	import { chatList } from '#lib/chat.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { activePortalKey, ME_PAGES, ME_PHONE_PAGES, portalItems, portalPhoneItems, type PortalMode } from '#lib/portal-nav.ts';
 
-	let { mode, compact = false, shopEnabled = false }: { mode: PortalMode; compact?: boolean; shopEnabled?: boolean } = $props();
-	const items = $derived(compact ? portalPhoneItems(mode, shopEnabled) : portalItems(mode, shopEnabled));
+	let { mode, compact = false, shopEnabled = false, chatEnabled = false }: { mode: PortalMode; compact?: boolean; shopEnabled?: boolean; chatEnabled?: boolean } = $props();
+	const items = $derived(compact ? portalPhoneItems(mode, shopEnabled, chatEnabled) : portalItems(mode, shopEnabled, chatEnabled));
 	const active = $derived(activePortalKey(page.url));
 	const meActive = $derived((compact ? ME_PHONE_PAGES : ME_PAGES).includes(active));
 	// The count on Me (forms and payments waiting for the family). The numbers come from the Home data, which only some pages load, so the last
@@ -29,6 +30,10 @@
 		<a class="{compact ? 'portal-tab' : 'nav-item'} {selected ? 'active' : ''}" href={item.href} aria-current={selected ? 'page' : undefined}>
 			<item.icon size={compact ? 21 : 17} class="shrink-0" aria-hidden="true" />
 			{t(item.label)}
+			{#if item.key === 'chat' && chatList.unreadTotal > 0}
+				{#if compact}<span class="portal-tab-badge" aria-label={t('chat.unread_badge', { n: chatList.unreadTotal })}>{chatList.unreadTotal > 99 ? '99+' : chatList.unreadTotal}</span>
+				{:else}<span class="ml-auto rounded-full bg-sidebar-chip px-1.5 font-mono text-[10px] leading-4 font-bold text-sidebar-fg" aria-label={t('chat.unread_badge', { n: chatList.unreadTotal })}>{chatList.unreadTotal > 99 ? '99+' : chatList.unreadTotal}</span>{/if}
+			{/if}
 			{#if compact && item.key === 'me' && todo > 0}<span class="portal-tab-badge" aria-label={t('portal.todo_count', { n: todo })}>{todo}</span>{/if}
 		</a>
 		{#if !compact && item.key === 'me' && meActive}

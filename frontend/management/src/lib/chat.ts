@@ -96,6 +96,14 @@ export function chatEnabled(me: { features: string[]; can_use_chat?: boolean } |
 	return !!me && me.features.includes('chat') && me.can_use_chat === true;
 }
 
+/**
+ * Which kinds of chat the "New chat" dialog offers. Staff-side screens offer all three; the member app only offers direct chats unless
+ * the person may announce (the API still has the last word and answers with an error otherwise).
+ */
+export function chatKinds(me: { is_club_admin?: boolean; can_announce_chat?: boolean } | null | undefined, staffSide: boolean): ConversationKind[] {
+	return staffSide || me?.is_club_admin || me?.can_announce_chat ? ['team', 'group', 'direct'] : ['direct'];
+}
+
 // ---- messages ------------------------------------------------------------------------------------------------
 
 /** Merge incoming messages into the list: same id replaces, result ascending by seq. */
