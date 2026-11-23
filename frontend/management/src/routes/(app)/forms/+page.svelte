@@ -122,7 +122,7 @@
 										{#if f.is_active}<a class="btn btn-outline btn-xs gap-1" href={sendFormHref(f.id)} aria-label={t('forms.send_named', { title: f.title })}><Send size={13} /> <span class="sr-only xl:not-sr-only">{t('forms.send')}</span></a>{/if}
 										<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('forms.duplicate_named', { title: f.title })} onclick={() => askDuplicate(f)}><Copy size={13} /></button>
 										<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('forms.delete_named', { title: f.title })} onclick={() => askDelete(f)}><Trash2 size={13} /></button>
-										<a class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-rule hover:text-ink" href={formHref(f.id)} aria-label={t('forms.edit_named', { title: f.title })} title={t('common.edit')}><ChevronRight size={18} /></a>
+										<a class="btn btn-ghost btn-xs btn-square" href={formHref(f.id)} aria-label={t('forms.edit_named', { title: f.title })} title={t('common.edit')}><ChevronRight size={16} /></a>
 									</div>
 								</td>
 							</tr>

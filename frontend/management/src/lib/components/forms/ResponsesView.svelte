@@ -87,7 +87,7 @@
 										{/if}
 									</td>
 								{/each}
-								<td class="text-right"><button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('forms.resp.delete_named', { name: who(r) })} onclick={() => ((target = r), (open = true))}><Trash2 size={13} /></button></td>
+								<td class="text-right"><div class="flex items-center justify-end gap-1"><button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('forms.resp.delete_named', { name: who(r) })} onclick={() => ((target = r), (open = true))}><Trash2 size={13} /></button></div></td>
 							</tr>
 						{/each}
 					</tbody>

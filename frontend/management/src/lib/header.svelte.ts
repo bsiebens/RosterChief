@@ -6,9 +6,12 @@ import type { Snippet } from 'svelte';
  * The (app) layout renders `header`; pages call `usePageHeader(() => ({ title, context, actions }))` in their script.
  * `actions` is a snippet (buttons) rendered right-aligned in the bar. The header is cleared when the page is destroyed.
  */
+/** A link back to the parent list, shown next to the bell (set by a layout, not by each page). */
+export type HeaderBack = { href: string; label: string };
 export type PageHeader = { title: string; context?: string; /** A pill shown right behind the context line. */ badge?: Snippet | null; actions?: Snippet | null };
 
 export const header = $state<PageHeader>({ title: '', context: '', badge: null, actions: null });
+export const headerBack = $state<{ link: HeaderBack | null }>({ link: null });
 
 export function usePageHeader(get: () => PageHeader) {
 	$effect(() => {

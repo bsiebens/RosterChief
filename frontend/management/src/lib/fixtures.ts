@@ -68,6 +68,9 @@ export type FixturePreview = {
 };
 export type FixtureImportResult = { created: number; updated: number; deleted: number; opponents_created: number; locations_created: number; sources: FixtureSource[] };
 
+export type FixtureGames = { deletable: number; played: number; with_data: number };
+export type FixtureGamesDeleted = { deleted: number; kept_played: number; kept_with_data: number };
+
 export type Check = {
 	rescheduled: { game_id: string; old_start: string; new_start: string }[];
 	new_games: { game_id: string; start: string; opponent_name: string }[];

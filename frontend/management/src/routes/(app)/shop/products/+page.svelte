@@ -125,7 +125,7 @@
 									<td class="text-right whitespace-nowrap">
 										<div class="flex justify-end gap-1">
 											<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('shop.product.delete_named', { name: p.name })} onclick={() => ((target = p), (delOpen = true))}><Trash2 size={13} /></button>
-											<a class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-rule hover:text-ink" href={productHref(p.id)} aria-label={t('shop.product.edit_named', { name: p.name })} title={t('common.edit')}><ChevronRight size={18} /></a>
+											<a class="btn btn-ghost btn-xs btn-square" href={productHref(p.id)} aria-label={t('shop.product.edit_named', { name: p.name })} title={t('common.edit')}><ChevronRight size={16} /></a>
 										</div>
 									</td>
 								</tr>
@@ -156,8 +156,8 @@
 							<span class="flex items-center gap-1">
 								<span class="font-mono text-xs text-muted">{c.product_count}</span>
 								<!-- The system categories keep both buttons, disabled, with the reason as a tooltip and for screen readers. -->
-								<button class="btn btn-ghost btn-xs btn-square" type="button" aria-label={t('common.edit')} aria-describedby={c.is_system ? `sys-${c.id}` : undefined} disabled={c.is_system} title={c.is_system ? t('shop.cat.system_reason') : undefined} onclick={() => askCat(c)}><Pencil size={13} /></button>
-								<button class="btn btn-ghost btn-xs btn-square {c.is_system ? '' : 'text-error'}" type="button" aria-label={t('common.delete')} aria-describedby={c.is_system ? `sys-${c.id}` : undefined} disabled={c.is_system} title={c.is_system ? t('shop.cat.system_reason') : undefined} onclick={() => ((cat = c), (catDelOpen = true))}><Trash2 size={13} /></button>
+								<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('common.edit')} aria-describedby={c.is_system ? `sys-${c.id}` : undefined} disabled={c.is_system} title={c.is_system ? t('shop.cat.system_reason') : undefined} onclick={() => askCat(c)}><Pencil size={13} /></button>
+								<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('common.delete')} aria-describedby={c.is_system ? `sys-${c.id}` : undefined} disabled={c.is_system} title={c.is_system ? t('shop.cat.system_reason') : undefined} onclick={() => ((cat = c), (catDelOpen = true))}><Trash2 size={13} /></button>
 								{#if c.is_system}<span id="sys-{c.id}" class="sr-only">{t('shop.cat.system_reason')}</span>{/if}
 							</span>
 						</li>

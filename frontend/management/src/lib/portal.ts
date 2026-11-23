@@ -132,6 +132,8 @@ export type OpenTask = { id: string; event_id: string; event_title: string; star
 export type GameSheetRow = { time: string; type: string; ours: boolean | null; team: string; icon: string; kind: string; who: string; detail: string; tag: string; score: string; serious: boolean };
 export type GameSheetPlayer = { pos: string; number: number | null; name: string; member_id?: string | null; photo_url?: string | null; initials: string; goals?: number; assists?: number; penalty_minutes?: number };
 export type GameSheet = {
+	/** False when we are the away team: the scoreboard then puts the opponent on the left. */
+	is_home?: boolean;
 	ours_label: string;
 	theirs_label: string;
 	score: string;

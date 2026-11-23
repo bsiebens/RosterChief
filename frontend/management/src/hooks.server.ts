@@ -65,7 +65,7 @@ async function resolveAuth(event: Event, mode: HostMode): Promise<{ auth: AuthSt
 			const portal = await backendFetch(event, `${API_PREFIX}portal/access`, { session: true }).catch(() => null);
 			if (portal?.ok) {
 				const info = await portal.json().catch(() => null);
-				return { auth: { status: 'authenticated', user, me: null, memberShopEnabled: info?.shop_enabled === true }, myClubs: [] };
+				return { auth: { status: 'authenticated', user, me: null, memberShopEnabled: info?.shop_enabled === true, memberChatEnabled: info?.chat_enabled === true }, myClubs: [] };
 			}
 		}
 		return { auth: { status: code === 'mfa_required' ? 'mfa_enrollment_required' : 'no_access', user }, myClubs: [] };

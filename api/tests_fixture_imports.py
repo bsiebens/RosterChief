@@ -386,6 +386,85 @@ class FixtureImportsApiTests(FixtureApiTestBase):
         self.assertTrue(AuditEntry.objects.filter(action="events.fixture_source_removed").exists())
         self.assertEqual(self.call("delete", f"{self.path}/{source_id}").status_code, 404)
 
+    # -- remove together with the unplayed games --
+
+    def _delete_setup(self):
+        """Five imported games (upcoming, past, scored, with an answer, upcoming) + a manual game + another team's import."""
+        from events.models import Attendance, Event
+        from teams.models import Team
+
+        self.import_rows([rbihf_row("1", days=5), rbihf_row("2", days=6), rbihf_row("3", days=7), rbihf_row("4", days=8), rbihf_row("5", days=9)])
+        games = {e.external_game_id: e for e in Event.objects.filter(external_game_id__in=["1", "2", "3", "4", "5"])}
+        Event.objects.filter(pk=games["2"].pk).update(start=timezone.now() - timedelta(days=2))
+        Event.objects.filter(pk=games["3"].pk).update(score_for=2, score_against=1)
+        Attendance.objects.create(event=games["4"], member=self.coach, status="present")
+        manual = Event.objects.create(title="Own game", kind=Event.EventKind.GAME, start=timezone.now() + timedelta(days=3))
+        manual.teams.add(self.team)
+        other = Team.objects.create(name="Other Team", short_name="OT")
+        self.import_rows([rbihf_row("1", days=5)], team=other)
+        self.store(team=other)
+        source_id = fixture_previews.entry_id(self.store())
+        return games, manual, other, source_id
+
+    def test_remove_with_games_deletes_only_unplayed_games_of_that_source(self):
+        from events.models import Event
+
+        _games, manual, other, source_id = self._delete_setup()
+        self.assertEqual(self.call("get", f"{self.path}/{source_id}/games").json(), {"deletable": 2, "played": 2, "with_data": 1})
+
+        response = self.call("delete", f"{self.path}/{source_id}?delete_games=true")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"deleted": 2, "kept_played": 2, "kept_with_data": 1})
+        self.assertEqual(self.stored(), [])
+        self.assertEqual(set(Event.objects.filter(teams=self.team).values_list("external_game_id", flat=True)), {"2", "3", "4", ""})
+        self.assertTrue(Event.objects.filter(pk=manual.pk).exists())
+        self.assertEqual(Event.objects.filter(teams=other).count(), 1)
+        self.assertEqual(len(self.stored(other)), 1)
+        self.assertEqual(AuditEntry.objects.filter(action="event.deleted").count(), 2)
+        self.assertTrue(AuditEntry.objects.filter(action="events.fixture_source_removed").exists())
+
+    def test_remove_with_games_needs_the_settings_permission_and_changes_nothing_otherwise(self):
+        from events.models import Event
+
+        _games, _manual, _other, source_id = self._delete_setup()
+        before = Event.objects.count()
+
+        self.assertEqual(self.call("delete", f"{self.path}/{source_id}?delete_games=true", self.coach_user).status_code, 403)
+        self.assertEqual(self.call("get", f"{self.path}/{source_id}/games", self.coach_user).status_code, 403)
+
+        self.assertEqual(Event.objects.count(), before)
+        self.assertEqual(len(self.stored()), 1)
+
+    def test_delete_team_with_games_removes_unplayed_games_of_its_sources(self):
+        from events.models import Event
+        from teams.models import Team
+
+        _games, manual, other, _source_id = self._delete_setup()
+        StaffAssignment.objects.filter(team=self.team).delete()
+
+        self.assertEqual(self.call("get", f"/teams/{self.team.pk}/fixture-games").json(), {"deletable": 2, "played": 2, "with_data": 1})
+        self.assertEqual(self.call("delete", f"/teams/{self.team.pk}?delete_games=true", self.coach_user).status_code, 403)
+        response = self.call("delete", f"/teams/{self.team.pk}?delete_games=true")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"deleted": 2, "kept_played": 2, "kept_with_data": 1})
+        self.assertFalse(Team.objects.filter(pk=self.team.pk).exists())
+        self.assertEqual(set(Event.objects.filter(external_game_id__in=["1", "2", "3", "4", "5"]).exclude(teams=other).values_list("external_game_id", flat=True)), {"2", "3", "4"})
+        self.assertTrue(Event.objects.filter(pk=manual.pk).exists())
+        self.assertEqual(Event.objects.filter(teams=other).count(), 1)
+
+    def test_delete_team_without_games_keeps_every_game(self):
+        from events.models import Event
+
+        _games, _manual, _other, _source_id = self._delete_setup()
+        StaffAssignment.objects.filter(team=self.team).delete()
+        before = Event.objects.count()
+
+        self.assertEqual(self.call("delete", f"/teams/{self.team.pk}").status_code, 204)
+
+        self.assertEqual(Event.objects.count(), before)
+
     # -- standings --
 
     def test_standings_need_the_rbihf_feature(self):

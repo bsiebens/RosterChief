@@ -24,6 +24,7 @@ event's teams). Audit actions: ``lineup.created``, ``lineup.published``, ``lineu
 
 from django.db import connection, transaction
 from django.db.models import F, Q
+from django.dispatch import Signal
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django_tenants.utils import get_public_schema_name, get_tenant_model
@@ -177,6 +178,11 @@ def _pickable_ids(lineup) -> set:
     return {member_id for member_id in _roster(lineup) if statuses.get(member_id, Attendance.AttendanceStatus.NO_RESPONSE) not in UNAVAILABLE_STATUSES}
 
 
+#: Sent after a line-up's picks changed (``lineup`` keyword), for code elsewhere that mirrors them, such as a tournament's home-team roster.
+#: A signal rather than a call because the picks are written in bulk, which sends no model signals.
+lineup_changed = Signal()
+
+
 @transaction.atomic
 def toggle_selection(actor, lineup, member) -> bool:
     """Flip ``member``'s pick. Returns the new state (True = now selected). Picking needs an available roster player;
@@ -185,10 +191,12 @@ def toggle_selection(actor, lineup, member) -> bool:
     Lineup.objects.select_for_update().filter(pk=lineup.pk).first()
     deleted, _details = LineupSelection.objects.filter(lineup=lineup, member=member).delete()
     if deleted:
+        lineup_changed.send(sender=Lineup, lineup=lineup)
         return False
     if member.pk not in _pickable_ids(lineup):
         _fail("member_id", "This player cannot be selected: not on the team's roster or not available.")
     LineupSelection.objects.create(lineup=lineup, member=member)
+    lineup_changed.send(sender=Lineup, lineup=lineup)
     return True
 
 
@@ -217,6 +225,7 @@ def set_selection(actor, lineup, member_ids, slots=None) -> set:
         LineupSlotAssignment.objects.bulk_create([LineupSlotAssignment(lineup=lineup, member_id=member_id, slot=slot) for slot, member_id in assigned.items()])
         if before != assigned:
             audit.record(actor, "lineup.slots_changed", target=lineup, changes={"slots": {slot: str(member_id) for slot, member_id in sorted(assigned.items())}})
+    lineup_changed.send(sender=Lineup, lineup=lineup)
     return wanted
 
 

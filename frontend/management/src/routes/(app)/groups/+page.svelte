@@ -78,7 +78,7 @@
 							<tr class="hover:bg-paper">
 								<td class="font-semibold"><a class="link" href="/groups/{g.id}">{g.name}</a></td>
 								<td class="text-right font-mono text-xs">{g.member_count}</td>
-								<td class="text-right"><a class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-rule hover:text-ink" href="/groups/{g.id}" aria-label={t('groups.edit_named', { name: g.name })} title={t('common.edit')}><ChevronRight size={18} /></a></td>
+								<td class="text-right"><div class="flex items-center justify-end gap-1"><a class="btn btn-ghost btn-xs btn-square" href="/groups/{g.id}" aria-label={t('groups.edit_named', { name: g.name })} title={t('common.edit')}><ChevronRight size={16} /></a></div></td>
 							</tr>
 						{/each}
 					</tbody>

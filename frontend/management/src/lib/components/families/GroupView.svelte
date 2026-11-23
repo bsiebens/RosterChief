@@ -81,10 +81,10 @@
 						</td>
 						<td>
 							<div class="flex items-center justify-end gap-1.5">
-								{#if data.me?.can_manage_members}<a class="btn btn-outline btn-xs gap-1" href="/members/{m.member_id}/edit" aria-label={t('families.detail.edit_named', { name })}><Pencil size={13} /> {t('common.edit')}</a>{/if}
+								{#if data.me?.can_manage_members}<a class="btn btn-outline btn-xs btn-square" href="/members/{m.member_id}/edit" aria-label={t('families.detail.edit_named', { name })} title={t('common.edit')}><Pencil size={13} /></a>{/if}
 								<form method="POST" action="?/removeMember" use:enhance={submit()}>
 									<input type="hidden" name="member_id" value={m.member_id} />
-									{#if group.can_manage_members}<button class="btn btn-outline btn-error btn-xs gap-1" type="submit" disabled={busy} aria-label={t('groups.remove_named', { name })}><UserMinus size={13} /> {t('families.remove')}</button>{/if}
+									{#if group.can_manage_members}<button class="btn btn-outline btn-error btn-xs btn-square" type="submit" disabled={busy} aria-label={t('groups.remove_named', { name })} title={t('families.remove')}><UserMinus size={13} /></button>{/if}
 								</form>
 							</div>
 						</td>

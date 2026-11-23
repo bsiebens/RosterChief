@@ -92,22 +92,24 @@
 								</form>
 							</td>
 							<td>
-								<div class="flex flex-wrap items-center justify-end gap-1.5">
+								<div class="flex flex-wrap items-center justify-end gap-1">
 									{#if !m.has_login}
 										<button class="btn btn-outline btn-xs gap-1" type="button" aria-label={t('families.detail.grant_named', { name })} onclick={() => (grantTarget = { id: m.member_id, name, email: m.email ?? '' })}><KeyRound size={13} /> {t('families.detail.grant_login')}</button>
 									{/if}
-									<a class="btn btn-outline btn-xs gap-1" href="/members/{m.member_id}/edit" aria-label={t('families.detail.edit_named', { name })}><Pencil size={13} /> {t('common.edit')}</a>
+									<a class="btn btn-outline btn-xs btn-square" href="/members/{m.member_id}/edit" aria-label={t('families.detail.edit_named', { name })} title={t('common.edit')}><Pencil size={13} /></a>
 									<form method="POST" action="?/removeMember" use:enhance={submit()}>
 										<input type="hidden" name="member_id" value={m.member_id} />
-										<button class="btn btn-outline btn-error btn-xs gap-1" type="submit" disabled={busy} aria-label={t('families.remove_person', { name })}><UserMinus size={13} /> {t('families.remove')}</button>
+										<button class="btn btn-outline btn-error btn-xs btn-square" type="submit" disabled={busy} aria-label={t('families.remove_person', { name })} title={t('families.remove')}><UserMinus size={13} /></button>
 									</form>
 									<button
-										class="btn btn-outline btn-error btn-xs gap-1"
+										class="btn btn-outline btn-error btn-xs btn-square"
 										type="button"
+										aria-label={t('families.detail.delete_person')}
+										title={t('families.detail.delete_person')}
 										onclick={() => {
 											toDelete = { id: m.member_id, name, has_login: !!m.has_login };
 											deletePersonOpen = true;
-										}}><Trash2 size={13} /> {t('families.detail.delete_person')}</button>
+										}}><Trash2 size={13} /></button>
 								</div>
 							</td>
 						</tr>

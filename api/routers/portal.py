@@ -68,23 +68,32 @@ def _people(viewer):
 
 
 def _charges(people):
-    """Sent, not cancelled charge invoices (a fine, a late fee) written for the viewer or a child they manage, newest first, with what was paid."""
+    """Sent, not cancelled invoices of the shop (an order with an invoice) and of charges (a fine, a late fee, a tournament fee) written for the viewer or a child
+    they manage, newest first, with what was paid. One list, so the open amounts of the Payments tab and Home agree."""
     paid = Coalesce(Sum("payments__amount", filter=Q(payments__status=Payment.PaymentStatus.CONFIRMED)), Value(Decimal("0")), output_field=DecimalField())
     return (
-        Order.objects.filter(kind=Order.Kind.CHARGE, purchaser_id__in=people, invoice__isnull=False)
-        .exclude(fulfillment_status=Order.FulfillmentStatus.CANCELLED)
-        .select_related("invoice").prefetch_related("lines").annotate(paid=paid).order_by("-invoice__issued_at")
+        Order.objects.filter(kind__in=[Order.Kind.CHARGE, Order.Kind.SHOP], purchaser_id__in=people, invoice__isnull=False)
+        .exclude(fulfillment_status=Order.FulfillmentStatus.CANCELLED).exclude(payment_status=Order.PaymentStatus.REFUNDED)
+        .select_related("invoice").prefetch_related("lines__product").annotate(paid=paid).order_by("-invoice__issued_at")
     )  # fmt: skip
+
+
+def _open_and_recent_charges(people, recent=20):
+    """Every invoice still owed (never cut off, however old) plus the latest paid ones."""
+    today = timezone.localdate()
+    open_rows = [_charge(order, today) for order in _charges(people).filter(payment_status__in=[Order.PaymentStatus.PENDING, Order.PaymentStatus.PARTIALLY_PAID])]
+    paid_rows = [_charge(order, today) for order in _charges(people).exclude(payment_status__in=[Order.PaymentStatus.PENDING, Order.PaymentStatus.PARTIALLY_PAID])[:recent]]
+    return open_rows + paid_rows
 
 
 def _charge(order, today):
     lines = list(order.lines.all())
-    summary = lines[0].description if lines else ""
+    summary = (lines[0].description or lines[0].product.name) if lines else ""
     if len(lines) > 1:
         summary = f"{summary} +{len(lines) - 1}"
     invoice = order.invoice
     return {
-        "id": order.pk, "number": invoice.number, "member_id": order.purchaser_id, "summary": summary, "total": str(order.total), "paid": str(order.paid),
+        "id": order.pk, "kind": order.kind, "number": invoice.number, "member_id": order.purchaser_id, "summary": summary, "total": str(order.total), "paid": str(order.paid),
         "due": str(max(Decimal("0"), order.total - order.paid)), "due_date": invoice.due_date, "status": charge_svc.status_for(order, invoice, today),
     }  # fmt: skip
 
@@ -199,10 +208,15 @@ def _shop_visible(request) -> bool:
     return request.features.has("shop") and is_shop_open()
 
 
+def _chat_visible(request) -> bool:
+    """The member app shows Chat while the club has the feature (the viewer has a member record by the time they get here)."""
+    return request.features.has("chat")
+
+
 @router.get("/access")
 def portal_access(request):
     _viewer(request)
-    return {"can_manage": access.can_access_management(request.user), "shop_enabled": _shop_visible(request)}
+    return {"can_manage": access.can_access_management(request.user), "shop_enabled": _shop_visible(request), "chat_enabled": _chat_visible(request)}
 
 
 @router.get("/home")
@@ -238,6 +252,7 @@ def portal_home(request):
         "viewer": viewer.pk,
         **_home_branding(request, timezone.localdate(now)),
         "shop_enabled": _shop_visible(request),
+        "chat_enabled": _chat_visible(request),
         "people": [{"id": member.pk, "name": str(member), "first_name": member.first_name, "photo_url": member.photo_url} for member in people.values()],
         "events": sorted(
             [_attendance(row, blockers.get(row.pk), counts) for row in events] + _requirement_rows(people, events, now),
@@ -264,7 +279,7 @@ def portal_home(request):
             for fee in fees
         ],
         "invoices": [{"id": invoice.pk, "number": invoice.invoice_number, "due": invoice.invoice_due_date} for invoice in invoices],
-        "charges": [_charge(order, timezone.localdate()) for order in _charges(people)[:20]],
+        "charges": _open_and_recent_charges(people),
         "payment_instructions": request.tenant.payment_instructions or "",
         "payments": sorted(
             ({"id": payment.pk, "member_id": fee.member_id, "season": fee.season.name, "amount": str(payment.amount), "method": payment.method, "paid_at": payment.paid_at} for fee in fees for payment in fee.payments.all()),
@@ -439,7 +454,7 @@ def _visible_event(request, event_id):
         raise HttpError(404, "Not found.")
     people = _people(viewer)
     in_audience = Attendance.objects.filter(event=event, member_id__in=people).exists()
-    if not in_audience and not any(offer.event_id == event.pk for offer in officiating_invitations.opportunities(people, now=timezone.now())):
+    if not in_audience and not any(offer.event.pk == event.pk for offer in officiating_invitations.opportunities(people, now=timezone.now())):
         raise HttpError(404, "Not found.")
     return viewer, people, event, in_audience
 

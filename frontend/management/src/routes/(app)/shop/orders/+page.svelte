@@ -122,7 +122,7 @@
 								<td class="hidden text-right font-mono text-sm lg:table-cell">{money(o.total)}</td>
 								<td class="text-right font-mono text-sm {Number(o.amount_due) > 0 && o.fulfillment_status !== 'cancelled' ? 'font-semibold text-warn-text' : 'text-muted'}">{o.fulfillment_status === 'cancelled' ? '' : money(o.amount_due)}</td>
 								<td class="hidden font-mono text-xs whitespace-nowrap text-muted xl:table-cell">{day(o.created)}</td>
-								<td class="text-right"><a class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-rule hover:text-ink" href={orderHref(o.id)} aria-label={o.number} title={o.number}><ChevronRight size={18} /></a></td>
+								<td class="text-right"><div class="flex items-center justify-end gap-1"><a class="btn btn-ghost btn-xs btn-square" href={orderHref(o.id)} aria-label={o.number} title={o.number}><ChevronRight size={16} /></a></div></td>
 							</tr>
 						{/each}
 					</tbody>

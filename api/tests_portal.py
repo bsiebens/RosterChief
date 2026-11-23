@@ -97,6 +97,21 @@ class ParentPortalTests(TestCase):
         denied = self.call("get", "/portal/home", login_session(self.outsider))
         self.assertIn(denied.status_code, (401, 403))
 
+    def test_a_phone_registers_its_push_token_and_removes_it_on_sign_out(self):
+        from notifications.models import PushDevice
+
+        token = login_session(self.parent)
+        body = {"installation_id": "ios-1", "platform": "ios", "environment": "sandbox", "push_token": "abc123", "app_version": "1.2", "locale": "nl"}
+        r = self.call("put", "/devices", token, body)
+        self.assertEqual((r.status_code, r.json()["enabled"]), (200, True), r.content)
+        self.assertEqual(self.call("put", "/devices", token, {**body, "push_token": "def456"}).status_code, 200)  # a new token for the same installation
+        self.assertEqual(PushDevice.objects.filter(installation_id="ios-1").count(), 1)
+        self.assertEqual(PushDevice.objects.get(installation_id="ios-1").push_token, "def456")
+        self.assertEqual(self.call("get", "/devices/ios-1", token).status_code, 200)
+        self.assertEqual(self.call("put", "/devices", token, {**body, "platform": "windows"}).status_code, 400)
+        self.assertEqual(self.call("delete", "/devices/ios-1", token).status_code, 204)
+        self.assertEqual(self.call("get", "/devices/ios-1", token).status_code, 404)
+
     def test_web_push_subscription_belongs_to_club_and_user(self):
         token = login_session(self.parent)
         public = ec.generate_private_key(ec.SECP256R1()).public_key().public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
@@ -226,6 +241,14 @@ class PortalProfileTests(ParentPortalTests):
                 event.invited_members.add(self.child)
         after = count()
         self.assertLessEqual(after - before, 2, f"{before} lookups with 1 event, {after} with 11")
+
+    def test_an_event_the_family_is_not_invited_to_is_a_404_not_a_server_error(self):
+        from events.models import Event
+
+        token = self.token()
+        with schema_context(self.club.schema_name):
+            other = Event.objects.exclude(pk=self.child_reply.event_id).first() or Event.objects.create(title="Elsewhere", start=timezone.now(), end=timezone.now() + datetime.timedelta(hours=1))
+        self.assertEqual(self.call("get", f"/portal/events/{other.pk}", token).status_code, 404)  # it used to crash on the officiating check
 
     def test_event_extras_for_the_family_lineup_tasks_attachments_and_claiming(self):
         from django.core.files.base import ContentFile

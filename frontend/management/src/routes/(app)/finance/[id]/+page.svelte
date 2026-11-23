@@ -117,9 +117,9 @@
 									<td class="hidden text-right font-mono text-sm lg:table-cell">{money(l.amount_paid)}</td>
 									<td class="text-right font-mono text-sm font-semibold">{money(l.balance)}</td>
 									<td><span class="badge badge-sm {l.fee_status === 'paid' ? 'badge-success' : l.fee_status === 'partially_paid' ? 'badge-info' : l.fee_status === 'waived' ? 'badge-ghost' : 'badge-neutral'}">{t(`fin.fee.${l.fee_status}`)}</span></td>
-									<td class="text-right whitespace-nowrap">
+									<td class="text-right whitespace-nowrap"><div class="flex items-center justify-end gap-1">
 										{#if confirmed && Number(l.balance) > 0}<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => startPay(l.membership_id)} aria-label={t('fin.pay_for', { name: l.member.name })}><Banknote size={13} /> {t('fin.pay_person')}</button>{/if}
-									</td>
+									</div></td>
 								</tr>
 							{/each}
 						</tbody>
@@ -178,9 +178,9 @@
 										<td class="text-sm">{t(`fin.method.${p.method}`)}{#if p.voucher_number}<p class="font-mono text-xs text-muted">{p.voucher_number}</p>{/if}</td>
 										<td class="hidden text-xs text-muted lg:table-cell">{p.reference || '–'}{#if p.note}<p>{p.note}</p>{/if}</td>
 										<td class="hidden text-xs text-muted xl:table-cell">{p.recorded_by ?? '–'}</td>
-										<td class="text-right">
-											<button class="btn btn-outline btn-error btn-xs gap-1" type="button" onclick={() => { removing = p; removeOpen = true; }} aria-label={t('fin.delete_named', { amount: money(p.amount), name: p.member.name })}><Trash2 size={13} /> {t('fin.delete')}</button>
-										</td>
+										<td class="text-right"><div class="flex items-center justify-end gap-1">
+											<button class="btn btn-outline btn-error btn-xs btn-square" type="button" onclick={() => { removing = p; removeOpen = true; }} aria-label={t('fin.delete_named', { amount: money(p.amount), name: p.member.name })} title={t('fin.delete')}><Trash2 size={13} /></button>
+										</div></td>
 									</tr>
 								{/each}
 							</tbody>

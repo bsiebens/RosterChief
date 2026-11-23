@@ -87,12 +87,12 @@
 									</div>
 								</td>
 								<td class="text-right font-mono text-xs">{o.event_count}</td>
-								<td class="text-right whitespace-nowrap">
+								<td class="text-right whitespace-nowrap"><div class="flex items-center justify-end gap-1">
 									{#if manage}
-										<button class="btn btn-outline btn-xs gap-1" type="button" aria-label={t('opponents.edit_named', { name: o.name })} onclick={() => ((editing = o), (formOpen = true))}><Pencil size={13} /> {t('common.edit')}</button>
-										<button class="btn btn-outline btn-error btn-xs gap-1" type="button" aria-label={t('opponents.delete_named', { name: o.name })} onclick={() => ((deleting = o), (deleteOpen = true))}><Trash2 size={13} /> {t('common.delete')}</button>
+										<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('opponents.edit_named', { name: o.name })} onclick={() => ((editing = o), (formOpen = true))} title={t('common.edit')}><Pencil size={13} /></button>
+										<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('opponents.delete_named', { name: o.name })} onclick={() => ((deleting = o), (deleteOpen = true))} title={t('common.delete')}><Trash2 size={13} /></button>
 									{/if}
-								</td>
+								</div></td>
 							</tr>
 						{/each}
 					</tbody>

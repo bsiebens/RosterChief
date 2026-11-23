@@ -32,7 +32,7 @@ from teams.models import Team, TeamMembership
 router = Router(auth=[TokenAuth(door=False), CookieAuth(door=False)])
 
 # Categories a member can switch (the rest -- coach and admin -- belong to staff and are not shown here).
-MEMBER_CATEGORIES = [Category.NEWS, Category.EVENT, Category.REMINDER, Category.LINEUP, Category.CREW, Category.FORM, Category.SHOP, Category.ANNOUNCEMENT, Category.GAME, Category.GENERAL]
+MEMBER_CATEGORIES = [Category.NEWS, Category.EVENT, Category.REMINDER, Category.LINEUP, Category.CREW, Category.FORM, Category.SHOP, Category.ANNOUNCEMENT, Category.CHAT, Category.GAME, Category.GENERAL]
 
 
 class ProfileIn(Schema):

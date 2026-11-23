@@ -78,7 +78,7 @@
 									{#if i.is_overdue}<span class="badge badge-sm badge-error ml-1">{t('shop.invc.overdue')}</span>{/if}
 								</td>
 								<td class="text-right whitespace-nowrap">
-									<div class="flex flex-wrap justify-end gap-1">
+									<div class="flex flex-wrap items-center justify-end gap-1">
 										<a class="btn btn-outline btn-xs gap-1" href={invoicePdfHref(i.id)} download="{i.number}.pdf" target="_blank" rel="noopener"><FileDown size={13} /> {t('shop.invc.pdf')}</a>
 										<InvoiceRecreate invoiceId={i.id} size="xs" onoutcome={(o) => (outcomes[i.id] = o)} />
 										{#if data.canOrders}<a class="btn btn-outline btn-xs" href={orderHref(i.order.id)}>{t('shop.invc.open_order')}</a>{/if}

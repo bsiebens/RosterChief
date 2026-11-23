@@ -86,7 +86,7 @@
 								</td>
 								<td class="text-right font-mono text-sm font-bold {r.on_hand <= 0 ? 'text-error' : ''}">{r.on_hand}</td>
 								<td class="hidden text-right font-mono text-sm text-muted md:table-cell">{r.committed}</td>
-								<td class="text-right"><button class="btn btn-outline btn-xs gap-1" type="button" aria-label={t('shop.inv.adjust_named', { name: stockLabel(r) })} onclick={() => ask(r)}><SlidersHorizontal size={13} /> <span class="sr-only md:not-sr-only">{t('shop.inv.adjust')}</span></button></td>
+								<td class="text-right"><div class="flex items-center justify-end gap-1"><button class="btn btn-outline btn-xs gap-1" type="button" aria-label={t('shop.inv.adjust_named', { name: stockLabel(r) })} onclick={() => ask(r)}><SlidersHorizontal size={13} /> <span class="sr-only md:not-sr-only">{t('shop.inv.adjust')}</span></button></div></td>
 							</tr>
 						{/each}
 					</tbody>

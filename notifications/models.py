@@ -22,6 +22,7 @@ class Category(models.TextChoices):
     COACH = "coach", _("Coach")
     ADMIN = "admin", _("Admin")
     ANNOUNCEMENT = "announcement", _("Announcements")
+    CHAT = "chat", _("Chat")
     GAME = "game", _("Game moments")
     GENERAL = "general", _("General")
 

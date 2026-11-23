@@ -1,5 +1,6 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { api, type ApiCall } from '#lib/management-api.ts';
+import type { SponsorBilling } from '#lib/sponsor-billing.ts';
 import type { Actions, PageServerLoad } from './$types';
 
 type Sponsor = {
@@ -9,7 +10,8 @@ type Sponsor = {
 	logo_url: string | null;
 	start_date: string;
 	end_date: string | null;
-	status: 'active' | 'upcoming' | 'ended';
+	status: 'active' | 'upcoming' | 'ended' | 'suspended';
+	billing: SponsorBilling;
 };
 
 const endpoint = '/sponsor-management';

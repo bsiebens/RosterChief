@@ -1,5 +1,6 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { api } from '#lib/management-api.ts';
+import type { InvoiceList, TypeSummary } from '#lib/invoices.ts';
 import { PAYMENT_TABS, type FinanceSummary, type OpenMembers, type PaymentIn, type PaymentTab, type RegistrationList } from '#lib/registrations.ts';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -12,15 +13,24 @@ export const load: PageServerLoad = async ({ url, fetch, parent }) => {
 	const asked = url.searchParams.get('payment') as PaymentTab;
 	const payment: PaymentTab = PAYMENT_TABS.includes(asked) ? asked : 'open';
 	const offset = Math.max(0, parseInt(url.searchParams.get('offset') ?? '0', 10) || 0);
-	const [res, open, members, summary] = await Promise.all([
+	const [res, open, members, summary, orders] = await Promise.all([
 		api<RegistrationList>('GET', '/registrations', { query: { status: 'confirmed', payment: payment === 'all' ? undefined : payment, q, limit: PAGE_SIZE, offset: offset || undefined }, f: fetch }),
 		api<RegistrationList>('GET', '/registrations', { query: { status: 'confirmed', payment: 'open', limit: 1 }, f: fetch }),
 		// Members with a fee still open that did not come in through a registration (import, added by hand).
 		api<OpenMembers>('GET', '/finance/open-members', { query: { q, limit: 100 }, f: fetch }),
 		// Totals of all confirmed invoices; the row hides when this fails.
-		api<FinanceSummary>('GET', '/finance/summary', { f: fetch })
+		api<FinanceSummary>('GET', '/finance/summary', { f: fetch }),
+		// The other open invoices (charges such as tournament fees, shop orders): what the person may see of them, with the counts and amounts of each kind.
+		api<InvoiceList>('GET', '/finance/invoices', { query: { type: 'orders', status: payment === 'overdue' ? 'overdue' : 'open', q: q || undefined, limit: 50 }, f: fetch })
 	]);
-	return { totals: summary.ok ? (summary.data ?? null) : null, openMembers: members.data?.results ?? [], openMembersCount: members.data?.count ?? 0, vouchersEnabled: !!members.data?.vouchers_enabled, filters: { q, payment, offset }, rows: res.data?.results ?? [], count: res.data?.count ?? 0, openCount: open.data?.count ?? 0, pageSize: PAGE_SIZE, error: res.ok ? null : res.status };
+	// The summary also carries the registration kind, which the registrations list and /finance/summary already cover: only shop and charge are "other".
+	const { registration: _registrations, ...others } = orders.data?.summary ?? {};
+	const sums = Object.values(others) as TypeSummary[];
+	const add = (key: 'open' | 'overdue' | 'invoiced' | 'received', base: string) => String(sums.reduce((n, x) => n + Number(x[`${key}_amount` as keyof TypeSummary] ?? 0), Number(base)));
+	const ordersOpenCount = sums.reduce((n, x) => n + x.open, 0);
+	const base = summary.ok ? summary.data : null;
+	const totals = base ? { ...base, invoiced: add('invoiced', base.invoiced), received: add('received', base.received), open: add('open', base.open), overdue: add('overdue', base.overdue), overdue_count: base.overdue_count + sums.reduce((n, x) => n + x.overdue, 0) } : null;
+	return { totals, orderRows: orders.data?.results ?? [], ordersCount: orders.data?.count ?? 0, ordersOpenCount, openMembers: members.data?.results ?? [], openMembersCount: members.data?.count ?? 0, vouchersEnabled: !!members.data?.vouchers_enabled, filters: { q, payment, offset }, rows: res.data?.results ?? [], count: res.data?.count ?? 0, openCount: open.data?.count ?? 0, pageSize: PAGE_SIZE, error: res.ok ? null : res.status };
 };
 
 export const actions: Actions = {

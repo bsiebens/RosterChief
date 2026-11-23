@@ -12,10 +12,13 @@ is kept server-side between preview and import (``events.services.fixture_previe
 
 import uuid
 
+from django.db import transaction
 from ninja import File, Router, UploadedFile
 from ninja.errors import HttpError
 
 from api.schemas_fixture_imports import (
+    FixtureGamesDeletedOut,
+    FixtureGamesOut,
     FixtureImportIn,
     FixtureImportOut,
     FixturePreviewIn,
@@ -200,14 +203,42 @@ def recheck(request, team_id: uuid.UUID, source_id: str):
     return _recheck(request, team, entry)
 
 
-@teams_router.delete("/{team_id}/fixture-sources/{source_id}", response={204: None}, summary="Forget a stored fixture source; its games stay (settings permission)", operation_id="remove_fixture_source")
-def remove_source(request, team_id: uuid.UUID, source_id: str):
+@teams_router.get("/{team_id}/fixture-sources/{source_id}/games", response=FixtureGamesOut, summary="Count the games of a fixture source that deleting it with its games would remove or keep (settings permission)", operation_id="fixture_source_games")
+def source_games(request, team_id: uuid.UUID, source_id: str):
     team = _team(team_id)
     access.require_settings(request.user)
     entry = _entry(team, source_id)
-    import_sources.remove_entry(team, entry)
-    audit.record(request.user, "events.fixture_source_removed", target=team, changes={"source": entry["source"], "url": entry.get("url", ""), "season": entry.get("season_name", ""), "competition_label": entry.get("competition_label", "")})
-    return 204, None
+    return import_sources.game_counts(import_sources.linked_games(team, entry))
+
+
+@teams_router.get("/{team_id}/fixture-games", response=FixtureGamesOut, summary="Count the games of a team's fixture sources that deleting the team with them would remove or keep (settings permission)", operation_id="team_fixture_games")
+def team_games(request, team_id: uuid.UUID):
+    team = _team(team_id)
+    access.require_settings(request.user)
+    return import_sources.game_counts(import_sources.games_of_entries(team, import_sources.sources_for(team)))
+
+
+@teams_router.delete(
+    "/{team_id}/fixture-sources/{source_id}",
+    response={200: FixtureGamesDeletedOut, 204: None},
+    summary="Forget a stored fixture source; its games stay, or with delete_games its unplayed games go too (settings permission)",
+    operation_id="remove_fixture_source",
+)
+def remove_source(request, team_id: uuid.UUID, source_id: str, delete_games: bool = False):
+    """Without ``delete_games``: 204, every game stays (detached from the source). With it: 200 and, in one transaction,
+    every linked game that is still upcoming with nothing recorded on it is deleted (as the normal event delete does,
+    audited); played, live, scored and games with data stay. The counts come back."""
+    team = _team(team_id)
+    access.require_settings(request.user)
+    entry = _entry(team, source_id)
+    with transaction.atomic():
+        result = import_sources.delete_unplayed_games(request.user, list(import_sources.linked_games(team, entry))) if delete_games else None
+        import_sources.remove_entry(team, entry)
+        changes = {"source": entry["source"], "url": entry.get("url", ""), "season": entry.get("season_name", ""), "competition_label": entry.get("competition_label", "")}
+        if result is not None:
+            changes["games_deleted"] = result["deleted"]
+        audit.record(request.user, "events.fixture_source_removed", target=team, changes=changes)
+    return (200, result) if result is not None else (204, None)
 
 
 @teams_router.get("/{team_id}/standings", response=list[StandingsCompetitionOut], summary="A team's RBIHF league standings for a season (competition_rbihf feature)", operation_id="team_standings")

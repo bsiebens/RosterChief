@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { afterNavigate } from '$app/navigation';
-	import { Menu } from '@lucide/svelte';
-	import { header } from '#lib/header.svelte.ts';
+	import { ArrowLeft, Menu } from '@lucide/svelte';
+	import { header, headerBack } from '#lib/header.svelte.ts';
 	import AppSwitcher from '#lib/components/AppSwitcher.svelte';
 	import PhoneHeader from '#lib/components/mobile/PhoneHeader.svelte';
 	import PortalNav from '#lib/components/PortalNav.svelte';
@@ -13,6 +13,10 @@
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import NotificationBell from '#lib/components/NotificationBell.svelte';
 	import LangSwitcher from '#lib/components/LangSwitcher.svelte';
+	import { chatEnabled } from '#lib/chat.ts';
+	import { invalidateAll } from '$app/navigation';
+	import { isStandalone, pullRefresh } from '#lib/pull-refresh.ts';
+	import { chatList } from '#lib/chat.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 
 	import { page } from '$app/state';
@@ -31,6 +35,14 @@
 	const home = $derived(parent ? '/member' : coach ? '/coach' : '/');
 	const season = $derived(parent ? page.data.home?.season : page.data.coach?.season);
 	const shopEnabled = $derived(parent && (data.me ? data.shopOpen === true : a.status === 'authenticated' && a.memberShopEnabled === true));
+	// Chat: the nav entries and the unread badges (one shared list poller, started while the shell is open).
+	// a parent-only account has no `me`: the portal access answer says whether chat is on for it
+	/** Pull to refresh, only in the portal apps and only when installed (a browser has its own reload). */
+	function pullRefreshIf(node: HTMLElement, refresh: (() => Promise<unknown>) | null) {
+		return refresh && isStandalone() ? pullRefresh(node, refresh) : { destroy() {} };
+	}
+	const chatOn = $derived(chatEnabled(data.me) || (!data.me && a.status === 'authenticated' && a.memberChatEnabled === true));
+	$effect(() => (chatOn ? chatList.acquire() : undefined));
 	let navOpen = $state(false);
 	afterNavigate(() => { navOpen = false; });
 	// People with both a member side and a staff side land in the app they used last (see lib/landing.ts).
@@ -45,10 +57,10 @@
 <div class="flex min-h-screen bg-paper font-sans text-slate" class:portal-ui={!!portal} class:portal-coach={coach}>
 	{#if clubShell && club}
 		{#if portal}
-			<div class="hidden xl:block"><Sidebar me={data.me} branding={club} {email} {portal} {shopEnabled} /></div>
-			<div class="hidden md:block xl:hidden"><PortalRail me={data.me} branding={club} mode={portal} {shopEnabled} /></div>
+			<div class="hidden xl:block"><Sidebar me={data.me} branding={club} {email} {portal} {shopEnabled} chatEnabled={chatOn} /></div>
+			<div class="hidden md:block xl:hidden"><PortalRail me={data.me} branding={club} mode={portal} {shopEnabled} chatEnabled={chatOn} /></div>
 		{:else}
-			<div class="hidden lg:block"><Sidebar me={data.me} branding={club} {email} {portal} {shopEnabled} /></div>
+			<div class="hidden lg:block"><Sidebar me={data.me} branding={club} {email} {portal} {shopEnabled} chatEnabled={chatOn} /></div>
 		{/if}
 	{/if}
 
@@ -122,12 +134,13 @@
 				{/if}
 				{#snippet failed()}{/snippet}
 			</svelte:boundary>
+			{#if headerBack.link}<a class="btn btn-outline gap-2" href={headerBack.link.href}><ArrowLeft size={16} aria-hidden="true" /> {headerBack.link.label}</a>{/if}
 			{#if management}<NotificationBell />{/if}
 			{#if portal}<div class="hidden md:block"><NotificationBell {portal} /></div>{/if}
 			{#if !clubShell}<LangSwitcher /><AccountMenu {email} />{/if}
 		</header>
 
-		<main class="flex-1 {portal ? 'overflow-x-clip' : ''}">
+		<main class="flex-1 {portal ? 'overflow-x-clip' : ''}" use:pullRefreshIf={portal ? () => invalidateAll() : null}>
 			<div class="flex min-w-0 flex-col gap-4 px-3 py-4 sm:px-5 sm:py-5 {portal ? 'md:px-7 md:py-6' : 'lg:px-7 lg:py-6'}">
 				<!-- Keyed by path: on navigation the old page is torn down before it can be handed the next page's data (that
 				     briefly happens otherwise and crashes pages that read fields only their own data has: the 500 on going back). -->
@@ -138,7 +151,7 @@
 		</main>
 		{#if portal}
 			<div class="sticky bottom-0 z-20 md:hidden">
-				<PortalNav mode={portal} compact {shopEnabled} />
+				<PortalNav mode={portal} compact {shopEnabled} chatEnabled={chatOn} />
 			</div>
 		{/if}
 	</div>

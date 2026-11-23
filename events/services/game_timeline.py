@@ -284,10 +284,11 @@ def display_timeline(timeline: GameTimeline, event) -> dict:
         label = str(item.get("period") or "?")
         if not periods or periods[-1]["label"] != label:
             periods.append({"label": label, "title": _period_title(label), "score": period_scores.get(label, ""), "rows": []})
-        if item["type"] in _ROW_TYPES:
+        if item.get("type") in _ROW_TYPES:  # a stored event without a type is skipped, never a 500
             periods[-1]["rows"].append(_row(item, our_side=our_side, ours_label=ours_label, theirs_label=theirs_label))
     score = data.get("score") or {}
     return {
+        "is_home": our_side == "home",  # the scoreboard puts the home team on the left
         "ours_label": ours_label,
         "theirs_label": theirs_label,
         "score": f"{score.get(our_side, 0)}{EN_DASH}{score.get(their_side, 0)}" if score else "",

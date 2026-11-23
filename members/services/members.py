@@ -118,6 +118,9 @@ def delete_member(actor, member: Member, *, detach_login: bool = False, authoriz
     if FeePayment.objects.filter(membership__member=member).exists():
         raise Invalid("This person has recorded fee payments and cannot be deleted.")
     pk, label, had_login = member.pk, str(member), bool(member.user_id)
+    from chat.services import privacy  # what the person wrote in chats stays, without their name
+
+    privacy.anonymise_member(member)
     try:
         member.delete()
     except ProtectedError as e:

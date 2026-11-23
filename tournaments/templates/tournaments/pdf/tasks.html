@@ -1,0 +1,125 @@
+{% load i18n %}
+
+{% comment %}
+    Rendered by WeasyPrint (A4 landscape): the volunteer overview of a tournament. One page per day with a time axis and a row per task and
+    location -- every shift a coloured block on the axis with its volunteers, open places dashed -- and the same shifts as a list below.
+
+    Context: club, tournament, days (date, rows, ticks, list, open_slots, total_slots), titles (title, colour), task_count, open_slots,
+    total_slots, generated_at.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>{% blocktrans with name=tournament.name %}{{ name }} volunteers{% endblocktrans %}</title>
+        <style>
+            @page {
+                size: A4 landscape;
+                margin: 14mm 14mm 16mm;
+                @bottom-left { content: "{{ club.name }} — {{ tournament.name }}"; font-size: 8pt; color: #666; }
+                @bottom-right { content: counter(page) " / " counter(pages); font-size: 8pt; color: #666; }
+            }
+            body { font-family: sans-serif; font-size: 9pt; color: #111; }
+            h1 { font-size: 20pt; margin: 0; }
+            h2 { font-size: 13pt; margin: 0; }
+            .muted { color: #666; }
+            .header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #111; padding-bottom: 3mm; margin-bottom: 4mm; }
+            .day { page-break-after: always; }
+            .day:last-child { page-break-after: auto; }
+            .day-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 3mm; }
+            .pill { display: inline-block; border: 1px solid #ccc; border-radius: 3mm; padding: 0.5mm 2.5mm; font-size: 8pt; color: #444; margin-left: 2mm; }
+            .legend { margin: 0 0 3mm; }
+            .legend span { display: inline-block; margin-right: 4mm; font-size: 8pt; }
+            .swatch { display: inline-block; width: 3mm; height: 3mm; border-radius: 0.8mm; vertical-align: -0.5mm; margin-right: 1mm; border: 0.3mm solid; }
+
+            .chart { position: relative; margin-left: 42mm; margin-right: 8mm; border-left: 0.3mm solid #999; }
+            .axis { position: relative; height: 6mm; border-bottom: 0.3mm solid #999; }
+            .tick { position: absolute; top: 0; font-size: 7.5pt; color: #444; transform: translateX(-50%); }
+            .row { position: relative; border-bottom: 0.2mm solid #e5e5e5; }
+            .row-label { position: absolute; left: -42mm; width: 40mm; top: 0; bottom: 0; padding-right: 2mm; }
+            .row-label strong { display: block; font-size: 8.5pt; }
+            .row-label span { font-size: 7.5pt; color: #666; }
+            .gridline { position: absolute; top: 0; bottom: 0; border-left: 0.2mm solid #eee; }
+            .block { position: absolute; height: 13.5mm; border: 0.4mm solid; border-radius: 1.5mm; padding: 0.8mm 1.4mm; overflow: hidden; box-sizing: border-box; }
+            .block .time { font-size: 7pt; font-weight: bold; }
+            .block .names { font-size: 7pt; line-height: 1.2; }
+            .block.open { border-style: dashed; }
+            .block .count { float: right; font-size: 7pt; font-weight: bold; }
+
+            table { width: 100%; border-collapse: collapse; margin-top: 5mm; }
+            th { font-size: 7.5pt; color: #666; text-transform: uppercase; letter-spacing: 0.4pt; text-align: left; border-bottom: 0.4mm solid #999; padding: 1mm 2mm; }
+            td { padding: 1.2mm 2mm; border-bottom: 0.2mm solid #eee; vertical-align: top; }
+            td.time { white-space: nowrap; font-weight: bold; width: 28mm; }
+            td.num { width: 16mm; text-align: center; }
+            .dot { display: inline-block; width: 2.4mm; height: 2.4mm; border-radius: 50%; margin-right: 1.5mm; vertical-align: -0.2mm; }
+            .open-text { color: #b45309; font-style: italic; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div>
+                <h1>{{ tournament.name }}</h1>
+                <div class="muted">{% trans "Volunteer overview" %}</div>
+            </div>
+            <div class="muted" style="text-align: right;">
+                {% blocktrans with n=task_count open=open_slots total=total_slots %}{{ n }} shifts · {{ open }} of {{ total }} places open{% endblocktrans %}<br>
+                {% blocktrans with generated=generated_at|date:"j F Y, H:i" %}Generated {{ generated }}{% endblocktrans %}
+            </div>
+        </div>
+
+        {% if titles %}
+            <p class="legend">
+                {% for t in titles %}<span><i class="swatch" style="background: {{ t.colour.0 }}; border-color: {{ t.colour.1 }};"></i>{{ t.title }}</span>{% endfor %}
+                <span class="muted">{% trans "Dashed = places still open" %}</span>
+            </p>
+        {% endif %}
+
+        {% for day in days %}
+            <section class="day">
+                <div class="day-head">
+                    <h2>{{ day.date|date:"l j F Y" }}</h2>
+                    <div>
+                        <span class="pill">{% blocktrans with n=day.list|length %}{{ n }} shifts{% endblocktrans %}</span>
+                        <span class="pill">{% blocktrans with open=day.open_slots total=day.total_slots %}{{ open }} of {{ total }} places open{% endblocktrans %}</span>
+                    </div>
+                </div>
+
+                <div class="chart">
+                    <div class="axis">
+                        {% for tick in day.ticks %}<span class="tick" style="left: {{ tick.left }}%;">{{ tick.label }}</span>{% endfor %}
+                    </div>
+                    {% for row in day.rows %}
+                        <div class="row" style="height: {{ row.height_mm }}mm;">
+                            {% for tick in day.ticks %}<span class="gridline" style="left: {{ tick.left }}%;"></span>{% endfor %}
+                            <div class="row-label"><strong>{{ row.title }}</strong><span>{{ row.location|default:"—" }}</span></div>
+                            {% for b in row.blocks %}
+                                <div class="block{% if not b.full %} open{% endif %}" style="left: {{ b.left }}%; width: {{ b.width }}%; top: {% widthratio b.lane 1 15 %}mm; margin-top: 1mm; background: {{ b.colour.0 }}; border-color: {{ b.colour.1 }}; color: {{ b.colour.2 }};">
+                                    <span class="count">{{ b.claimed }}/{{ b.needed }}</span>
+                                    <div class="time">{{ b.start|date:"H:i" }}–{{ b.end|date:"H:i" }}</div>
+                                    <div class="names">{% if b.names %}{{ b.names|join:", " }}{% else %}<em>{% trans "Open" %}</em>{% endif %}</div>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% endfor %}
+                </div>
+
+                <table>
+                    <thead><tr><th>{% trans "Time" %}</th><th>{% trans "Task" %}</th><th>{% trans "Location" %}</th><th class="num">{% trans "Places" %}</th><th>{% trans "Volunteers" %}</th></tr></thead>
+                    <tbody>
+                        {% for b in day.list %}
+                            <tr>
+                                <td class="time">{{ b.start|date:"H:i" }}–{{ b.end|date:"H:i" }}</td>
+                                <td><i class="dot" style="background: {{ b.colour.1 }};"></i>{{ b.title }}</td>
+                                <td>{{ b.location|default:"—" }}</td>
+                                <td class="num">{{ b.claimed }}/{{ b.needed }}</td>
+                                <td>{% if b.names %}{{ b.names|join:", " }}{% endif %}{% if b.open %}{% if b.names %} · {% endif %}<span class="open-text">{% blocktrans count n=b.open %}{{ n }} open{% plural %}{{ n }} open{% endblocktrans %}</span>{% endif %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </section>
+        {% empty %}
+            <p class="muted">{% trans "No volunteer tasks yet." %}</p>
+        {% endfor %}
+    </body>
+</html>

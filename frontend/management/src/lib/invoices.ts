@@ -26,7 +26,7 @@ export type InvoiceRow = {
 	/** The screen of its own kind. */
 	href: string;
 };
-export type TypeSummary = { drafts: number; open: number; overdue: number; paid: number; cancelled: number; open_amount: string; overdue_amount: string };
+export type TypeSummary = { drafts: number; open: number; overdue: number; paid: number; cancelled: number; open_amount: string; overdue_amount: string; invoiced_amount: string; received_amount: string };
 export type InvoiceList = { count: number; results: InvoiceRow[]; types: InvoiceType[]; summary: Partial<Record<InvoiceType, TypeSummary>> };
 
 export const statusBadge = (s: InvoiceStatus): string => ({ draft: 'badge-neutral', open: 'badge-info', partially_paid: 'badge-warning', overdue: 'badge-error', paid: 'badge-success', cancelled: 'badge-neutral' })[s] ?? 'badge-neutral';

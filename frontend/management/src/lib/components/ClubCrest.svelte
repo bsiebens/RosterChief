@@ -14,11 +14,16 @@
 			.join('')
 			.toUpperCase() || '?'
 	);
+	let failed = $state(false); // a logo that does not load falls back to the initials
+	$effect(() => {
+		logoUrl;
+		failed = false;
+	});
 	const dim = $derived(`width:${size}px;height:${size}px`);
 </script>
 
-{#if logoUrl}
-	<img class="crest shrink-0 object-cover" style={dim} src={logoUrl} alt="" width={size} height={size} />
+{#if logoUrl && !failed}
+	<img class="crest shrink-0 object-cover" style={dim} src={logoUrl} alt="" width={size} height={size} onerror={() => (failed = true)} />
 {:else}
 	<span class="crest flex shrink-0 items-center justify-center bg-club" style="{dim};{bg ? `background:${bg};` : ''}">
 		<span class="font-display leading-none font-extrabold text-club-content" style="font-size:{Math.round(size / 3)}px;{fg ? `color:${fg};` : ''}">{initials}</span>

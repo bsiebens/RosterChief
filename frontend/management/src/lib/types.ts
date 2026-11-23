@@ -54,6 +54,13 @@ export type Me = {
 	can_manage_shop_orders: boolean;
 	can_manage_shop_discounts: boolean;
 	can_manage_shop_invoices: boolean;
+	/** Tournaments (false without the `tournaments` feature): manage = settings, registrations, payments; operate = teams, rosters, schedule, scores, tasks. Manage implies operate. */
+	can_manage_tournaments: boolean;
+	can_operate_tournaments: boolean;
+	/** Chat (absent or false without the `chat` feature): may use it, may moderate reports, may post in announcement chats. */
+	can_use_chat?: boolean;
+	can_moderate_chat?: boolean;
+	can_announce_chat?: boolean;
 	/** The shop's VAT setting: 'included' while shop prices contain VAT, otherwise 'off'. */
 	shop_vat_mode: string;
 	/** Teams where the user holds a management position this season: they may edit those teams. */
@@ -120,4 +127,4 @@ export type AuthState =
 	/** Club staff without a second factor: only the security screens work. */
 	| { status: 'mfa_enrollment_required'; user: User }
 	/** `me` is set in club mode; on the bare domain (platform mode) it is null and `locals.myClubs` is used instead. */
-	| { status: 'authenticated'; user: User; me: Me | null; memberShopEnabled?: boolean };
+	| { status: 'authenticated'; user: User; me: Me | null; memberShopEnabled?: boolean; memberChatEnabled?: boolean };

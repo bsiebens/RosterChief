@@ -1,6 +1,6 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { TeamAttendance } from '#lib/attendance.ts';
-import type { FixtureSources } from '#lib/fixtures.ts';
+import type { FixtureGames, FixtureSources } from '#lib/fixtures.ts';
 import { api } from '#lib/management-api.ts';
 import { loadPools, loadSeasons, strOrNull, teamBody, teamCall, text, intOrNull, type EligibleReferee, type Position, type TeamDetail, type TeamRow } from '#lib/teams/server.ts';
 import type { Actions, PageServerLoad } from './$types';
@@ -18,7 +18,7 @@ export type TeamNumbers = {
 export const load: PageServerLoad = async ({ params, url, fetch, parent }) => {
 	const { me } = (await parent()) as { me?: { features?: string[] } };
 	const season = url.searchParams.get('season') ?? '';
-	const [team, seasons, pools, positions, teams, numbers, attendance, referees, officials, fixtures] = await Promise.all([
+	const [team, seasons, pools, positions, teams, numbers, attendance, referees, officials, fixtures, fixtureGames] = await Promise.all([
 		api<TeamDetail>('GET', `/teams/${params.id}`, { query: { season }, f: fetch }),
 		loadSeasons(fetch),
 		loadPools(fetch),
@@ -31,10 +31,12 @@ export const load: PageServerLoad = async ({ params, url, fetch, parent }) => {
 		me?.features?.includes('referee_officials') ? api<EligibleReferee[]>('GET', `/teams/${params.id}/referees`, { f: fetch }) : Promise.resolve(null),
 		me?.features?.includes('referee_officials') ? api<EligibleReferee[]>('GET', `/teams/${params.id}/officials`, { f: fetch }) : Promise.resolve(null),
 		// The fixture import sources; a failure only hides the card's rows.
-		api<FixtureSources>('GET', `/teams/${params.id}/fixture-sources`, { f: fetch })
+		api<FixtureSources>('GET', `/teams/${params.id}/fixture-sources`, { f: fetch }),
+		// What deleting the team with its fixture games would do (settings holders only; otherwise null).
+		api<FixtureGames>('GET', `/teams/${params.id}/fixture-games`, { f: fetch })
 	]);
 	if (!team.ok) error(team.status === 404 ? 404 : team.status || 500);
-	return { team: team.data!, season, seasons, pools, positions: positions.data ?? [], teams: teams.data ?? [], numbers: numbers.ok ? (numbers.data ?? null) : null, attendance: attendance.ok ? (attendance.data ?? null) : null, referees: referees?.ok ? (referees.data ?? []) : null, officials: officials?.ok ? (officials.data ?? []) : null, fixtures: fixtures.ok ? (fixtures.data ?? null) : null };
+	return { team: team.data!, season, seasons, pools, positions: positions.data ?? [], teams: teams.data ?? [], numbers: numbers.ok ? (numbers.data ?? null) : null, attendance: attendance.ok ? (attendance.data ?? null) : null, referees: referees?.ok ? (referees.data ?? []) : null, officials: officials?.ok ? (officials.data ?? []) : null, fixtures: fixtures.ok ? (fixtures.data ?? null) : null, fixtureGames: fixtureGames.ok ? (fixtureGames.data ?? null) : null };
 };
 
 const flag = (form: FormData, k: string) => form.get(k) === 'on';
@@ -67,8 +69,9 @@ export const actions: Actions = {
 		const { failure } = await teamCall('photo', 'DELETE', `/teams/${params.id}/photo${url.searchParams.get('season') ? `?season=${url.searchParams.get('season')}` : ''}`, fetch);
 		return failure ?? { done: 'removePhoto' };
 	},
-	delete: async ({ params, fetch }) => {
-		const { failure } = await teamCall('delete', 'DELETE', `/teams/${params.id}`, fetch);
+	delete: async ({ request, params, fetch }) => {
+		const form = await request.formData();
+		const { failure } = await teamCall('delete', 'DELETE', `/teams/${params.id}${form.get('delete_games') === 'on' ? '?delete_games=true' : ''}`, fetch);
 		if (failure) return failure;
 		redirect(303, '/teams');
 	},

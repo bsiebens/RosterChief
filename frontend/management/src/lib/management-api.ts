@@ -30,12 +30,12 @@ export function withQuery(path: string, query?: Query): string {
 	return qs ? `${path}${path.includes('?') ? '&' : '?'}${qs}` : path;
 }
 
-export async function api<T = any>(method: string, path: string, opts: { body?: unknown; form?: FormData; query?: Query; f?: Fetch } = {}): Promise<ApiCall<T>> {
-	const { body, form, query, f = fetch } = opts;
+export async function api<T = any>(method: string, path: string, opts: { body?: unknown; form?: FormData; query?: Query; f?: Fetch; headers?: Record<string, string> } = {}): Promise<ApiCall<T>> {
+	const { body, form, query, f = fetch, headers: extra = {} } = opts;
 	try {
 		const res = await f(withQuery(`/api/v1${path}`, query), {
 			method,
-			headers: { accept: 'application/json', ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
+			headers: { accept: 'application/json', ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...extra },
 			body: form ?? (body !== undefined ? JSON.stringify(body) : undefined)
 		});
 		if (res.status === 204) return { ok: true, status: 204, fields: {} };

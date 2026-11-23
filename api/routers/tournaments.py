@@ -1,0 +1,449 @@
+"""``/tournaments``: tournaments, their registration queue and teams. Reading needs either tournament permission; settings, the queue
+and payments need ``tournaments.manage_tournaments``; entering a team by hand needs ``tournaments.operate_tournaments`` (the manage
+tier includes it). Permission (403) is checked before the ``tournaments`` feature (404). Rules live in ``tournaments.services``."""
+
+import logging
+import uuid
+
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
+from django.db import connection, transaction
+from django.db.models import Count, Q
+from ninja import Field, File, Router, Schema, UploadedFile
+
+from api.auth import AUTHENTICATORS
+from api.routers import tournaments_common as c
+from api.schemas_tournaments import DayIn, ManualTeamIn, PaymentIn, RejectIn, TournamentIn, TournamentPatch, WithdrawIn
+from events.models import Season
+from formbuilder.services.management import Conflict
+from members.services import access
+from members.services.errors import Invalid
+from teams.models import Team
+from tournaments.models import Tournament, TournamentDay, TournamentRegistration, TournamentTeam
+from tournaments.services import billing, notifications, team_access
+from tournaments.services import registration as svc
+from tournaments.sports import is_ice_hockey
+
+router = Router(auth=AUTHENTICATORS)
+
+SETTINGS = (
+    "name", "status", "registration_open", "max_teams", "earliest_birth_year", "latest_birth_year", "contact_email", "description", "deposit_amount", "entry_fee_amount",
+    "lunch_mode", "lunch_price_per_day", "lunch_billed_with_fee", "default_match_duration_minutes", "default_gap_minutes", "clock_direction",
+)  # fmt: skip
+
+
+def _money(value):
+    return None if value is None else f"{value:.2f}"
+
+
+def tournament_item(t: Tournament) -> dict:
+    return {
+        "id": t.pk, "slug": t.slug, "public_path": t.public_path, "name": t.name, "season": c.ref(t.season), "start_date": t.start_date, "end_date": t.end_date, "status": t.status,
+        "registration_open": t.registration_open, "max_teams": t.max_teams, "accepts_registrations": t.accepts_registrations,
+        "pending_registration_count": getattr(t, "pending_registration_count", None), "teams_in_count": getattr(t, "teams_in_count", None),
+    }  # fmt: skip
+
+
+def tournament_detail(t: Tournament, user) -> dict:
+    location = t.location
+    return {
+        **tournament_item(t),
+        "contact_email": t.contact_email, "description": t.description, "earliest_birth_year": t.earliest_birth_year, "latest_birth_year": t.latest_birth_year, "home_team": c.ref(t.home_team), "event_id": t.event_id,
+        "deposit_amount": _money(t.deposit_amount), "entry_fee_amount": _money(t.entry_fee_amount), "lunch_mode": t.lunch_mode, "lunch_price_per_day": _money(t.lunch_price_per_day),
+        "lunch_billed_with_fee": t.lunch_billed_with_fee, "default_match_duration_minutes": t.default_match_duration_minutes, "default_gap_minutes": t.default_gap_minutes,
+        "clock_direction": t.clock_direction, "ice_hockey": is_ice_hockey(getattr(connection.tenant, "sport", None)), "schedule_needs_regeneration": t.schedule_needs_regeneration,
+        "dates": t.date_range(), "days": c.days_out(t), "is_full": t.is_full, "location": c.ref(location),
+        "pending_registration_count": t.registrations.filter(status=TournamentRegistration.Status.PENDING).count(),
+        "teams_in_count": t.teams.filter(withdrawn_at__isnull=True).count(),
+        "unread_message_count": t.messages.filter(sender="team", read_by_organisers=False).count(),
+        "can_manage": access.can_manage_tournaments(user), "can_operate": access.can_operate_tournaments(user),
+    }  # fmt: skip
+
+
+def _day_rows(days: list[DayIn]) -> list[dict]:
+    """The submitted days, sorted, each date once and every day ending after it starts."""
+    rows = sorted(({"date": d.date, "starts_at": d.starts_at, "ends_at": d.ends_at} for d in days), key=lambda r: r["date"])
+    if len({r["date"] for r in rows}) != len(rows):
+        raise Invalid("Each date can only be added once.", {"days": ["Each date can only be added once."]})
+    if any(r["ends_at"] <= r["starts_at"] for r in rows):
+        raise Invalid("Every day must end after it starts.", {"days": ["Every day must end after it starts."]})
+    return rows
+
+
+def _save_days(t: Tournament, rows: list[dict]):
+    lunch = {d.date: (d.lunch_start, d.lunch_end) for d in t.days.all()}  # a day that stays keeps its lunch window
+    t.days.all().delete()
+    TournamentDay.objects.bulk_create([TournamentDay(tournament=t, **r, **dict(zip(("lunch_start", "lunch_end"), lunch.get(r["date"], (None, None)), strict=True))) for r in rows])
+
+
+def _season_for(start, end):
+    season = Season.objects.filter(start_date__lte=start, end_date__gte=end).first()
+    if season is None:
+        raise Invalid("No season covers that date range.", {"start_date": ["No season of this club covers that date range. Add a season that includes these dates first."]})
+    return season
+
+
+def _home_team(team_id):
+    if team_id is None:
+        return None
+    team = Team.objects.filter(pk=team_id).first()
+    if team is None:
+        raise Invalid("Unknown team.", {"home_team_id": ["Unknown team."]})
+    return team
+
+
+def _check_dates(t: Tournament):
+    if t.end_date < t.start_date:
+        raise Invalid("Must be on or after the start date.", {"end_date": ["Must be on or after the start date."]})
+    t.season = _season_for(t.start_date, t.end_date)
+
+
+def _after_save(t: Tournament, request, *, was_published: bool):
+    svc.ensure_home_team(t)
+    if not was_published and t.status == Tournament.Status.PUBLISHED:
+        notifications.dispatch_notify_tournament_shifts_open(str(t.pk))
+
+
+@router.get("", summary="Tournaments of the club", operation_id="tournaments_list")
+def list_tournaments(request, season: uuid.UUID | None = None, status: str | None = None):
+    c.gate_view(request)
+    qs = Tournament.objects.select_related("season").annotate(
+        pending_registration_count=Count("registrations", filter=Q(registrations__status=TournamentRegistration.Status.PENDING), distinct=True),
+        teams_in_count=Count("teams", filter=Q(teams__withdrawn_at__isnull=True), distinct=True),
+    )  # fmt: skip
+    if season is not None:
+        qs = qs.filter(season_id=season)
+    if status:
+        qs = qs.filter(status=status)
+    seasons = [c.ref(s) for s in Season.objects.order_by("-start_date")]
+    return {"results": [tournament_item(t) for t in qs], "seasons": seasons, "can_manage": access.can_manage_tournaments(request.user)}
+
+
+@router.post("", summary="Create a tournament", operation_id="tournaments_create", response={201: dict})
+def create_tournament(request, payload: TournamentIn):
+    c.gate_manage(request)
+    data = payload.dict()
+    days = _day_rows(payload.days)
+    data.pop("days")
+    home = _home_team(data.pop("home_team_id"))
+    t = Tournament(home_team=home, start_date=days[0]["date"], end_date=days[-1]["date"], **data)
+    _check_dates(t)
+    c.validate(t, exclude=["season"])
+    with transaction.atomic():
+        t.save()
+        _save_days(t, days)
+    _after_save(t, request, was_published=False)
+    return 201, tournament_detail(t, request.user)
+
+
+@router.get("/{tournament_id}", summary="One tournament with its settings", operation_id="tournaments_detail")
+def get_tournament(request, tournament_id: uuid.UUID):
+    c.gate_view(request)
+    return tournament_detail(c.get_tournament(tournament_id), request.user)
+
+
+@router.patch("/{tournament_id}", summary="Change a tournament's settings", operation_id="tournaments_update")
+def update_tournament(request, tournament_id: uuid.UUID, payload: TournamentPatch):
+    c.gate_manage(request)
+    t = c.get_tournament(tournament_id)
+    was_published = t.status == Tournament.Status.PUBLISHED
+    data = payload.dict(exclude_unset=True)
+    if "home_team_id" in data:
+        t.home_team = _home_team(data.pop("home_team_id"))
+    c.apply(t, {k: v for k, v in data.items() if k in SETTINGS})
+    days = _day_rows(payload.days) if payload.days is not None else None
+    if days is not None:
+        t.start_date, t.end_date = days[0]["date"], days[-1]["date"]
+    _check_dates(t)
+    c.validate(t, exclude=["season"])
+    with transaction.atomic():
+        t.save()
+        if days is not None:
+            _save_days(t, days)
+    _after_save(t, request, was_published=was_published)
+    return tournament_detail(c.get_tournament(t.pk), request.user)
+
+
+@router.delete("/{tournament_id}", summary="Delete a draft tournament (and the calendar event it created)", operation_id="tournaments_delete", response={204: None})
+def delete_tournament(request, tournament_id: uuid.UUID):
+    c.gate_manage(request)
+    t = c.get_tournament(tournament_id)
+    if t.status != Tournament.Status.DRAFT:
+        raise Conflict("Only a draft tournament can be deleted.", "not_draft")
+    with transaction.atomic():
+        event = t.event  # always the one ensure_home_team created: the API never links an event by hand
+        t.delete()
+        if event is not None:
+            event.delete()
+    return 204, None
+
+
+# --- registration queue -----------------------------------------------------------------------------------------------------
+
+_GROUP_ORDER = {TournamentRegistration.Status.APPROVED: 0, TournamentRegistration.Status.PENDING: 1, TournamentRegistration.Status.REJECTED: 2}
+
+
+def registration_out(r: TournamentRegistration, tournament: Tournament, *, oldest_pending=False) -> dict:
+    team = getattr(r, "tournament_team", None)
+    return {
+        "id": r.pk, "status": r.status, "name": r.display_name, "club_team": c.ref(r.team), "is_foreign": r.is_foreign, "contact_name": r.foreign_contact_name,
+        "contact_email": r.foreign_contact_email, "contact_phone": r.foreign_contact_phone, "primary_color": r.foreign_primary_color, "secondary_color": r.foreign_secondary_color,
+        "logo_url": c.url(r.foreign_logo), "rejection_reason": r.rejection_reason, "submitted_at": r.submitted_at, "reviewed_at": r.reviewed_at,
+        "tournament_team_id": team.pk if team is not None else None, "is_oldest_pending": oldest_pending,
+        "players": [c.person_out(p, tournament) for p in r.players.all()],
+    }  # fmt: skip
+
+
+def _registration(registration_id) -> TournamentRegistration:
+    return c.get_or_404(TournamentRegistration.objects.select_related("tournament", "team"), pk=registration_id)
+
+
+@router.get("/{tournament_id}/registrations", summary="The registration queue: approved, then pending (oldest first), then rejected", operation_id="tournaments_registrations")
+def registrations(request, tournament_id: uuid.UUID):
+    c.gate_view(request)
+    t = c.get_tournament(tournament_id)
+    rows = list(TournamentRegistration.objects.filter(tournament=t).select_related("team", "tournament_team").prefetch_related("players"))
+    rows.sort(key=lambda r: (_GROUP_ORDER[r.status], r.submitted_at))
+    oldest = next((r.pk for r in rows if r.status == TournamentRegistration.Status.PENDING), None)
+    return {"results": [registration_out(r, t, oldest_pending=r.pk == oldest) for r in rows]}
+
+
+@router.post("/registrations/{registration_id}/approve", summary="Approve a pending registration: the team joins the tournament", operation_id="tournaments_registration_approve")
+def approve(request, registration_id: uuid.UUID):
+    c.gate_manage(request)
+    r = _registration(registration_id)
+    try:
+        team = svc.approve_registration(r, reviewed_by=request.user)
+    except svc.RegistrationDecisionError as error:
+        raise Conflict(str(error), "already_decided") from error
+    r = _registration(registration_id)
+    notifications.send_registration_decision_email(r, request=request)
+    _deposit_invoice(team, request)
+    return {**registration_out(r, r.tournament), "tournament_team_id": team.pk}
+
+
+@router.post("/registrations/{registration_id}/reject", summary="Reject a pending registration", operation_id="tournaments_registration_reject")
+def reject(request, registration_id: uuid.UUID, payload: RejectIn):
+    c.gate_manage(request)
+    r = _registration(registration_id)
+    try:
+        svc.reject_registration(r, reviewed_by=request.user, reason=payload.reason)
+    except svc.RegistrationDecisionError as error:
+        raise Conflict(str(error), "already_decided") from error
+    r = _registration(registration_id)
+    notifications.send_registration_decision_email(r, request=request)
+    return registration_out(r, r.tournament)
+
+
+class ContactIn(Schema):
+    contact_name: str = Field(min_length=1, max_length=255)
+    contact_email: str = Field(min_length=3, max_length=254)
+    contact_phone: str = Field("", max_length=32)
+
+
+def _apply_contact(registration: TournamentRegistration, payload: ContactIn) -> None:
+    """Change the contact person of a team's application, and of its live team when it has one (they are the same person)."""
+    email = payload.contact_email.strip()
+    try:
+        validate_email(email)
+    except ValidationError:
+        raise Invalid("Enter a valid email address.", {"contact_email": ["Enter a valid email address."]}) from None
+    registration.foreign_contact_name, registration.foreign_contact_email, registration.foreign_contact_phone = payload.contact_name.strip(), email, payload.contact_phone.strip()
+    registration.save(update_fields=["foreign_contact_name", "foreign_contact_email", "foreign_contact_phone"])
+    team = getattr(registration, "tournament_team", None)
+    if team is not None:
+        team.foreign_contact_name, team.foreign_contact_email, team.foreign_contact_phone = registration.foreign_contact_name, email, registration.foreign_contact_phone
+        team.save(update_fields=["foreign_contact_name", "foreign_contact_email", "foreign_contact_phone"])
+
+
+@router.patch("/registrations/{registration_id}/contact", summary="Change the contact person of an application", operation_id="tournaments_registration_contact")
+def registration_contact(request, registration_id: uuid.UUID, payload: ContactIn):
+    c.gate_manage(request)
+    r = _registration(registration_id)
+    if r.team_id:
+        raise Invalid("A club team has no outside contact person.", {"detail": ["A club team has no outside contact person."]}, code="not_foreign")
+    _apply_contact(r, payload)
+    return registration_out(_registration(registration_id), r.tournament)
+
+
+@router.post("/registrations/{registration_id}/access/send", summary="Email the private page link and a new password to the application's contact person", operation_id="tournaments_registration_access_send")
+def registration_access_send(request, registration_id: uuid.UUID):
+    c.gate_manage(request)
+    r = _registration(registration_id)
+    if r.team_id:
+        raise Invalid("A club team has no outside contact person.", {"detail": ["A club team has no outside contact person."]}, code="not_foreign")
+    return _send_access(r, request)
+
+
+# --- teams ------------------------------------------------------------------------------------------------------------------
+
+
+def _team(team_id) -> TournamentTeam:
+    return c.get_or_404(TournamentTeam.objects.select_related("team", "tournament"), pk=team_id)
+
+
+@router.get("/{tournament_id}/teams", summary="Every team in the tournament (withdrawn ones included)", operation_id="tournaments_teams")
+def teams(request, tournament_id: uuid.UUID):
+    c.gate_view(request)
+    t = c.get_tournament(tournament_id)
+    rows = list(t.teams.select_related("team").prefetch_related("roster_entries__member"))
+    for row in rows:
+        row.tournament = t
+    return {"results": [c.team_out(row, t) for row in rows], "payment_statuses": [v for v, _label in TournamentTeam.PaymentStatus.choices]}
+
+
+@router.post("/{tournament_id}/teams", summary="Enter a team by hand, bypassing the registration queue", operation_id="tournaments_team_create", response={201: dict})
+def create_team(request, tournament_id: uuid.UUID, payload: ManualTeamIn):
+    c.gate_operate(request)
+    t = c.get_tournament(tournament_id)
+    if t.is_full:
+        raise Conflict("The tournament is full: withdraw or delete a team first.", "full")
+    if payload.kind == "club":
+        team = Team.objects.filter(pk=payload.team_id).first() if payload.team_id else None
+        if team is None:
+            raise Invalid("Choose a team.", {"team_id": ["Choose one of the club's teams."]})
+        if TournamentTeam.objects.filter(tournament=t, team=team).exists():
+            raise Invalid("Already entered.", {"team_id": ["This team is already in the tournament."]})
+        created = svc.create_manual_team(t, club_team=team)
+    else:
+        errors = {f: ["This field is required."] for f in ("foreign_name", "foreign_contact_name", "foreign_contact_email") if not getattr(payload, f).strip()}
+        if errors:
+            raise Invalid("Missing details.", errors)
+        created = svc.create_manual_team(
+            t,
+            foreign_fields={
+                "foreign_name": payload.foreign_name.strip(), "foreign_contact_name": payload.foreign_contact_name.strip(), "foreign_contact_email": payload.foreign_contact_email.strip(),
+                "foreign_contact_phone": payload.foreign_contact_phone, "foreign_primary_color": payload.foreign_primary_color, "foreign_secondary_color": payload.foreign_secondary_color,
+            },
+        )  # fmt: skip
+    created = _team(created.pk)
+    if created.team_id is None:
+        _deposit_invoice(created, request)  # an outside team added by hand owes the deposit like one that applied
+        created = _team(created.pk)
+    return 201, c.team_out(created, t)
+
+
+@router.post("/teams/{team_id}/logo", summary="Upload a foreign team's logo", operation_id="tournaments_team_logo")
+def team_logo(request, team_id: uuid.UUID, logo: File[UploadedFile]):
+    c.gate_operate(request)
+    team = _team(team_id)
+    if team.team_id is not None:
+        raise Invalid("Only a foreign team has a logo of its own.", {"logo": ["Only a foreign team has a logo of its own."]})
+    if not (logo.content_type or "").startswith("image/"):
+        raise Invalid("Not an image.", {"logo": ["Upload an image."]})
+    team.foreign_logo.save(logo.name, logo, save=True)
+    return c.team_out(team, team.tournament)
+
+
+def _deposit_invoice(team: TournamentTeam, request) -> None:
+    """The deposit invoice for a team that was just accepted. Best effort: a missing contact email or finance setting never undoes the approval
+    (the Invoices button on the team can make it again)."""
+    try:
+        billing.ensure_deposit_invoice(team, request.user)
+    except Exception:
+        logging.getLogger(__name__).exception("tournaments.deposit_invoice_failed")
+
+
+@router.post("/teams/{team_id}/invoices/{which}", summary="Create the deposit or balance invoice of a guest team in finance", operation_id="tournaments_team_invoice")
+def team_invoice(request, team_id: uuid.UUID, which: str):
+    c.gate_manage(request)
+    team = _team(team_id)
+    if which not in ("deposit", "balance") or not billing.billable(team):
+        raise Invalid("Only guest teams are invoiced.", {"detail": ["Only guest teams are invoiced."]}, code="not_billable")
+    try:
+        order = billing.ensure_deposit_invoice(team, request.user) if which == "deposit" else billing.ensure_balance_invoice(team, request.user)
+    except Invalid:
+        raise
+    except Conflict:
+        raise
+    if order is None:
+        raise Invalid("There is nothing to invoice.", {"detail": ["There is nothing to invoice."]}, code="nothing_due")
+    team = _team(team_id)
+    return {"invoices": billing.state(team), "payment_status": team.payment_status}
+
+
+@router.patch("/teams/{team_id}/payment", summary="Set a team's payment status", operation_id="tournaments_team_payment")
+def team_payment(request, team_id: uuid.UUID, payload: PaymentIn):
+    c.gate_manage(request)
+    team = _team(team_id)
+    if billing.managed(team):
+        raise Conflict("This team's payment follows its invoices in finance.", "managed_by_invoices")
+    team.payment_status = payload.payment_status
+    team.save(update_fields=["payment_status"])
+    return c.team_out(team, team.tournament)
+
+
+def _private_registration(team: TournamentTeam) -> TournamentRegistration:
+    """The application behind a team's private page. A team the organisers added themselves has none yet: it gets an approved one made
+    from the team's own contact details (no new decision, nothing changes for the team). Club teams have no outside contact person."""
+    if team.registration_id:
+        return team.registration
+    if team.team_id:
+        raise Invalid("A club team has no outside contact person.", {"detail": ["A club team has no outside contact person."]}, code="not_foreign")
+    registration = TournamentRegistration.objects.create(
+        tournament=team.tournament, foreign_name=team.foreign_name, foreign_contact_name=team.foreign_contact_name, foreign_contact_email=team.foreign_contact_email,
+        foreign_contact_phone=team.foreign_contact_phone, foreign_primary_color=team.foreign_primary_color, foreign_secondary_color=team.foreign_secondary_color, status=TournamentRegistration.Status.APPROVED, auto_created=True,
+    )  # fmt: skip
+    team_access.reset_password(registration)  # never an open link: the contact gets the password when the link is sent
+    team.registration = registration
+    team.save(update_fields=["registration"])
+    return registration
+
+
+def _send_access(registration: TournamentRegistration, request) -> dict:
+    """A new password and the link, mailed to the registered contact person. The password is only kept hashed, so "send again" always means
+    "make a new one"; whatever was sent before stops working."""
+    if not registration.foreign_contact_email:
+        raise Invalid("This team has no contact email.", {"detail": ["This team has no contact email."]}, code="no_email")
+    password = team_access.reset_password(registration)
+    if not notifications.send_team_link_email(registration, password, request=request):
+        raise Conflict("The email could not be sent.", "mail_failed")
+    return {"sent": True, "email": registration.foreign_contact_email}
+
+
+@router.patch("/teams/{team_id}/contact", summary="Change the contact person of a team", operation_id="tournaments_team_contact")
+def team_contact(request, team_id: uuid.UUID, payload: ContactIn):
+    c.gate_manage(request)
+    team = _team(team_id)
+    registration = _private_registration(team)
+    _apply_contact(registration, payload)
+    return c.team_out(_team(team_id), team.tournament)
+
+
+@router.post("/teams/{team_id}/private-link", summary="The private page link of a team (made on first use)", operation_id="tournaments_team_private_link")
+def team_private_link(request, team_id: uuid.UUID):
+    c.gate_operate(request)
+    registration = _private_registration(_team(team_id))
+    return {"url": notifications._status_url(registration, request=request), "email": registration.foreign_contact_email}
+
+
+@router.post("/teams/{team_id}/private-link/send", summary="Email the private page link to the team's contact person", operation_id="tournaments_team_private_link_send")
+def team_private_link_send(request, team_id: uuid.UUID):
+    c.gate_operate(request)
+    team = _team(team_id)
+    if not team.team_id and not team.foreign_contact_email:
+        raise Invalid("This team has no contact email.", {"detail": ["This team has no contact email."]}, code="no_email")
+    return _send_access(_private_registration(team), request)
+
+
+@router.post("/teams/{team_id}/withdraw", summary="Withdraw an approved team (soft: matches and roster stay)", operation_id="tournaments_team_withdraw")
+def team_withdraw(request, team_id: uuid.UUID, payload: WithdrawIn):
+    c.gate_manage(request)
+    team = _team(team_id)
+    try:
+        svc.withdraw_team(team, reason=payload.reason, withdrawn_by=request.user)
+    except svc.TeamWithdrawalError as error:
+        raise Conflict(str(error), "cannot_withdraw") from error
+    team = _team(team_id)
+    return c.team_out(team, team.tournament)
+
+
+@router.delete("/teams/{team_id}", summary="Delete a team entered by hand", operation_id="tournaments_team_delete", response={204: None})
+def team_delete(request, team_id: uuid.UUID):
+    c.gate_manage(request)
+    team = _team(team_id)
+    try:
+        svc.delete_manual_team(team)
+    except svc.TeamDeletionError as error:
+        raise Conflict(str(error), "cannot_delete") from error
+    return 204, None

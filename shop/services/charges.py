@@ -206,6 +206,7 @@ def cancel(actor, order) -> Order:
     order.save(update_fields=["fulfillment_status", "modified"])
     order.payments.filter(status=Payment.PaymentStatus.PENDING).update(status=Payment.PaymentStatus.FAILED)
     invoices.invalidate_cache(order)
+    payments._tell_tournaments(order)
     transaction.on_commit(lambda: notifications.dispatch("charge_cancelled", order.pk))
     return order
 

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { enhance } from '$app/forms';
-	import { ChevronRight, Hash, Pencil, Plus, Trash2, Bookmark } from '@lucide/svelte';
+	import { ChevronRight, Hash, Plus, Trash2, Bookmark } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import InfoTip from '#lib/components/InfoTip.svelte';
@@ -123,11 +123,11 @@
 									</div>
 								</td>
 								<td class="text-right font-mono text-xs">{p.reservation_count}</td>
-								<td class="text-right whitespace-nowrap">
+								<td class="text-right whitespace-nowrap"><div class="flex items-center justify-end gap-1">
 									<button class="btn btn-outline btn-xs" type="button" onclick={() => openReservations(p)}><Bookmark size={13} /> {t('pools.reservations')}</button>
+									<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('pools.delete_named', { name: p.name })} onclick={() => openDelete(p)}><Trash2 size={13} /></button>
 									<button class="btn btn-ghost btn-xs btn-square text-muted" type="button" aria-label={t('pools.edit_named', { name: p.name })} onclick={() => openForm(p)}><ChevronRight size={16} /></button>
-									<button class="btn btn-ghost btn-xs btn-square text-error" type="button" aria-label={t('pools.delete_named', { name: p.name })} onclick={() => openDelete(p)}><Trash2 size={14} /></button>
-								</td>
+								</div></td>
 							</tr>
 						{/each}
 					</tbody>
@@ -199,7 +199,7 @@
 							<form method="POST" action="?/release" use:enhance={submitRes()}>
 								<input type="hidden" name="pool" value={resPool?.id ?? ''} />
 								<input type="hidden" name="rid" value={r.id} />
-								<button class="btn btn-outline btn-error btn-xs" type="submit" disabled={busy} aria-label={t('pools.res.release_named', { n: r.number })}><Trash2 size={13} /> {t('pools.res.release')}</button>
+								<button class="btn btn-outline btn-error btn-xs btn-square" type="submit" disabled={busy} aria-label={t('pools.res.release_named', { n: r.number })} title={t('pools.res.release')}><Trash2 size={13} /></button>
 							</form>
 						{:else}
 							<span class="text-xs text-muted">{t('pools.res.locked')}</span>

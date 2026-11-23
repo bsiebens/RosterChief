@@ -106,9 +106,9 @@
 								<td class="hidden text-sm text-muted lg:table-cell">{audience(n.team_ids)}</td>
 								<td class="hidden text-sm text-muted xl:table-cell">{n.created_by?.name ?? t('common.none')}</td>
 								<td class="font-mono text-xs whitespace-nowrap text-muted">{formatDateTime(n.status === 'published' && n.published_at ? n.published_at : n.created)}</td>
-								<td class="text-right whitespace-nowrap">
-									<a class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-rule hover:text-ink" href={newsHref(n.id)} title={n.can_edit ? (n.status === 'pending_review' && publisher ? t('news.review') : t('common.edit')) : t('news.open')} aria-label={n.can_edit ? (n.status === 'pending_review' && publisher ? t('news.review_named', { title: n.title }) : t('news.edit_named', { title: n.title })) : t('news.open')}><ChevronRight size={18} /></a>
-								</td>
+								<td class="text-right whitespace-nowrap"><div class="flex items-center justify-end gap-1">
+									<a class="btn btn-ghost btn-xs btn-square" href={newsHref(n.id)} title={n.can_edit ? (n.status === 'pending_review' && publisher ? t('news.review') : t('common.edit')) : t('news.open')} aria-label={n.can_edit ? (n.status === 'pending_review' && publisher ? t('news.review_named', { title: n.title }) : t('news.edit_named', { title: n.title })) : t('news.open')}><ChevronRight size={16} /></a>
+								</div></td>
 							</tr>
 						{/each}
 					</tbody>

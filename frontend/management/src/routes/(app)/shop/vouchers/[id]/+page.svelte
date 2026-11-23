@@ -129,14 +129,14 @@
 										<td class="text-right font-mono text-sm">{money(h.amount)}</td>
 										<td class="text-sm">{#if h.order_id}<a class="link" href="/shop/orders/{h.order_id}">{h.detail}</a>{:else}{h.detail}{/if}</td>
 										<td class="text-sm">{h.recorded_by ?? t('common.none')}</td>
-										<td class="text-right">
+										<td class="text-right"><div class="flex items-center justify-end gap-1">
 											{#if h.kind === 'manual' && h.consumption_id}
 												<form method="POST" action="?/unconsume" use:enhance>
 													<input type="hidden" name="consumption_id" value={h.consumption_id} />
 													<button class="btn btn-outline btn-xs gap-1" type="submit"><Undo2 size={13} /> {t('shop.vch.use_undo')}</button>
 												</form>
 											{/if}
-										</td>
+										</div></td>
 									</tr>
 								{/each}
 							</tbody>

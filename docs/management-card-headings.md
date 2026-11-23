@@ -27,6 +27,15 @@
 | Team jersey numbers | Pools, current holders, and reservations |
 | Team details and coach roster | Attendance rate, players, staff, and jersey numbers |
 | Team analytics | Results, goalies, and unavailable state |
+| Tournament settings | Details |
+| Tournament registrations | Registration cards (team, contact, players) |
+| Tournament teams and roster | Teams table, roster table, and lunch per day |
+| Tournament fields and stages | Fields, stages, and break rules |
+| Tournament seeding and next phase | Seed the knockout, and one card per group |
+| Tournament schedule | Schedule, field board per field, and schedule blocks |
+| Tournament scores and standings | One card per stage, group standings, and brackets |
+| Tournament volunteer tasks | Task cards and the printable overview per location |
+| Tournament dressing rooms | Club-wide rooms list and one card per team on the tournament |
 
 The Requirements **Kind** column uses consistent spacing between each pill and its qualifier.
 

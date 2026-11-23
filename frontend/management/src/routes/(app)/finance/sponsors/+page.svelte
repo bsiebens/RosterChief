@@ -2,7 +2,7 @@
 	import { enhance, type SubmitFunction } from '$app/forms';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { ExternalLink, Handshake, Pencil, Plus, Trash2 } from '@lucide/svelte';
+	import { ExternalLink, Handshake, Pencil, Plus, Trash2, Wallet } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import FilterTabs from '#lib/components/FilterTabs.svelte';
@@ -11,11 +11,12 @@
 	import { formatDay, isoDate } from '#lib/events/types.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
+	import { billingBadge, money } from '#lib/sponsor-billing.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
 
 	let { data, form } = $props();
 	type Sponsor = (typeof data.sponsors)[number];
-	const badge = { active: 'badge-success', upcoming: 'badge-info', ended: 'badge-neutral' };
+	const badge = { active: 'badge-success', upcoming: 'badge-info', ended: 'badge-neutral', suspended: 'badge-error' };
 	let editing = $state<Sponsor | null>(null);
 	let deleting = $state<Sponsor | null>(null);
 	let editOpen = $state(false);
@@ -56,7 +57,8 @@
 		{ key: 'all', label: t('fin.tab.all') },
 		{ key: 'active', label: t('sponsors.active'), count: count('active') },
 		{ key: 'upcoming', label: t('sponsors.upcoming'), count: count('upcoming') },
-		{ key: 'ended', label: t('sponsors.ended'), count: count('ended') }
+		{ key: 'ended', label: t('sponsors.ended'), count: count('ended') },
+		...(count('suspended') ? [{ key: 'suspended', label: t('sponsors.suspended'), count: count('suspended'), warn: true }] : [])
 	]);
 	const href = (patch: Record<string, string>) => {
 		const sp = new URLSearchParams(page.url.search);
@@ -92,7 +94,7 @@
 		{:else}
 			<div class="card overflow-x-auto">
 				<table class="table">
-					<thead><tr><th>{t('sponsors.name')}</th><th>{t('sponsors.status')}</th><th class="hidden lg:table-cell">{t('sponsors.start')}</th><th class="hidden lg:table-cell">{t('sponsors.end')}</th><th><span class="sr-only">{t('sponsors.actions')}</span></th></tr></thead>
+					<thead><tr><th>{t('sponsors.name')}</th><th>{t('sponsors.status')}</th><th>{t('spb.col.payments')}</th><th class="hidden lg:table-cell">{t('sponsors.start')}</th><th class="hidden lg:table-cell">{t('sponsors.end')}</th><th><span class="sr-only">{t('sponsors.actions')}</span></th></tr></thead>
 					<tbody>
 						{#each visible as sponsor (sponsor.id)}
 							<tr class="hover:bg-paper">
@@ -108,12 +110,19 @@
 									</div>
 								</td>
 								<td><span class="badge badge-sm {badge[sponsor.status]}">{t(`sponsors.${sponsor.status}`)}</span></td>
+								<td>
+									<a class="inline-flex flex-col items-start gap-0.5" href="/finance/sponsors/{sponsor.id}" aria-label={t('spb.manage') + ': ' + sponsor.name}>
+										<span class="badge badge-sm {billingBadge(sponsor.billing.status)}">{t(`spb.status.${sponsor.billing.status}`, { n: sponsor.billing.overdue_days })}</span>
+										{#if sponsor.billing.status !== 'none' && Number(sponsor.billing.open_amount) > 0}<span class="font-mono text-xs text-muted">{money(sponsor.billing.open_amount)}</span>{/if}
+									</a>
+								</td>
 								<td class="hidden font-mono text-xs whitespace-nowrap lg:table-cell">{formatDay(sponsor.start_date)}</td>
 								<td class="hidden font-mono text-xs whitespace-nowrap lg:table-cell">{sponsor.end_date ? formatDay(sponsor.end_date) : '—'}</td>
 								<td>
-									<div class="flex justify-end gap-2 whitespace-nowrap">
-										<button class="btn btn-outline btn-xs gap-1" type="button" aria-label={t('sponsors.edit_named', { name: sponsor.name })} onclick={() => edit(sponsor)}><Pencil size={13} aria-hidden="true" /> <span class="sr-only xl:not-sr-only">{t('common.edit')}</span></button>
-										<button class="btn btn-outline btn-error btn-xs gap-1" type="button" aria-label={t('sponsors.delete_named', { name: sponsor.name })} onclick={() => remove(sponsor)}><Trash2 size={13} aria-hidden="true" /> <span class="sr-only xl:not-sr-only">{t('common.delete')}</span></button>
+									<div class="flex items-center justify-end gap-1">
+										<a class="btn btn-outline btn-xs btn-square" href="/finance/sponsors/{sponsor.id}" aria-label={t('spb.manage') + ': ' + sponsor.name} title={t('spb.manage')}><Wallet size={13} /></a>
+										<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('sponsors.edit_named', { name: sponsor.name })} onclick={() => edit(sponsor)} title={t('common.edit')}><Pencil size={13} /></button>
+										<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('sponsors.delete_named', { name: sponsor.name })} onclick={() => remove(sponsor)} title={t('common.delete')}><Trash2 size={13} /></button>
 									</div>
 								</td>
 							</tr>

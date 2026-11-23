@@ -422,7 +422,60 @@ def require_manage_forms(actor) -> None:
         raise NotAllowed("You are not allowed to manage forms.")
 
 
-SHOP_SUPERSET = "shop.manage_shop"
+MANAGE_TOURNAMENTS = "tournaments.manage_tournaments"
+OPERATE_TOURNAMENTS = "tournaments.operate_tournaments"
+
+
+def can_manage_tournaments(user) -> bool:
+    """Platform owner, the club's Owner role or a holder of ``tournaments.manage_tournaments``: tournament settings, the registration
+    queue, teams and their payments, club-wide dressing rooms. The club-has-the-feature check is done by the callers (routers, /me)."""
+    if user is None or not user.is_authenticated or not user.is_active:
+        return False
+    return is_platform_owner(user) or _is_club_owner(user) or user.has_perm(MANAGE_TOURNAMENTS)
+
+
+def can_operate_tournaments(user) -> bool:
+    """Run a tournament day to day (rosters, fields and stages, schedule, results, tasks, dressing room bookings): a holder of
+    ``tournaments.operate_tournaments`` or anyone who can manage tournaments (the manage tier includes the operate tier)."""
+    if user is None or not user.is_authenticated or not user.is_active:
+        return False
+    return can_manage_tournaments(user) or user.has_perm(OPERATE_TOURNAMENTS)
+
+
+def require_manage_tournaments(actor) -> None:
+    from .errors import NotAllowed
+
+    if not can_manage_tournaments(actor):
+        raise NotAllowed("You are not allowed to manage tournaments.")
+
+
+def require_operate_tournaments(actor) -> None:
+    from .errors import NotAllowed
+
+    if not can_operate_tournaments(actor):
+        raise NotAllowed("You are not allowed to operate tournaments.")
+
+
+CHAT_MODERATE = "chat.moderate"
+CHAT_ANNOUNCE = "chat.announce"
+
+
+def can_moderate_chat(user) -> bool:
+    """Platform owner, the club's Owner role or a holder of ``chat.moderate``: sees the chats with minors and handles reports (all audit-logged).
+    The club-has-the-feature check is done by the callers (routers, /me)."""
+    if user is None or not user.is_authenticated or not user.is_active:
+        return False
+    return is_platform_owner(user) or _is_club_owner(user) or user.has_perm(CHAT_MODERATE)
+
+
+def can_announce_chat(user) -> bool:
+    """Platform owner, the club's Owner role or a holder of ``chat.announce``: club-wide announcement chats."""
+    if user is None or not user.is_authenticated or not user.is_active:
+        return False
+    return is_platform_owner(user) or _is_club_owner(user) or user.has_perm(CHAT_ANNOUNCE)
+
+
+SHOP_SUPERSET ="shop.manage_shop"
 MANAGE_SHOP_PRODUCTS = "shop.manage_products"
 MANAGE_SHOP_INVENTORY = "shop.manage_inventory"
 MANAGE_SHOP_ORDERS = "shop.manage_orders"
