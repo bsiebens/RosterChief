@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ChevronLeft, DoorOpen, Shirt, Users, Utensils } from '@lucide/svelte';
+	import { CalendarClock, ChevronLeft, DoorOpen, Shirt, Users, Utensils } from '@lucide/svelte';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import GameCard from '#lib/components/tournaments/public/GameCard.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -62,12 +62,12 @@
 				<ol class="relative grid gap-3 border-l-2 border-line pl-5">
 					{#each g.items as i, n (i.tie?.id ?? `b${i.block?.id}${n}`)}
 						<li class="relative">
-							<span class="absolute top-4 -left-[1.62rem] size-3 rounded-full border-2 border-white {i.block ? (i.block.kind === 'lunch' ? 'bg-amber-500' : 'bg-club') : 'bg-ink'}"></span>
+							<span class="absolute top-1/2 left-[calc(-1.25rem-1px)] size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white {i.block ? (i.block.kind === 'lunch' ? 'bg-amber-500' : 'bg-club') : 'bg-ink'}"></span>
 							{#if i.tie}
 								<GameCard tie={i.tie} {path} me={d.team.slug} />
 							{:else if i.block}
 								<div class="flex items-center gap-3 rounded-xl border border-dashed border-line bg-white px-4 py-3">
-									<span class="flex size-9 shrink-0 items-center justify-center rounded-lg {i.block.kind === 'lunch' ? 'bg-amber-100 text-amber-700' : 'bg-club/10 text-club'}"><Utensils size={17} aria-hidden="true" /></span>
+									<span class="flex size-9 shrink-0 items-center justify-center rounded-lg {i.block.kind === 'lunch' ? 'bg-amber-100 text-amber-700' : 'bg-club/10 text-club'}">{#if i.block.kind === 'lunch'}<Utensils size={17} aria-hidden="true" />{:else}<CalendarClock size={17} aria-hidden="true" />{/if}</span>
 									<div class="min-w-0">
 										<p class="font-semibold text-ink">{i.block.title}</p>
 										<p class="font-mono text-xs text-muted">{timeLabel(i.block.starts_at)} – {timeLabel(i.block.ends_at)}{#if i.block.location} · {i.block.location}{/if}</p>

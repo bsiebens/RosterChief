@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Utensils } from '@lucide/svelte';
+	import { CalendarClock, Utensils } from '@lucide/svelte';
 	import GameCard from '#lib/components/tournaments/public/GameCard.svelte';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
@@ -82,7 +82,7 @@
 					<GameCard tie={i.tie} path={tn.path} me={teams.find((x) => x.id === team)?.slug ?? ''} />
 				{:else if i.block}
 					<div class="flex items-center gap-3 rounded-xl border border-dashed border-line bg-white/70 px-4 py-3 sm:col-span-2 xl:col-span-3">
-						<span class="flex size-9 shrink-0 items-center justify-center rounded-lg {i.block.kind === 'lunch' ? 'bg-amber-100 text-amber-700' : 'bg-club/10 text-club'}"><Utensils size={17} aria-hidden="true" /></span>
+						<span class="flex size-9 shrink-0 items-center justify-center rounded-lg {i.block.kind === 'lunch' ? 'bg-amber-100 text-amber-700' : 'bg-club/10 text-club'}">{#if i.block.kind === 'lunch'}<Utensils size={17} aria-hidden="true" />{:else}<CalendarClock size={17} aria-hidden="true" />{/if}</span>
 						<div class="min-w-0">
 							<p class="font-semibold text-ink">{i.block.title}</p>
 							<p class="font-mono text-xs text-muted">{timeLabel(i.block.starts_at)} – {timeLabel(i.block.ends_at)}{#if i.block.location} · {i.block.location}{/if}</p>
@@ -102,7 +102,7 @@
 							<GameCard tie={i.tie} path={tn.path} me={teams.find((x) => x.id === team)?.slug ?? ''} />
 						{:else if i.block}
 							<div class="flex items-center gap-3 rounded-xl border border-dashed border-line bg-white/70 px-4 py-3 sm:col-span-2 xl:col-span-3">
-								<span class="flex size-9 shrink-0 items-center justify-center rounded-lg {i.block.kind === 'lunch' ? 'bg-amber-100 text-amber-700' : 'bg-club/10 text-club'}"><Utensils size={17} aria-hidden="true" /></span>
+								<span class="flex size-9 shrink-0 items-center justify-center rounded-lg {i.block.kind === 'lunch' ? 'bg-amber-100 text-amber-700' : 'bg-club/10 text-club'}">{#if i.block.kind === 'lunch'}<Utensils size={17} aria-hidden="true" />{:else}<CalendarClock size={17} aria-hidden="true" />{/if}</span>
 								<div class="min-w-0">
 									<p class="font-semibold text-ink">{i.block.title}</p>
 									<p class="font-mono text-xs text-muted">{timeLabel(i.block.starts_at)} – {timeLabel(i.block.ends_at)}{#if i.block.location} · {i.block.location}{/if}</p>
