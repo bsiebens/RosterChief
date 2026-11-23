@@ -22,8 +22,8 @@
 		...(tn.accepts_registrations ? [{ href: `${base}/register`, label: t('tp.nav.register'), cta: true }] : [])
 	]);
 	const current = (tab: { href: string; exact?: boolean }) => (tab.exact ? page.url.pathname === tab.href : page.url.pathname.startsWith(tab.href));
-	// the big hero is for the overview; the other pages keep a slim one so the content starts higher
-	const slim = $derived(page.url.pathname !== base);
+	// one hero height on every page, so switching tabs never makes the content jump
+	const slim = false;
 </script>
 
 <div class="min-h-screen bg-paper font-sans text-slate">
@@ -35,19 +35,19 @@
 			</a>
 			<div class="flex items-center gap-3">{#if tn.status === 'published' || tn.status === 'in_progress'}<AlertsButton slug={tn.slug} />{/if}<LangSwitcher /></div>
 		</div>
-		<div class="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-x-8 gap-y-4 px-4 sm:px-6 {slim ? 'py-5' : 'py-10 sm:py-14'}">
+		<div class="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-x-8 gap-y-4 px-4 sm:px-6 py-8 sm:py-10">
 			<div class="min-w-0">
 				<div class="flex flex-wrap items-center gap-2">
 					<span class="rounded-full bg-white/15 px-3 py-0.5 font-mono text-[11px] tracking-[.12em] uppercase">{t(`tp.status.${tn.status}`)}</span>
 					{#if live}<span class="rounded-full bg-white px-1.5 py-0.5"><LiveBadge /></span>{/if}
 				</div>
-				<h1 class="mt-3 font-display leading-[1.05] font-extrabold tracking-[.01em] uppercase break-words {slim ? 'text-3xl' : 'text-4xl sm:text-6xl'}">{tn.name}</h1>
+				<h1 class="mt-3 font-display leading-[1.05] font-extrabold tracking-[.01em] uppercase break-words text-4xl sm:text-5xl">{tn.name}</h1>
 				<p class="mt-3 flex flex-wrap items-center gap-x-6 gap-y-1 text-sm opacity-90 sm:text-base">
 					<span class="flex items-center gap-2"><CalendarDays size={17} aria-hidden="true" />{range(tn.start_date, tn.end_date)}</span>
 					{#if tn.location}<span class="flex items-center gap-2"><MapPin size={17} aria-hidden="true" />{tn.location}{#if tn.location_address}<span class="hidden opacity-75 sm:inline">· {tn.location_address}</span>{/if}</span>{/if}
 				</p>
 			</div>
-			{#if tn.accepts_registrations && !slim}
+			{#if tn.accepts_registrations}
 				<a class="btn btn-lg border-0 bg-white font-display tracking-[.08em] text-primary uppercase shadow-lg hover:bg-white/90" href="{base}/register">{t('tp.register_cta')}</a>
 			{/if}
 		</div>
