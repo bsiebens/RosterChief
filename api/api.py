@@ -16,6 +16,7 @@ from .auth import AUTHENTICATORS
 from .errors import register_error_handlers
 from .routers import analytics as analytics_router
 from .routers import calendar_data as calendar_data_router
+from .routers import chat as chat_router
 from .routers import club_settings as club_settings_router
 from .routers import evaluations as evaluations_router
 from .routers import event_subtypes as event_subtypes_router
@@ -124,6 +125,7 @@ api.add_router("/tournaments", tournaments_logistics_router.router, tags=["tourn
 api.add_router("/tournaments", tournaments_lunch_router.router, tags=["tournaments"])
 api.add_router("/dressing-rooms", tournaments_logistics_router.rooms_router, tags=["tournaments"])
 api.add_router("/public/tournaments", public_tournaments_router.router, tags=["public"])
+api.add_router("/chat", chat_router.router, tags=["chat"])
 api.add_router("/notifications", notifications_router.router, tags=["notifications"])
 api.add_router("/web-push", web_push_router.router, tags=["notifications"])
 api.add_router("/overview", overview_router.router, tags=["overview"])

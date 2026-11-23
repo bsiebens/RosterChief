@@ -34,6 +34,7 @@ urlpatterns = [
     path('api/v1/', legacy_public_api.urls),
     path('api/v1/', api.urls),
     path('api/platform/v1/', platform_api.urls),
+    path('', include('chat.urls')),  # chat attachments (streamed after a permission check)
     path('', include('members.urls')),  # private member photos (streamed after a permission check)
 ]
 
