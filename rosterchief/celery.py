@@ -47,5 +47,6 @@ app.conf.beat_schedule = {
     "shop-send-charge-reminders": {"task": "shop.send_charge_reminders", "schedule": crontab(hour=8, minute=0)},  # daily: overdue charge invoices
     "tournaments-send-due-alerts": {"task": "tournaments.send_due_alerts", "schedule": crontab()},  # every minute: games and blocks starting within 5 minutes
     "tournaments-invoice-due-balances": {"task": "tournaments.invoice_due_balances", "schedule": crontab(hour=7, minute=0)},  # daily: balance invoices of guest teams a week before the tournament
+    "sponsoring-run-billing": {"task": "sponsoring.run_billing", "schedule": crontab(hour=7, minute=15)},  # daily: sponsor installments invoiced a lead time before their date, sponsors past their grace period made inactive
     "billing-archive-overdue": {"task": "billing.archive_overdue_clubs", "schedule": crontab(hour=6, minute=0)},
 }

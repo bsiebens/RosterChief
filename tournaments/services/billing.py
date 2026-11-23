@@ -15,7 +15,7 @@ from django.utils.translation import gettext as _
 
 from members.models import Member
 from shop.models import Order
-from shop.services import charges, payments
+from shop.services import charges, payers, payments
 
 from ..models import Tournament, TournamentTeam
 
@@ -45,11 +45,7 @@ def payer_for(team: TournamentTeam) -> Member:
     """The contact person as a member record (found by email, else made): the person the invoices are addressed to."""
     if team.payer_id:
         return team.payer
-    name = (team.foreign_contact_name or team.foreign_name).strip()
-    first, _sep, last = name.partition(" ")
-    member = Member.objects.filter(email__iexact=team.foreign_contact_email).first() if team.foreign_contact_email else None
-    if member is None:
-        member = Member.objects.create(first_name=first[:75] or team.foreign_name[:75], last_name=last[:75], email=team.foreign_contact_email)
+    member = payers.external_payer(team.foreign_contact_name or team.foreign_name, team.foreign_contact_email, fallback_name=team.foreign_name)
     team.payer = member
     team.save(update_fields=["payer"])
     return member

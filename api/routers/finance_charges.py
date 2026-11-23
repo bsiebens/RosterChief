@@ -22,7 +22,7 @@ from members.services import access
 from members.services.errors import Invalid
 from shop.models import Invoice, Order, Payment
 from shop.services import charges as svc
-from shop.services import defaults, invoices, payments
+from shop.services import defaults, invoices, payers, payments
 from shop.settings_models import ShopSettings
 
 router = Router(auth=AUTHENTICATORS)
@@ -48,8 +48,17 @@ class ChargeLineIn(Schema):
     unit_price: MoneyIn = Field(gt=0)
 
 
+class PayerIn(Schema):
+    """Someone who is not a member (a sponsor, an outside club, a company): they are invoiced through a login-less member record made from this."""
+
+    name: str = Field(max_length=150)
+    email: str = Field(max_length=254)
+
+
 class ChargeIn(Schema):
-    member_id: uuid.UUID
+    #: Either an existing member or an outside ``payer``.
+    member_id: uuid.UUID | None = None
+    payer: PayerIn | None = None
     lines: list[ChargeLineIn] = Field(min_length=1, max_length=svc.MAX_LINES)
     #: The due date the invoice gets when it is sent; empty means the shop's default terms.
     due_date: datetime.date | None = None
@@ -252,6 +261,20 @@ def _member(member_id) -> Member:
     return member
 
 
+def _payer(payload) -> Member:
+    """The member of an invoice: the one chosen, or the login-less record of an outside payer (found by email, else made)."""
+    if payload.member_id:
+        return _member(payload.member_id)
+    payer = payload.payer
+    if payer is None:
+        raise Invalid("Choose who this invoice is for.", {"member_id": ["Choose a member or enter an outside payer."]})
+    if not payer.name.strip():
+        raise Invalid("Enter a name.", {"payer.name": ["Enter a name."]})
+    if "@" not in payer.email:
+        raise Invalid("Enter an email address.", {"payer.email": ["Invoices are sent to this address."]})
+    return payers.external_payer(payer.name, payer.email)
+
+
 def _lines(lines) -> list[svc.ChargeLine]:
     return [svc.ChargeLine(description=ln.description, quantity=ln.quantity, unit_price=ln.unit_price) for ln in lines]
 
@@ -320,7 +343,7 @@ def list_charges(request, status: Status = "all", q: str = "", member_id: uuid.U
 @router.post("", response={201: ChargeDetailOut}, summary="Write a charge invoice (a draft)", operation_id="create_charge")
 def create(request, payload: ChargeIn):
     _gate(request)
-    order = svc.create_draft(request.user, member=_member(payload.member_id), lines=_lines(payload.lines), due_date=payload.due_date, notes=payload.notes, invoice_text=payload.invoice_text, payment_instructions=payload.payment_instructions)
+    order = svc.create_draft(request.user, member=_payer(payload), lines=_lines(payload.lines), due_date=payload.due_date, notes=payload.notes, invoice_text=payload.invoice_text, payment_instructions=payload.payment_instructions)
     return 201, _detail(order.pk)
 
 
