@@ -44,6 +44,22 @@ class AvailableSourceOut(Schema):
     enabled: bool
 
 
+class FixtureGamesOut(Schema):
+    """What deleting a source (or a team) together with its games would do: ``deletable`` upcoming games with nothing
+    recorded on them go; ``played`` (kick-off passed, live or with a result) and ``with_data`` (upcoming, but with
+    answers, a line-up, files, officials ...) stay."""
+
+    deletable: int
+    played: int
+    with_data: int
+
+
+class FixtureGamesDeletedOut(Schema):
+    deleted: int
+    kept_played: int
+    kept_with_data: int
+
+
 class FixtureSourcesOut(Schema):
     sources: list[FixtureSourceOut]
     available: list[AvailableSourceOut]

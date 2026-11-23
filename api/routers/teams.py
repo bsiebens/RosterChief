@@ -11,6 +11,7 @@ from ninja.errors import HttpError
 
 from api.routers.analytics import analytics_available
 from api.schemas_events import TeamAttendanceOut
+from api.schemas_fixture_imports import FixtureGamesDeletedOut
 from api.schemas_teams import (
     EligibleRefereeOut,
     PeopleIn,
@@ -116,11 +117,12 @@ def update_team(request, team_id: uuid.UUID, payload: TeamPatch):
     return svc.team_out(svc.update_team(request.user, team, payload.dict(exclude_unset=True)))
 
 
-@router.delete("/{team_id}", response={204: None}, summary="Delete a team (settings permission)", operation_id="delete_team")
-def delete_team(request, team_id: uuid.UUID):
+@router.delete("/{team_id}", response={200: FixtureGamesDeletedOut, 204: None}, summary="Delete a team, optionally with the upcoming games of its fixture sources (settings permission)", operation_id="delete_team")
+def delete_team(request, team_id: uuid.UUID, delete_games: bool = False):
+    """With ``delete_games``: 200 and the counts of the deleted games and of the played / data-bearing ones that stay."""
     _settings(request)
-    svc.delete_team(request.user, _team(team_id))
-    return 204, None
+    result = svc.delete_team(request.user, _team(team_id), delete_games=delete_games)
+    return (200, result) if result is not None else (204, None)
 
 
 @router.post("/{team_id}/photo", response=TeamDetailOut, summary="Upload the team photo of a season (team manager)", operation_id="set_team_photo")
