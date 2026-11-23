@@ -75,7 +75,7 @@ class Message(UUIDModel):
     author = models.ForeignKey("members.Member", null=True, on_delete=models.SET_NULL, related_name="+")
     body = models.TextField(blank=True, max_length=4000)
     urgent = models.BooleanField(default=False)
-    client_key = models.CharField(max_length=64, null=True, blank=True)
+    client_key = models.CharField(max_length=64, null=True, blank=True)  # noqa: DJ001
     edited_at = models.DateTimeField(null=True, blank=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
     deleted_by = models.ForeignKey("members.Member", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
