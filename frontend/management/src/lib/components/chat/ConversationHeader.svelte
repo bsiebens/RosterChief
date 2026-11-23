@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ArrowLeft, BellOff, Users } from '@lucide/svelte';
+	import { ArrowLeft, BellOff, Megaphone, Users } from '@lucide/svelte';
 	import type { Conversation } from '#lib/chat.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import ChatAvatar from './ChatAvatar.svelte';
@@ -18,6 +18,7 @@
 		<p class="flex items-center gap-1.5 truncate text-xs text-muted">
 			<span>{conversation.participant_count === 1 ? t('chat.header.people_one') : t('chat.header.people', { n: conversation.participant_count })}</span>
 			<span aria-hidden="true">·</span>
+			{#if conversation.audience === 'club'}<Megaphone size={11} aria-hidden="true" /><span>{t('chat.audience.club')}</span><span aria-hidden="true">·</span>{/if}
 			<span>{t(conversation.mode === 'announcement' ? 'chat.mode.announcement' : 'chat.mode.discussion')}</span>
 			{#if conversation.muted}<BellOff size={11} aria-label={t('chat.list.muted')} />{/if}
 		</p>

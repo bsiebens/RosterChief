@@ -29,6 +29,8 @@ export type Conversation = {
 	kind: ConversationKind;
 	mode: ConversationMode;
 	title: string;
+	/** 'club' for a club-wide chat (a group chat kept in step with the club's members). */
+	audience: 'club' | null;
 	team: { id: string; name: string } | null;
 	participant_count: number;
 	last_message: Message | null;
@@ -51,7 +53,11 @@ export type NewConversation = {
 	member_ids?: string[];
 	team_id?: string;
 	include?: { staff: boolean; players: boolean; parents: boolean };
+	/** kind 'group' only: the whole club (narrowed by `include` and `team_ids`) instead of `member_ids`. */
+	audience?: 'club';
+	team_ids?: string[];
 };
+export type ChatSettings = { retention_months: number | null };
 
 /** A message that is on its way (or failed): shown after the server's messages until the server answers. */
 export type PendingMessage = { key: string; body: string; attachments: Attachment[]; urgent: boolean; state: 'sending' | 'failed'; error: string; created: string };
@@ -83,7 +89,9 @@ export const chatApi = {
 	react: (id: string, emoji: string) => api<{ reactions: Reaction[] }>('POST', `${B}/messages/${id}/reactions`, { body: { emoji } }),
 	report: (id: string, reason: string) => api('POST', `${B}/messages/${id}/report`, { body: { reason } }),
 	people: (q: string) => api<{ results: Person[] }>('GET', `${B}/people`, { query: { q, limit: 20 } }),
-	teams: () => api<{ results: TeamOption[] }>('GET', `${B}/teams`),
+	teams: (club = false) => api<{ results: TeamOption[] }>('GET', `${B}/teams`, club ? { query: { club: 1 } } : {}),
+	settings: () => api<ChatSettings>('GET', `${B}/settings`),
+	saveSettings: (retention_months: number | null) => api<ChatSettings>('PUT', `${B}/settings`, { body: { retention_months } }),
 	reports: () => api<{ results: Report[] }>('GET', `${B}/moderation/reports`),
 	handleReport: (id: string) => api('POST', `${B}/moderation/reports/${id}/handle`),
 	moderationMessages: (id: string) => api<MessagesPage>('GET', `${B}/moderation/conversations/${id}/messages`)

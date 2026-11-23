@@ -9,6 +9,7 @@
 	import ConversationList from './ConversationList.svelte';
 	import ConversationView from './ConversationView.svelte';
 	import ModerationPanel from './ModerationPanel.svelte';
+	import SettingsPanel from './SettingsPanel.svelte';
 	import NewChatSheet from './NewChatSheet.svelte';
 
 	/**
@@ -29,7 +30,7 @@
 	} = $props();
 
 	const selected = $derived(page.url.searchParams.get('c') ?? '');
-	const tab = $derived(canModerate && page.url.searchParams.get('tab') === 'moderation' ? 'moderation' : 'chats');
+	const tab = $derived(canModerate && page.url.searchParams.get('tab') === 'moderation' ? 'moderation' : canModerate && page.url.searchParams.get('tab') === 'settings' ? 'settings' : 'chats');
 	let creating = $state(false);
 
 	onMount(() => chatList.acquire());
@@ -45,11 +46,14 @@
 	<div class="mb-3 flex w-fit flex-wrap items-center gap-1.5" role="group" aria-label={t('chat.title')}>
 		<a class="portal-person compact text" href={base} aria-current={tab === 'chats' ? 'true' : undefined}>{t('chat.tab.chats')}</a>
 		<a class="portal-person compact text" href="{base}?tab=moderation" aria-current={tab === 'moderation' ? 'true' : undefined}>{t('chat.tab.moderation')}</a>
+		<a class="portal-person compact text" href="{base}?tab=settings" aria-current={tab === 'settings' ? 'true' : undefined}>{t('chat.tab.settings')}</a>
 	</div>
 {/if}
 
 {#if tab === 'moderation'}
 	<ModerationPanel {heightClass} />
+{:else if tab === 'settings'}
+	<SettingsPanel />
 {:else}
 	<div class="flex overflow-hidden rounded-xl border border-line bg-white {heightClass}">
 		<aside class="{selected ? 'hidden md:flex' : 'flex'} w-full shrink-0 flex-col border-r border-line md:w-80 xl:w-[22rem]" aria-label={t('chat.list.label')}>
