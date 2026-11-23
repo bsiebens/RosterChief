@@ -22153,6 +22153,117 @@
         ]
       }
     },
+    "/api/v1/devices": {
+      "put": {
+        "operationId": "devices_register",
+        "summary": "Register or refresh this installation's push token",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "notifications"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "TokenAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/devices/{installation_id}": {
+      "delete": {
+        "operationId": "devices_remove",
+        "summary": "Remove this installation (on sign out)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "schema": {
+              "title": "Installation Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        },
+        "tags": [
+          "notifications"
+        ],
+        "security": [
+          {
+            "TokenAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ]
+      },
+      "get": {
+        "operationId": "devices_status",
+        "summary": "Whether this installation is registered",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "schema": {
+              "title": "Installation Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "notifications"
+        ],
+        "security": [
+          {
+            "TokenAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/overview": {
       "get": {
         "operationId": "club_overview",
@@ -50264,6 +50375,87 @@
           "keys"
         ],
         "title": "PushRegistration",
+        "type": "object"
+      },
+      "DeviceOut": {
+        "properties": {
+          "installation_id": {
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          },
+          "environment": {
+            "title": "Environment",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "installation_id",
+          "platform",
+          "environment",
+          "enabled"
+        ],
+        "title": "DeviceOut",
+        "type": "object"
+      },
+      "DeviceIn": {
+        "properties": {
+          "installation_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "platform": {
+            "description": "ios or android",
+            "title": "Platform",
+            "type": "string"
+          },
+          "environment": {
+            "default": "production",
+            "description": "sandbox (debug builds) or production",
+            "title": "Environment",
+            "type": "string"
+          },
+          "push_token": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Push Token",
+            "type": "string"
+          },
+          "push_to_start_token": {
+            "default": "",
+            "description": "iOS Live Activity push-to-start token",
+            "maxLength": 4096,
+            "title": "Push To Start Token",
+            "type": "string"
+          },
+          "app_version": {
+            "default": "",
+            "maxLength": 32,
+            "title": "App Version",
+            "type": "string"
+          },
+          "locale": {
+            "default": "",
+            "maxLength": 16,
+            "title": "Locale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "platform",
+          "push_token"
+        ],
+        "title": "DeviceIn",
         "type": "object"
       },
       "AttendanceCard": {
