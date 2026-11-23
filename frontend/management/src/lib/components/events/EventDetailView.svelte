@@ -422,7 +422,7 @@
         {/if}
     {:else if data.tab === 'sheet'}
         {#if data.sheet}
-            <EventGameSheet sheet={data.sheet} eventId={ev.id} canDebug={canManageSettings(data.me)} ourLogo={data.branding?.logo_url ?? ''} theirLogo={ev.opponent?.logo_url ?? ''}/>
+            <EventGameSheet sheet={data.sheet} eventId={ev.id} canDebug={canManageSettings(data.me)} ourLogo={data.branding?.logo_url ?? ''} theirLogo={ev.opponent?.logo_url ?? ''} background={data.me?.event_background ?? null}/>
         {/if}
     {:else if data.tab === 'tasks'}
         {#if data.tasks}

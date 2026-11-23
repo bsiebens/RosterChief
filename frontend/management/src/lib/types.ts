@@ -68,6 +68,8 @@ export type Me = {
 	/** Groups the user administers: they may schedule events for them and manage their people. */
 	admin_group_ids: string[];
 	features: string[];
+	/** The club's event card background (Settings), or null. */
+	event_background?: string | null;
 };
 
 /** GET /api/v1/club: public branding of the club behind the current hostname. Colours are validated #RRGGBB or ''. */

@@ -556,9 +556,9 @@
 
 {#snippet sponsorLogo(sponsor: { id: string; name: string; url?: string | null; logo_url?: string | null }, hidden = false)}
 	{#snippet logo()}
-		{#if sponsor.logo_url}<img class="h-12 w-full object-contain" src={sponsor.logo_url} alt={hidden ? '' : sponsor.name} loading="lazy" />{:else}<span class="line-clamp-2 text-center text-xs leading-tight font-semibold text-muted">{sponsor.name}</span>{/if}
+		{#if sponsor.logo_url}<img class="h-12 w-full object-contain" src={sponsor.logo_url} alt={hidden ? '' : sponsor.name} loading="lazy" />{:else}<span class="line-clamp-2 text-center text-xs leading-tight font-semibold text-neutral-600">{sponsor.name}</span>{/if}
 	{/snippet}
-	{#if sponsor.url && /^https?:\/\//i.test(sponsor.url)}<a class="grid size-full place-items-center p-2 hover:bg-subhead" href={sponsor.url} target="_blank" rel="noopener noreferrer" tabindex={hidden ? -1 : undefined}>{@render logo()}</a>{:else}<div class="grid size-full place-items-center p-2">{@render logo()}</div>{/if}
+	{#if sponsor.url && /^https?:\/\//i.test(sponsor.url)}<a class="grid size-full place-items-center p-2 hover:bg-black/5" href={sponsor.url} target="_blank" rel="noopener noreferrer" tabindex={hidden ? -1 : undefined}>{@render logo()}</a>{:else}<div class="grid size-full place-items-center p-2">{@render logo()}</div>{/if}
 {/snippet}
 
 {#snippet followingLive()}
@@ -582,16 +582,16 @@
 			<div class="sponsor-carousel -mx-3 overflow-x-auto md:hidden" aria-label={t('sponsors.title')} role="group">
 				<ul class="sponsor-track flex w-max gap-2 px-3" style="--sponsor-duration: {Math.max(all.length * 4, 16)}s">
 					{#each all as sponsor (sponsor.id)}
-						<li class="card h-16 w-28 shrink-0 overflow-hidden">{@render sponsorLogo(sponsor)}</li>
+						<li class="card bg-white! h-16 w-28 shrink-0 overflow-hidden">{@render sponsorLogo(sponsor)}</li>
 					{/each}
 					{#each all as sponsor (sponsor.id)}
-						<li class="card sponsor-dup h-16 w-28 shrink-0 overflow-hidden" aria-hidden="true">{@render sponsorLogo(sponsor, true)}</li>
+						<li class="card bg-white! sponsor-dup h-16 w-28 shrink-0 overflow-hidden" aria-hidden="true">{@render sponsorLogo(sponsor, true)}</li>
 					{/each}
 				</ul>
 			</div>
 			<ul class="hidden grid-cols-3 gap-2 md:grid" aria-label={t('sponsors.title')}>
 				{#each all as sponsor (sponsor.id)}
-					<li class="card h-16 overflow-hidden">{@render sponsorLogo(sponsor)}</li>
+					<li class="card bg-white! h-16 overflow-hidden">{@render sponsorLogo(sponsor)}</li>
 				{/each}
 			</ul>
 		</section>

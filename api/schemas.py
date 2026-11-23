@@ -68,3 +68,4 @@ class MeOut(Schema):
     managed_team_ids: list[str] = []
     admin_group_ids: list[str] = []
     features: list[str]
+    event_background: str | None = None
