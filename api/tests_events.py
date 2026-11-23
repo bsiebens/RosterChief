@@ -762,4 +762,5 @@ class EventsApiTests(TestCase):
 
     def test_me_is_unchanged(self):
         keys = set(self.call("get", "/me", self.head.user).json())
-        self.assertFalse({k for k in keys if "event" in k or "attendance" in k})
+        # event_background is club branding, not event/attendance data.
+        self.assertFalse({k for k in keys - {"event_background"} if "event" in k or "attendance" in k})
