@@ -2,6 +2,7 @@
 	import { FileDown, Plus, Trash2, Users } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import NoticeAlert from '#lib/components/NoticeAlert.svelte';
+	import TeamLinkButtons from '#lib/components/tournaments/TeamLinkButtons.svelte';
 	import TeamLogo from '#lib/components/tournaments/TeamLogo.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
@@ -114,6 +115,7 @@
 							<td class="text-right whitespace-nowrap">
 								<div class="flex items-center justify-end gap-1">
 									<a class="btn btn-outline btn-xs" href="{TBASE}/{tn.id}/teams/{team.id}">{t('tn.teams.roster')}</a>
+									{#if canOperate && team.is_foreign && !team.withdrawn_at}<TeamLinkButtons teamId={team.id} email={team.contact_email} compact />{/if}
 									{#if canOperate}
 										<label class="btn btn-outline btn-xs focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-club">
 											{t('tn.teams.logo')}

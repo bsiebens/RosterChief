@@ -196,4 +196,4 @@
 
 {/if}
 
-<p class="text-xs text-muted">{t('tp.status.keep_link')}{#if tn.contact_email} <a class="link" href="mailto:{tn.contact_email}">{tn.contact_email}</a>{/if}</p>
+<p class="text-xs text-muted">{t('tp.status.keep_link')}{#if tn.contact_email}{' '}<a class="link" href="mailto:{tn.contact_email}">{tn.contact_email}</a>{/if}</p>

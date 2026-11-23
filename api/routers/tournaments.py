@@ -297,6 +297,41 @@ def team_payment(request, team_id: uuid.UUID, payload: PaymentIn):
     return c.team_out(team, team.tournament)
 
 
+def _private_registration(team: TournamentTeam) -> TournamentRegistration:
+    """The application behind a team's private page. A team the organisers added themselves has none yet: it gets an approved one made
+    from the team's own contact details (no new decision, nothing changes for the team). Club teams have no outside contact person."""
+    if team.registration_id:
+        return team.registration
+    if team.team_id:
+        raise Invalid("A club team has no outside contact person.", {"detail": ["A club team has no outside contact person."]}, code="not_foreign")
+    registration = TournamentRegistration.objects.create(
+        tournament=team.tournament, foreign_name=team.foreign_name, foreign_contact_name=team.foreign_contact_name, foreign_contact_email=team.foreign_contact_email,
+        foreign_contact_phone=team.foreign_contact_phone, foreign_primary_color=team.foreign_primary_color, foreign_secondary_color=team.foreign_secondary_color, status=TournamentRegistration.Status.APPROVED,
+    )  # fmt: skip
+    team.registration = registration
+    team.save(update_fields=["registration"])
+    return registration
+
+
+@router.post("/teams/{team_id}/private-link", summary="The private page link of a team (made on first use)", operation_id="tournaments_team_private_link")
+def team_private_link(request, team_id: uuid.UUID):
+    c.gate_operate(request)
+    registration = _private_registration(_team(team_id))
+    return {"url": notifications._status_url(registration, request=request), "email": registration.foreign_contact_email}
+
+
+@router.post("/teams/{team_id}/private-link/send", summary="Email the private page link to the team's contact person", operation_id="tournaments_team_private_link_send")
+def team_private_link_send(request, team_id: uuid.UUID):
+    c.gate_operate(request)
+    team = _team(team_id)
+    if not team.team_id and not team.foreign_contact_email:
+        raise Invalid("This team has no contact email.", {"detail": ["This team has no contact email."]}, code="no_email")
+    registration = _private_registration(team)
+    if not notifications.send_team_link_email(registration, request=request):
+        raise Conflict("The email could not be sent.", "mail_failed")
+    return {"sent": True, "email": registration.foreign_contact_email}
+
+
 @router.post("/teams/{team_id}/withdraw", summary="Withdraw an approved team (soft: matches and roster stay)", operation_id="tournaments_team_withdraw")
 def team_withdraw(request, team_id: uuid.UUID, payload: WithdrawIn):
     c.gate_manage(request)

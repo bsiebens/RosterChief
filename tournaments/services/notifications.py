@@ -152,3 +152,15 @@ def send_organiser_message_email(registration, body: str, *, request=None) -> bo
     t = registration.tournament
     lines = [_("The organisers of %(tournament)s sent a message to your team:") % {"tournament": t.name}, body, _("Read and answer it on your team page: %(url)s") % {"url": _status_url(registration, request=request)}]
     return _send(registration, _("New message from the organisers of %(tournament)s") % {"tournament": t.name}, lines)
+
+
+def send_team_link_email(registration, *, request=None) -> bool:
+    """Mail a team's responsible person the private link to their team page (roster, logo, messages with the organisers)."""
+    t = registration.tournament
+    lines = [
+        _("Hello %(name)s,") % {"name": registration.foreign_contact_name or registration.foreign_name},
+        _("This is the private page of %(team)s at %(tournament)s. Use it to keep your players up to date, upload your logo and exchange messages with the organisers.") % {"team": registration.foreign_name, "tournament": t.name},
+        _status_url(registration, request=request),
+        _("Keep this link to yourself: anyone who has it can change your team's details."),
+    ]
+    return _send(registration, _("Your team page for %(tournament)s") % {"tournament": t.name}, lines)

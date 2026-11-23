@@ -837,6 +837,23 @@ class TournamentApiTests(TestCase):
         t.save()
         self.assertEqual(times(), [(4, 11), (8, 0), (12, 0)])
 
+    def test_a_teams_private_link_is_made_on_first_use_and_can_be_mailed(self):
+        from django.core import mail
+
+        t = self.make(status="published")
+        team = self.foreign(t, "Alpha")
+        r = self.as_("operate", "post", f"/teams/{team.pk}/private-link")
+        self.assertEqual(r.status_code, 200, r.content)
+        url = r.json()["url"]
+        self.assertIn("/registration/", url)
+        self.assertEqual(self.as_("operate", "post", f"/teams/{team.pk}/private-link").json()["url"], url)  # the same link every time
+        token = url.rsplit("/", 1)[1]
+        self.assertEqual(self.call("get", f"/{t.slug}/registrations/{token}", prefix="/public/tournaments").json()["registration"]["name"], "Alpha")
+        sent = self.as_("operate", "post", f"/teams/{team.pk}/private-link/send")
+        self.assertEqual((sent.status_code, len(mail.outbox)), (200, 1), sent.content)
+        self.assertIn(token, mail.outbox[0].body)
+        self.assertEqual(self.as_("operate", "post", f"/teams/{uuid.uuid4()}/private-link").status_code, 404)
+
     def test_public_endpoints_are_404_without_feature(self):
         t = self.make(status="published")
         self.features = Entitlements({})
