@@ -78,7 +78,7 @@
 		<ol class="grid gap-2">
 			{#each rows as { e, period, match } (e.id)}
 				{@const Icon = icon[e.type] ?? MessageSquare}
-				<li class="grid grid-cols-[auto_auto_1fr] items-center gap-3 rounded-xl border border-line bg-white px-4 py-3 shadow-sm {e.side === 'away' ? 'sm:ml-12' : e.side === 'home' ? 'sm:mr-12' : ''}">
+				<li class="grid grid-cols-[auto_auto_1fr_auto] items-center gap-3 rounded-xl border border-line border-l-4 bg-white px-4 py-3 shadow-sm" style:border-left-color={(e.side === 'home' ? match.home_team : e.side === 'away' ? match.away_team : null)?.primary_color || (e.side ? 'var(--color-club)' : undefined)}>
 					<span class="w-16 font-mono text-xs text-muted">{#if multi && pick === 0}P{period} {/if}{clock(e)}</span>
 					<span class="flex size-9 items-center justify-center rounded-full {tone[e.type] ?? tone.other}"><Icon size={17} aria-hidden="true" /></span>
 					<div class="min-w-0 text-sm">
@@ -97,6 +97,10 @@
 						{/if}
 						{#if e.note && e.type !== 'other'}<p class="text-xs text-muted italic">{e.note}</p>{/if}
 					</div>
+					{#if e.side}
+						{@const side = e.side === 'home' ? match.home_team : match.away_team}
+						{#if side}<ClubCrest name={side.name} logoUrl={side.logo_url} bg={side.primary_color || undefined} size={28} />{/if}
+					{:else}<span></span>{/if}
 				</li>
 			{/each}
 		</ol>
