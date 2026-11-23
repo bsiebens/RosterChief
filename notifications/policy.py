@@ -33,6 +33,7 @@ POLICIES = {
     Category.COACH: _policy("coach", DAY, importance="high", apns_priority=10),
     Category.ADMIN: _policy("admin", 3 * DAY),
     Category.ANNOUNCEMENT: _policy("announcement", 7 * DAY),
+    Category.CHAT: _policy("chat", DAY, collapse=True, importance="high", apns_priority=10),
     Category.GAME: _policy("game", 15 * 60, collapse=True, importance="high", apns_priority=10, hold=False),
     Category.GENERAL: _policy("general", 3 * DAY),
 }

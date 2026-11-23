@@ -43,7 +43,7 @@ MAX_MANIFEST = 32 * 1024**2
 logger = logging.getLogger(__name__)
 
 # Restrict serialization to club applications. Explicitly skip derived data and transient jobs.
-TENANT_APPS = {"members", "sponsoring", "teams", "events", "news", "formbuilder", "shop", "evaluations", "registration", "tournaments"}
+TENANT_APPS = {"members", "sponsoring", "teams", "events", "news", "formbuilder", "shop", "evaluations", "registration", "tournaments", "chat"}
 EXCLUDED_MODELS = {"members.importjob", "events.gamestat", "events.gamemoment", "events.statsrefresh"}
 EXCLUDED_FIELDS = {"shop.shopsettings": {"credentials_encrypted"}}
 CLUB_FIELDS = {

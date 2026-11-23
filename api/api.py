@@ -174,6 +174,7 @@ def me(request):
     except ObjectDoesNotExist:
         raise PermissionDenied from None  # signed in, but not a user of this club
     tournaments_on = club.schema_name != get_public_schema_name() and request.features.has("tournaments")
+    chat_on = club.schema_name != get_public_schema_name() and request.features.has("chat")
     member = _member_profile(user, club)
     return {
         "id": str(user.pk),
@@ -204,6 +205,9 @@ def me(request):
         "can_manage_shop_invoices": shop_on and access.can_manage_shop_invoices(user),
         "can_manage_tournaments": tournaments_on and access.can_manage_tournaments(user),
         "can_operate_tournaments": tournaments_on and access.can_operate_tournaments(user),
+        "can_use_chat": chat_on and member is not None,
+        "can_moderate_chat": chat_on and access.can_moderate_chat(user),
+        "can_announce_chat": chat_on and access.can_announce_chat(user),
         "can_add_news": club.schema_name != get_public_schema_name() and access.can_add_news(user),
         # The shop's VAT setting, so the product form shows a VAT rate only while VAT is on ("off" when the club has no shop).
         "shop_vat_mode": ShopSettings.current().vat_mode if shop_on else "off",
