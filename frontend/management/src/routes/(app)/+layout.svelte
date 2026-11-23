@@ -14,6 +14,8 @@
 	import NotificationBell from '#lib/components/NotificationBell.svelte';
 	import LangSwitcher from '#lib/components/LangSwitcher.svelte';
 	import { chatEnabled } from '#lib/chat.ts';
+	import { invalidateAll } from '$app/navigation';
+	import { isStandalone, pullRefresh } from '#lib/pull-refresh.ts';
 	import { chatList } from '#lib/chat.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 
@@ -35,6 +37,10 @@
 	const shopEnabled = $derived(parent && (data.me ? data.shopOpen === true : a.status === 'authenticated' && a.memberShopEnabled === true));
 	// Chat: the nav entries and the unread badges (one shared list poller, started while the shell is open).
 	// a parent-only account has no `me`: the portal access answer says whether chat is on for it
+	/** Pull to refresh, only in the portal apps and only when installed (a browser has its own reload). */
+	function pullRefreshIf(node: HTMLElement, refresh: (() => Promise<unknown>) | null) {
+		return refresh && isStandalone() ? pullRefresh(node, refresh) : { destroy() {} };
+	}
 	const chatOn = $derived(chatEnabled(data.me) || (!data.me && a.status === 'authenticated' && a.memberChatEnabled === true));
 	$effect(() => (chatOn ? chatList.acquire() : undefined));
 	let navOpen = $state(false);
@@ -134,7 +140,7 @@
 			{#if !clubShell}<LangSwitcher /><AccountMenu {email} />{/if}
 		</header>
 
-		<main class="flex-1 {portal ? 'overflow-x-clip' : ''}">
+		<main class="flex-1 {portal ? 'overflow-x-clip' : ''}" use:pullRefreshIf={portal ? () => invalidateAll() : null}>
 			<div class="flex min-w-0 flex-col gap-4 px-3 py-4 sm:px-5 sm:py-5 {portal ? 'md:px-7 md:py-6' : 'lg:px-7 lg:py-6'}">
 				<!-- Keyed by path: on navigation the old page is torn down before it can be handed the next page's data (that
 				     briefly happens otherwise and crashes pages that read fields only their own data has: the 500 on going back). -->

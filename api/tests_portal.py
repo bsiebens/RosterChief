@@ -227,6 +227,14 @@ class PortalProfileTests(ParentPortalTests):
         after = count()
         self.assertLessEqual(after - before, 2, f"{before} lookups with 1 event, {after} with 11")
 
+    def test_an_event_the_family_is_not_invited_to_is_a_404_not_a_server_error(self):
+        from events.models import Event
+
+        token = self.token()
+        with schema_context(self.club.schema_name):
+            other = Event.objects.exclude(pk=self.child_reply.event_id).first() or Event.objects.create(title="Elsewhere", start=timezone.now(), end=timezone.now() + datetime.timedelta(hours=1))
+        self.assertEqual(self.call("get", f"/portal/events/{other.pk}", token).status_code, 404)  # it used to crash on the officiating check
+
     def test_event_extras_for_the_family_lineup_tasks_attachments_and_claiming(self):
         from django.core.files.base import ContentFile
 

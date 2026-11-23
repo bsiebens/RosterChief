@@ -123,6 +123,7 @@ export default {
 		'tn.inv.s.partially_paid': 'partly paid',
 		'tn.inv.s.paid': 'paid',
 		'tn.inv.s.refunded': 'refunded',
+		'portal.refresh': 'Refresh',
 	},
 	nl: {
 		'ts.final_standings': 'Eindklassement',
@@ -247,6 +248,7 @@ export default {
 		'tn.inv.s.partially_paid': 'deels betaald',
 		'tn.inv.s.paid': 'betaald',
 		'tn.inv.s.refunded': 'terugbetaald',
+		'portal.refresh': 'Vernieuwen',
 	},
 	fr: {
 		'ts.final_standings': 'Classement final',
@@ -371,5 +373,6 @@ export default {
 		'tn.inv.s.partially_paid': 'partiellement payée',
 		'tn.inv.s.paid': 'payée',
 		'tn.inv.s.refunded': 'remboursée',
+		'portal.refresh': 'Actualiser',
 	}
 };

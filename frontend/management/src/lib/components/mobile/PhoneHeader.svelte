@@ -1,7 +1,9 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { onMount } from 'svelte';
-	import { ArrowLeft, ArrowLeftRight, Bell, House, Whistle } from '@lucide/svelte';
+	import { ArrowLeft, ArrowLeftRight, Bell, House, RefreshCw, Whistle } from '@lucide/svelte';
+	import { invalidateAll } from '$app/navigation';
+	import { isStandalone } from '#lib/pull-refresh.ts';
 	import { page } from '$app/state';
 	import NotificationBell from '#lib/components/NotificationBell.svelte';
 	import Sheet from '#lib/components/portal/Sheet.svelte';
@@ -16,7 +18,21 @@
 	 */
 	let { mode, title, context = '', actions = null, canSwitch = false }: { mode: 'parent' | 'coach'; title: string; context?: string; actions?: Snippet | null; canSwitch?: boolean } = $props();
 
-	onMount(() => void notifications.load());
+	let standalone = $state(false);
+	let refreshing = $state(false);
+	onMount(() => {
+		void notifications.load();
+		standalone = isStandalone(); // an installed app has no browser reload button
+	});
+	async function refresh() {
+		refreshing = true;
+		try {
+			await invalidateAll();
+			void notifications.load();
+		} finally {
+			refreshing = false;
+		}
+	}
 	let switchOpen = $state(false);
 	// The header stays mounted when going between the member and coach views: the switch sheet must not stay open behind that.
 	$effect(() => {
@@ -55,6 +71,7 @@
 	{#if back}<a class="phone-ib" href={back} aria-label={t('common.back')}><ArrowLeft size={22} aria-hidden="true" /></a>{/if}
 	<h1 class="phone-title" class:long={title.length > 14}>{#if context}<span class="phone-sub">{context}</span>{/if}{title}</h1>
 	{#if actions}{@render actions()}{/if}
+	{#if standalone}<button class="phone-ib" type="button" onclick={refresh} aria-label={t('portal.refresh')} disabled={refreshing}><RefreshCw size={20} class={refreshing ? 'animate-spin' : ''} aria-hidden="true" /></button>{/if}
 	{#if mode === 'parent' || mode === 'coach'}
 		<a class="phone-ib" href="/{mode === 'parent' ? 'member' : 'coach'}/notifications" aria-label={notifications.unread ? t('portal.todo_count', { n: notifications.unread }) : t('portal.notifications')}>
 			<Bell size={22} aria-hidden="true" />{#if notifications.unread > 0}<span class="phone-dot"></span>{/if}

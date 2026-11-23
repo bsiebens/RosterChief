@@ -19,7 +19,12 @@
 	const icon = (row: { icon: string }) => (row.icon === 'goal' ? Goal : row.icon === 'shield-user' ? ShieldHalf : Timer);
 	const rows = $derived(game.periods.flatMap((period) => period.rows));
 	const count = (type: string, ours: boolean) => rows.filter((row) => row.type === type && row.ours === ours).length;
-	const [scoreOurs, scoreTheirs] = $derived((game.score || '–').split(/[–-]/).map((part) => part.trim()));
+	// The scoreboard reads home team first, like a game sheet: when we are the away team our side moves to the right and every "ours–theirs" score flips
+	const home = $derived(game.is_home !== false);
+	const flip = (value: string) => (home ? value : value.replace(/^\s*(.*?)\s*([–-])\s*(.*?)\s*$/, '$3$2$1'));
+	const [scoreLeft, scoreRight] = $derived(flip(game.score || '–').split(/[–-]/).map((part) => part.trim()));
+	const leftLabel = $derived(home ? game.ours_label : game.theirs_label);
+	const rightLabel = $derived(home ? game.theirs_label : game.ours_label);
 </script>
 
 <dialog bind:this={dialog} class="portal-modal" aria-label={t('portal.timeline_title')} onclose={() => (open = false)} onclick={(e) => { if (e.target === dialog) dialog?.close(); }}>
@@ -33,14 +38,14 @@
 				<button type="button" class="btn btn-square size-9 shrink-0 border-sidebar-fg bg-sidebar-fg! text-sidebar-bg!" aria-label={t('portal.close')} onclick={() => dialog?.close()}><X size={18} strokeWidth={3} aria-hidden="true" /></button>
 			</div>
 			<div class="grid grid-cols-[1fr_auto_1fr] items-center gap-4 px-5 py-6">
-				<p class="text-right font-display text-xl leading-tight font-extrabold uppercase sm:text-2xl">{game.ours_label}</p>
-				<p class="flex items-center gap-2 font-display text-5xl leading-none font-extrabold tabular-nums"><span>{scoreOurs}</span><span class="text-sidebar-fg-faint" aria-hidden="true">:</span><span>{scoreTheirs ?? ''}</span></p>
-				<p class="font-display text-xl leading-tight font-extrabold uppercase sm:text-2xl">{game.theirs_label}</p>
+				<p class="text-right font-display text-xl leading-tight font-extrabold uppercase sm:text-2xl">{leftLabel}</p>
+				<p class="flex items-center gap-2 font-display text-5xl leading-none font-extrabold tabular-nums"><span>{scoreLeft}</span><span class="text-sidebar-fg-faint" aria-hidden="true">:</span><span>{scoreRight ?? ''}</span></p>
+				<p class="font-display text-xl leading-tight font-extrabold uppercase sm:text-2xl">{rightLabel}</p>
 			</div>
 			{#if game.period_scores.length}
 				<div class="grid border-t border-sidebar-hairline text-center" style="grid-template-columns: repeat({game.period_scores.length}, minmax(0, 1fr))">
 					{#each game.period_scores as period, i (period.label)}
-						<div class="py-2 {i ? 'border-l border-sidebar-hairline' : ''}"><p class="font-mono text-[11px] text-sidebar-fg-dim">{period.label}</p><p class="flex items-baseline justify-center gap-2 font-display text-xl font-extrabold">{#each period.score.split(/[–-]/) as part, n (n)}{#if n}<span class="text-sidebar-fg-faint" aria-hidden="true">–</span>{/if}<span>{part.trim()}</span>{/each}</p></div>
+						<div class="py-2 {i ? 'border-l border-sidebar-hairline' : ''}"><p class="font-mono text-[11px] text-sidebar-fg-dim">{period.label}</p><p class="flex items-baseline justify-center gap-2 font-display text-xl font-extrabold">{#each flip(period.score).split(/[–-]/) as part, n (n)}{#if n}<span class="text-sidebar-fg-faint" aria-hidden="true">–</span>{/if}<span>{part.trim()}</span>{/each}</p></div>
 					{/each}
 				</div>
 			{/if}
@@ -52,7 +57,7 @@
 		<div class="grid gap-5 p-5">
 			{#each game.periods as period (period.label)}
 				<section>
-					<h3 class="mb-1 flex items-center gap-2 border-b border-line pb-1 font-display text-sm font-extrabold tracking-[.06em] text-ink uppercase">{period.title}{#if period.score}<span class="font-mono text-xs font-normal text-muted">{period.score}</span>{/if}</h3>
+					<h3 class="mb-1 flex items-center gap-2 border-b border-line pb-1 font-display text-sm font-extrabold tracking-[.06em] text-ink uppercase">{period.title}{#if period.score}<span class="font-mono text-xs font-normal text-muted">{flip(period.score)}</span>{/if}</h3>
 					{#if period.rows.length}
 						<ul class="divide-y divide-rule">
 							{#each period.rows as row, i (i)}
@@ -64,7 +69,7 @@
 										<span class="flex flex-wrap items-center gap-x-2 gap-y-1"><span class="font-semibold text-ink">{row.who}</span>{#if row.tag}<span class="badge badge-xs badge-outline">{row.tag}</span>{/if}</span>
 										<span class="mt-0.5 block text-xs text-muted">{row.kind}{row.team ? ` · ${row.team}` : ''}{row.detail ? ` · ${row.detail}` : ''}</span>
 									</span>
-									<span class="font-display text-lg font-extrabold tabular-nums text-ink">{row.score}</span>
+									<span class="font-display text-lg font-extrabold tabular-nums text-ink">{flip(row.score)}</span>
 								</li>
 							{/each}
 						</ul>

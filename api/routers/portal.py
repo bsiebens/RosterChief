@@ -454,7 +454,7 @@ def _visible_event(request, event_id):
         raise HttpError(404, "Not found.")
     people = _people(viewer)
     in_audience = Attendance.objects.filter(event=event, member_id__in=people).exists()
-    if not in_audience and not any(offer.event_id == event.pk for offer in officiating_invitations.opportunities(people, now=timezone.now())):
+    if not in_audience and not any(offer.event.pk == event.pk for offer in officiating_invitations.opportunities(people, now=timezone.now())):
         raise HttpError(404, "Not found.")
     return viewer, people, event, in_audience
 
