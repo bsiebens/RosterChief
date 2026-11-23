@@ -13,6 +13,8 @@
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import NotificationBell from '#lib/components/NotificationBell.svelte';
 	import LangSwitcher from '#lib/components/LangSwitcher.svelte';
+	import { chatEnabled } from '#lib/chat.ts';
+	import { chatList } from '#lib/chat.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 
 	import { page } from '$app/state';
@@ -31,6 +33,9 @@
 	const home = $derived(parent ? '/member' : coach ? '/coach' : '/');
 	const season = $derived(parent ? page.data.home?.season : page.data.coach?.season);
 	const shopEnabled = $derived(parent && (data.me ? data.shopOpen === true : a.status === 'authenticated' && a.memberShopEnabled === true));
+	// Chat: the nav entries and the unread badges (one shared list poller, started while the shell is open).
+	const chatOn = $derived(chatEnabled(data.me));
+	$effect(() => (chatOn ? chatList.acquire() : undefined));
 	let navOpen = $state(false);
 	afterNavigate(() => { navOpen = false; });
 	// People with both a member side and a staff side land in the app they used last (see lib/landing.ts).
@@ -45,10 +50,10 @@
 <div class="flex min-h-screen bg-paper font-sans text-slate" class:portal-ui={!!portal} class:portal-coach={coach}>
 	{#if clubShell && club}
 		{#if portal}
-			<div class="hidden xl:block"><Sidebar me={data.me} branding={club} {email} {portal} {shopEnabled} /></div>
-			<div class="hidden md:block xl:hidden"><PortalRail me={data.me} branding={club} mode={portal} {shopEnabled} /></div>
+			<div class="hidden xl:block"><Sidebar me={data.me} branding={club} {email} {portal} {shopEnabled} chatEnabled={chatOn} /></div>
+			<div class="hidden md:block xl:hidden"><PortalRail me={data.me} branding={club} mode={portal} {shopEnabled} chatEnabled={chatOn} /></div>
 		{:else}
-			<div class="hidden lg:block"><Sidebar me={data.me} branding={club} {email} {portal} {shopEnabled} /></div>
+			<div class="hidden lg:block"><Sidebar me={data.me} branding={club} {email} {portal} {shopEnabled} chatEnabled={chatOn} /></div>
 		{/if}
 	{/if}
 
@@ -139,7 +144,7 @@
 		</main>
 		{#if portal}
 			<div class="sticky bottom-0 z-20 md:hidden">
-				<PortalNav mode={portal} compact {shopEnabled} />
+				<PortalNav mode={portal} compact {shopEnabled} chatEnabled={chatOn} />
 			</div>
 		{/if}
 	</div>

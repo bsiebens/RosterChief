@@ -57,6 +57,10 @@ export type Me = {
 	/** Tournaments (false without the `tournaments` feature): manage = settings, registrations, payments; operate = teams, rosters, schedule, scores, tasks. Manage implies operate. */
 	can_manage_tournaments: boolean;
 	can_operate_tournaments: boolean;
+	/** Chat (absent or false without the `chat` feature): may use it, may moderate reports, may post in announcement chats. */
+	can_use_chat?: boolean;
+	can_moderate_chat?: boolean;
+	can_announce_chat?: boolean;
 	/** The shop's VAT setting: 'included' while shop prices contain VAT, otherwise 'off'. */
 	shop_vat_mode: string;
 	/** Teams where the user holds a management position this season: they may edit those teams. */

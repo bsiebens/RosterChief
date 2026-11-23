@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { chatList } from '#lib/chat.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { activePortalKey, ME_PAGES, portalItems, type PortalMode } from '#lib/portal-nav.ts';
 	import type { Branding, Me } from '#lib/types.ts';
@@ -7,8 +8,8 @@
 	import ClubCrest from './ClubCrest.svelte';
 
 	/** The tablet navigation of the member and coach apps: the club crest, an icon rail and the app switcher. */
-	let { me, branding, mode, shopEnabled = false }: { me: Me | null; branding: Branding; mode: PortalMode; shopEnabled?: boolean } = $props();
-	const items = $derived(portalItems(mode, shopEnabled));
+	let { me, branding, mode, shopEnabled = false, chatEnabled = false }: { me: Me | null; branding: Branding; mode: PortalMode; shopEnabled?: boolean; chatEnabled?: boolean } = $props();
+	const items = $derived(portalItems(mode, shopEnabled, chatEnabled));
 	const active = $derived(activePortalKey(page.url));
 	const home = $derived(mode === 'parent' ? '/member' : '/coach');
 </script>
@@ -18,9 +19,10 @@
 	<nav class="flex flex-col items-center gap-1" aria-label={t('shell.nav.label')}>
 		{#each items as item (item.href)}
 			{@const selected = active === item.key || (item.key === 'me' && ME_PAGES.includes(active))}
-			<a class="rail-item {selected ? 'active' : ''}" href={item.href} aria-current={selected ? 'page' : undefined}>
+			<a class="rail-item relative {selected ? 'active' : ''}" href={item.href} aria-current={selected ? 'page' : undefined}>
 				<item.icon size={22} class="shrink-0" aria-hidden="true" />
 				{t(item.label)}
+				{#if item.key === 'chat' && chatList.unreadTotal > 0}<span class="absolute top-1 right-2 rounded-full bg-club px-1.5 font-mono text-[10px] leading-4 font-bold text-club-content" aria-label={t('chat.unread_badge', { n: chatList.unreadTotal })}>{chatList.unreadTotal > 99 ? '99+' : chatList.unreadTotal}</span>{/if}
 			</a>
 		{/each}
 	</nav>

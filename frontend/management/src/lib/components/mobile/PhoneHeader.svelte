@@ -29,6 +29,7 @@
 		const path = page.url.pathname;
 		const tab = page.url.searchParams.get('tab');
 		if (mode === 'parent') {
+			if (path.startsWith('/member/chat')) return null;
 			if (path.startsWith('/member/notifications')) return tab === null && page.url.searchParams.get('view') !== 'settings' ? '/member' : '/member?tab=me';
 			if (path.startsWith('/member/shop')) return tab === null && page.url.searchParams.get('view') === 'orders' ? '/member?tab=me' : null;
 			if (path !== '/member') return '/member?tab=me';
