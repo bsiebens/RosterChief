@@ -16,6 +16,7 @@ from api.schemas_teams import (
     EligibleRefereeOut,
     PeopleIn,
     PeopleOut,
+    PlayerPhotosOut,
     PoolOverviewOut,
     RosterEntryOut,
     RosterIn,
@@ -197,6 +198,21 @@ def add_people(request, team_id: uuid.UUID, payload: PeopleIn):
     fails is reported with the reason and the others are added."""
     data = payload.dict()
     return svc.add_people(request.user, _team(team_id), season_id=data["season_id"], rows=data["rows"])
+
+
+@router.post("/{team_id}/player-photos", response=PlayerPhotosOut, summary="Upload the player pictures of several players at once (team manager)", operation_id="set_team_player_photos")
+def set_team_player_photos(request, team_id: uuid.UUID, files: File[list[UploadedFile]], member_ids: Form[list[uuid.UUID]], season_id: uuid.UUID | None = Form(None)):
+    """Multipart: ``files`` (JPEG, PNG or WebP up to 5 MB each) and ``member_ids``, one per file in the same order; only
+    the official player picture changes. Players must be on the roster of the season (default: the current one). A row
+    that fails is reported with the reason and the others are saved."""
+    if len(files) != len(member_ids):
+        raise Invalid("Give one player for every file.", {"member_ids": ["Give one player for every file."]})
+    team = _team(team_id)
+    season = _season(season_id)
+    if season is None:
+        raise Invalid("There is no current season.", {"season_id": ["There is no current season."]})
+    rows = svc.set_player_photos(request.user, team, season, list(zip(member_ids, files, strict=True)))
+    return {"saved": sum(r["ok"] for r in rows), "rows": rows}
 
 
 @router.patch("/{team_id}/roster/{membership_id}", response=RosterEntryOut, summary="Edit a roster entry (team manager)", operation_id="update_team_player")

@@ -65,6 +65,22 @@ export const actions: Actions = {
 		if (!res.ok) return fail(res.status || 500, { teamAction: 'photo', teamError: res.fields.file || res.message || 'failed', teamFields: res.fields });
 		return { done: 'photo' };
 	},
+	uploadPlayerPhotos: async ({ request, params, url, fetch }) => {
+		const form = await request.formData();
+		const files = form.getAll('files').filter((f): f is File => f instanceof File && f.size > 0);
+		const memberIds = form.getAll('member_ids').map(String);
+		if (!files.length || files.length !== memberIds.length) return fail(422, { teamAction: 'playerPhotos', teamError: 'required', teamFields: {} });
+		const up = new FormData();
+		files.forEach((f, i) => {
+			up.append('files', f);
+			up.append('member_ids', memberIds[i]);
+		});
+		const season = url.searchParams.get('season') ?? '';
+		if (season) up.set('season_id', season);
+		const res = await api<{ saved: number; rows: { index: number; ok: boolean; error: string | null }[] }>('POST', `/teams/${params.id}/player-photos`, { form: up, f: fetch });
+		if (!res.ok) return fail(res.status || 500, { teamAction: 'playerPhotos', teamError: res.message || 'failed', teamFields: res.fields });
+		return { done: 'playerPhotos', photoResult: { ...res.data!, names: files.map((f) => f.name) } };
+	},
 	removePhoto: async ({ params, url, fetch }) => {
 		const { failure } = await teamCall('photo', 'DELETE', `/teams/${params.id}/photo${url.searchParams.get('season') ? `?season=${url.searchParams.get('season')}` : ''}`, fetch);
 		return failure ?? { done: 'removePhoto' };

@@ -241,6 +241,41 @@ class TeamsApiTests(TestCase):
             self.assertIsNone(self.admin("get", f"/{self.u12.pk}").json()["photo_url"])
             self.assertTrue(AuditEntry.objects.filter(action="team.photo_set").exists())
 
+    def test_player_photos_mass_upload(self):
+        import tempfile
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django.test import override_settings
+
+        with schema_context(self.club.schema_name):
+            TeamMembership.objects.create(team=self.u12, member=self.kid, season=self.season, position=self.forward)
+            TeamMembership.objects.create(team=self.u12, member=self.peer, season=self.season, position=self.forward)
+
+        def up(pairs, user=None):
+            return Client().post(
+                f"{BASE}/{self.u12.pk}/player-photos",
+                {"files": [SimpleUploadedFile(name, data) for _, name, data in pairs], "member_ids": [str(m.pk) for m, _, _ in pairs], "season_id": str(self.season.pk)},
+                HTTP_HOST=self.host,
+                HTTP_X_SESSION_TOKEN=login_session(user or self.owner),
+            )
+
+        with tempfile.TemporaryDirectory() as media, override_settings(MEDIA_ROOT=media, PRIVATE_MEDIA_ROOT=media):
+            self.assertEqual(up([(self.kid, "kid.png", self._png())], user=self.coach_user).status_code, 403)  # not a team manager
+            r = up([(self.kid, "kim.png", self._png()), (self.peer, "pat.png", b"not an image"), (self.teen, "tom.png", self._png())])
+            self.assertEqual(r.status_code, 200, r.content)
+            body = r.json()
+            self.assertEqual(body["saved"], 1)
+            self.assertEqual([row["ok"] for row in body["rows"]], [True, False, False])  # bad image; Tom is not on this roster
+            with schema_context(self.club.schema_name):
+                self.assertTrue(Member.objects.get(pk=self.kid.pk).player_photo)
+                self.assertFalse(Member.objects.get(pk=self.kid.pk).profile_photo)  # only the player picture
+                self.assertFalse(Member.objects.get(pk=self.peer.pk).player_photo)
+                self.assertFalse(Member.objects.get(pk=self.teen.pk).player_photo)
+            self.assertTrue(self.audit("member.player_photo_changed"))
+            # one player per file
+            r = Client().post(f"{BASE}/{self.u12.pk}/player-photos", {"files": [SimpleUploadedFile("a.png", self._png())], "member_ids": []}, HTTP_HOST=self.host, HTTP_X_SESSION_TOKEN=login_session(self.owner))
+            self.assertEqual(r.status_code, 422)
+
     def test_eligible_referees_need_the_feature(self):
         self.assertEqual(self.admin("get", f"/{self.u12.pk}/referees").status_code, 404)  # club without referee_officials
 

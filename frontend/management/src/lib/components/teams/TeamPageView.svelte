@@ -2,11 +2,12 @@
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
-	import { ArrowLeft, BarChart3, CalendarCheck, FileDown, Hash, Pencil, Trash2, TrendingDown, TrendingUp, TriangleAlert, Upload, UserMinus, UserPlus, Users, UsersRound, UserX } from '@lucide/svelte';
+	import { ArrowLeft, BarChart3, CalendarCheck, FileDown, Hash, ImagePlus, Pencil, Trash2, TrendingDown, TrendingUp, TriangleAlert, Upload, UserMinus, UserPlus, Users, UsersRound, UserX } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Avatar from '#lib/components/Avatar.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import NumberLegend from '#lib/components/teams/NumberLegend.svelte';
+	import PlayerPhotosModal from '#lib/components/teams/PlayerPhotosModal.svelte';
 	import RosterModal from '#lib/components/teams/RosterModal.svelte';
 	import StaffModal from '#lib/components/teams/StaffModal.svelte';
 	import TeamFormModal from '#lib/components/teams/TeamFormModal.svelte';
@@ -36,6 +37,7 @@
 	let addPlayerOpen = $state(false);
 	let editPlayerOpen = $state(false);
 	let editPlayer = $state<RosterEntry | null>(null);
+	let playerPhotosOpen = $state(false);
 	let addStaffOpen = $state(false);
 	let editStaffOpen = $state(false);
 	let editStaff = $state<StaffEntry | null>(null);
@@ -227,7 +229,12 @@
 	<div class="card">
 		<div class="flex flex-wrap items-center justify-between gap-2 px-6 py-4">
 			<h2 class="flex flex-wrap items-center gap-2 font-display text-lg font-extrabold tracking-[.04em] text-ink uppercase"><Users size={16} class="shrink-0" aria-hidden="true" /> {t('teams.card.players')} <span class="font-mono text-xs font-normal text-muted">· {team.roster.length}</span></h2>
-			{#if manage}<a class="btn btn-outline btn-sm gap-2" href={addHref}><UserPlus size={16} /> {t('teams.player.add_many')}</a>{/if}
+			{#if manage}
+				<div class="flex flex-wrap gap-2">
+					<button class="btn btn-outline btn-sm gap-2" type="button" disabled={team.roster.length === 0} onclick={() => (playerPhotosOpen = true)}><ImagePlus size={16} /> {t('teampage.pp.button')}</button>
+					<a class="btn btn-outline btn-sm gap-2" href={addHref}><UserPlus size={16} /> {t('teams.player.add_many')}</a>
+				</div>
+			{/if}
 		</div>
 		{#if errorFor('removePlayer')}<div class="px-6 pb-3"><Alert kind="error">{errorFor('removePlayer')}</Alert></div>{/if}
 		<div class="overflow-x-auto">
@@ -349,6 +356,7 @@
 
 <TeamFormModal bind:open={editOpen} title={t('teams.edit')} {team} pools={data.pools} teams={data.teams} action={act('save')} name="save" {form} submitLabel={t('common.save')} lockStructure={!canManageSettings(data.me)} />
 
+<PlayerPhotosModal bind:open={playerPhotosOpen} roster={team.roster} {act} {form} />
 <RosterModal bind:open={editPlayerOpen} entry={editPlayer} positions={playerPositions} exclude={[]} {act} {seasonId} {form} />
 <StaffModal bind:open={editStaffOpen} entry={editStaff} positions={staffPositions} exclude={[]} {act} {seasonId} {form} />
 
