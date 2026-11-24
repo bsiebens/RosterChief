@@ -852,7 +852,7 @@
 						<p class="text-xs text-muted">{t('portal.stat_legend')}</p>
 					{/if}
 				</section>
-				<GameTimelineDialog {game} title={event.title} {crest} bind:open={timelineOpen} />
+				<GameTimelineDialog {game} title={event.title} {crest} opponentCrest={event.opponent_logo} {background} bind:open={timelineOpen} />
 			{:else if audience && extras?.lineup}
 				<section class="card card-body">
 					<h2 class="card-title"><Users size={16} aria-hidden="true" />{t('portal.lineup')}</h2>

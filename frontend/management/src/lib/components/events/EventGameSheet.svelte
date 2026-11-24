@@ -47,8 +47,8 @@
 	<section class="card relative isolate overflow-hidden border-ink bg-ink text-white">
 		{#if background}<EventBackdrop src={background} />{/if}
 		<!-- Each side's logo as a big, light grayscale watermark behind its name (transparency kept). -->
-		{#if ourLogo}<img src={ourLogo} alt="" aria-hidden="true" class="pointer-events-none absolute top-1/2 -left-10 -z-10 h-[200%] w-auto max-w-none -translate-y-1/2 object-contain opacity-[0.16] [filter:grayscale(1)_brightness(1.7)]" />{/if}
-		{#if theirLogo}<img src={theirLogo} alt="" aria-hidden="true" class="pointer-events-none absolute top-1/2 -right-6 -z-10 h-[150%] w-auto max-w-none -translate-y-1/2 object-contain opacity-[0.16] [filter:grayscale(1)_brightness(1.7)]" />{/if}
+		{#if ourLogo}<img src={ourLogo} alt="" aria-hidden="true" class="pointer-events-none absolute top-1/2 -left-10 -z-10 h-[200%] w-auto max-w-none -translate-y-1/2 object-contain opacity-[0.3] [filter:grayscale(1)_brightness(1.7)]" />{/if}
+		{#if theirLogo}<img src={theirLogo} alt="" aria-hidden="true" class="pointer-events-none absolute top-1/2 -right-6 -z-10 h-[150%] w-auto max-w-none -translate-y-1/2 object-contain opacity-[0.3] [filter:grayscale(1)_brightness(1.7)]" />{/if}
 		<div class="flex flex-wrap items-center justify-between gap-2 px-6 pt-3">
 			<span class="font-mono text-xs tracking-[.08em] text-on-dark uppercase">{t('events.tab.sheet')}</span>
 			<div class="flex flex-wrap items-center gap-2">

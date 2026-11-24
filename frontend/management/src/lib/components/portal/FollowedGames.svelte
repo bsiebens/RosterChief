@@ -149,7 +149,7 @@
 {/if}
 
 {#if opened && sheet}
-	<GameTimelineDialog game={sheet} title={opened.title} {crest} bind:open />
+	<GameTimelineDialog game={sheet} title={opened.title} {crest} opponentCrest={opened.opponent_logo} {background} bind:open />
 {/if}
 {#if opened && missing}
 	<p class="sr-only" role="status">{t('portal.no_timeline')}</p>
