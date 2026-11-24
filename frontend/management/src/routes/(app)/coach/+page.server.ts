@@ -32,7 +32,7 @@ export const load: PageServerLoad = async ({ fetch, url }) => {
 
 // The squad editor: the same team API as the manage app (the API decides who may change which team, and refuses a coach their own staff entry).
 const flag = (form: FormData, key: string) => form.get(key) === 'on';
-const rosterBody = (form: FormData) => ({ position_id: strOrNull(form, 'position_id'), jersey_number: intOrNull(form, 'jersey_number'), is_captain: flag(form, 'is_captain'), is_alternate_captain: flag(form, 'is_alternate_captain') });
+const rosterBody = (form: FormData) => ({ position_id: strOrNull(form, 'position_id'), jersey_number: intOrNull(form, 'jersey_number'), is_captain: flag(form, 'is_captain'), is_alternate_captain: flag(form, 'is_alternate_captain'), override_number: flag(form, 'override_number') });
 
 export const actions: Actions = {
 	addPlayer: async ({ request, fetch }) => {

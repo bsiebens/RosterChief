@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { tick } from 'svelte';
 	import { UserPlus } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import EntityPicker from '#lib/components/EntityPicker.svelte';
@@ -24,6 +25,14 @@
 	let memberId = $state('');
 	const mine = $derived(form?.teamAction === name);
 	const fields = $derived<Record<string, string>>(mine ? (form?.teamFields ?? {}) : {});
+	const numberTaken = $derived(mine && form?.teamCode === 'number_taken');
+	let override = $state(false);
+	let formEl = $state<HTMLFormElement>();
+	const addAnyway = async () => {
+		override = true;
+		await tick();
+		formEl?.requestSubmit();
+	};
 	const formLevel = $derived(mine && form?.teamError && !Object.keys(fields).length ? (form.teamError as string) : '');
 	const title = $derived(entry ? t('teams.player.edit_named', { name: `${entry.first_name} ${entry.last_name}`.trim() }) : t('teams.player.add'));
 </script>
@@ -31,6 +40,7 @@
 <Modal bind:open {title}>
 	<form
 		method="POST"
+		bind:this={formEl}
 		action={act(name)}
 		class="grid gap-3"
 		use:enhance={() => {
@@ -38,6 +48,7 @@
 			return async ({ result, update }) => {
 				await update({ reset: result.type === 'success' });
 				busy = false;
+				override = false;
 				if (result.type === 'success') {
 					memberId = '';
 					open = false;
@@ -46,7 +57,8 @@
 		}}
 	>
 		<input type="hidden" name="season_id" value={seasonId} />
-		{#if formLevel}<Alert kind="error">{formLevel}</Alert>{/if}
+		{#if override}<input type="hidden" name="override_number" value="on" />{/if}
+		{#if formLevel && !numberTaken}<Alert kind="error">{formLevel}</Alert>{/if}
 		{#if entry}
 			<input type="hidden" name="membership_id" value={entry.id} />
 		{:else}
@@ -61,12 +73,19 @@
 				</select>
 				{#if fields.position_id}<span class="mt-1 block text-xs text-error">{fields.position_id}</span>{/if}
 			</div>
-			<Field label={t('teams.f.number')} name="jersey_number" type="number" min="0" value={entry?.jersey_number === null || entry?.jersey_number === undefined ? '' : String(entry.jersey_number)} error={fields.jersey_number} />
+			<Field label={t('teams.f.number')} name="jersey_number" type="number" min="0" value={entry?.jersey_number === null || entry?.jersey_number === undefined ? '' : String(entry.jersey_number)} error={numberTaken ? undefined : fields.jersey_number} />
 		</div>
 		<div class="flex flex-wrap gap-5 text-sm">
 			<label class="flex items-center gap-2"><input type="checkbox" name="is_captain" class="checkbox checkbox-sm" checked={entry?.is_captain ?? false} /> {t('teams.captain')}</label>
 			<label class="flex items-center gap-2"><input type="checkbox" name="is_alternate_captain" class="checkbox checkbox-sm" checked={entry?.is_alternate_captain ?? false} /> {t('teams.alt_captain')}</label>
 		</div>
+		{#if numberTaken}
+			<Alert kind="warning" title={t('teams.number_taken.title')}>
+				<p>{fields.jersey_number}</p>
+				<p class="mt-1">{t('teams.number_taken.body')}</p>
+				<button class="btn btn-warning btn-sm mt-2" type="button" disabled={busy} onclick={addAnyway}>{entry ? t('teams.number_taken.save_anyway') : t('teams.number_taken.add_anyway')}</button>
+			</Alert>
+		{/if}
 		<div class="modal-action mt-2 flex justify-end gap-2">
 			<button class="btn btn-outline" type="button" onclick={() => (open = false)}>{t('common.cancel')}</button>
 			<button class="btn btn-primary gap-2" type="submit" disabled={busy || (!entry && !memberId)}>
