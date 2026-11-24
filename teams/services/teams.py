@@ -537,7 +537,10 @@ def add_player(actor, team, *, member_id, season_id, position_id, jersey_number,
     m = TeamMembership(team=team, member=member, season=season, position=position, jersey_number=jersey_number, is_captain=is_captain, is_alternate_captain=is_alternate_captain and not is_captain)
     m.save()
     _apply_captaincy(m)
-    audit.record(actor, "team.roster_added", member=member, target=m, target_label=f"{member} - {team.name}", changes={**{k: {"from": None, "to": v} for k, v in _roster_state(m).items()}, **({"number_overridden": {"from": None, "to": overruled}} if overruled else {})})
+    changes = {k: {"from": None, "to": v} for k, v in _roster_state(m).items()}
+    if overruled:
+        changes["number_overridden"] = {"from": None, "to": overruled}
+    audit.record(actor, "team.roster_added", member=member, target=m, target_label=f"{member} - {team.name}", changes=changes)
     return get_membership(team, m.pk)
 
 
