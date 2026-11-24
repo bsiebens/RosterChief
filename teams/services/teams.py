@@ -499,6 +499,8 @@ def _check_number(team, season, member, number, exclude_pk=None, override=False)
     msg = numbers.clash_message(number, season, team, member, exclude_pk)
     if msg and not override:
         raise Invalid(msg, {"jersey_number": [msg]}, code="number_taken")
+    if msg and TeamMembership.objects.filter(team=team, season=season, jersey_number=number).exclude(pk=exclude_pk).exists():
+        _fail("jersey_number", f"Number {number} is already on this team's roster this season; it cannot be shared.")  # the database forbids it
     return msg  # the clash that was knowingly overruled, for the audit log
 
 
