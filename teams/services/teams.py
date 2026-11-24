@@ -488,14 +488,18 @@ def _position(position_id, *, staff: bool, field="position_id"):
     return pos
 
 
-def _check_number(team, season, member, number, exclude_pk=None):
+def _check_number(team, season, member, number, exclude_pk=None, override=False):
+    """``override``: a team manager knowingly accepts a number somebody else holds or that is reserved (historic data). The range still applies.
+    A clash is reported with code ``number_taken`` so the UI can offer to add the player anyway."""
     if number is None:
-        return
+        return None
     msg = numbers.range_message(number, team) if number >= 0 else "Must be zero or more."
-    if msg is None:
-        msg = numbers.clash_message(number, season, team, member, exclude_pk)
     if msg:
         _fail("jersey_number", msg)
+    msg = numbers.clash_message(number, season, team, member, exclude_pk)
+    if msg and not override:
+        raise Invalid(msg, {"jersey_number": [msg]}, code="number_taken")
+    return msg  # the clash that was knowingly overruled, for the audit log
 
 
 def _apply_captaincy(m: TeamMembership):
@@ -517,8 +521,8 @@ def _require_active_membership(member, season) -> None:
 
 
 @transaction.atomic
-def add_player(actor, team, *, member_id, season_id, position_id, jersey_number, is_captain, is_alternate_captain, check_membership=True):
-    """``check_membership=False``: the caller (the member import) has just made the membership and it is still pending."""
+def add_player(actor, team, *, member_id, season_id, position_id, jersey_number, is_captain, is_alternate_captain, check_membership=True, override_number=False):
+    """``override_number``: add them even though the number is held or reserved. ``check_membership=False``: the caller (the member import) has just made the membership and it is still pending."""
     require_team_manager(actor, team)
     season = resolve_season(season_id)
     member = Member.objects.filter(pk=member_id).first()
@@ -529,11 +533,14 @@ def add_player(actor, team, *, member_id, season_id, position_id, jersey_number,
     if TeamMembership.objects.filter(team=team, season=season, member=member).exists():
         _fail("member_id", f"{member} is already on this team in {season.name}.")
     position = _position(position_id, staff=False)
-    _check_number(team, season, member, jersey_number)
+    overruled = _check_number(team, season, member, jersey_number, override=override_number)
     m = TeamMembership(team=team, member=member, season=season, position=position, jersey_number=jersey_number, is_captain=is_captain, is_alternate_captain=is_alternate_captain and not is_captain)
     m.save()
     _apply_captaincy(m)
-    audit.record(actor, "team.roster_added", member=member, target=m, target_label=f"{member} - {team.name}", changes={k: {"from": None, "to": v} for k, v in _roster_state(m).items()})
+    changes = {k: {"from": None, "to": v} for k, v in _roster_state(m).items()}
+    if overruled:
+        changes["number_overridden"] = {"from": None, "to": overruled}
+    audit.record(actor, "team.roster_added", member=member, target=m, target_label=f"{member} - {team.name}", changes=changes)
     return get_membership(team, m.pk)
 
 
@@ -543,8 +550,9 @@ def update_player(actor, m: TeamMembership, values: dict):
     before = _roster_state(m)
     if "position_id" in values:
         m.position = _position(values["position_id"], staff=False)
+    overruled = None
     if "jersey_number" in values:
-        _check_number(m.team, m.season, m.member, values["jersey_number"], exclude_pk=m.pk)
+        overruled = _check_number(m.team, m.season, m.member, values["jersey_number"], exclude_pk=m.pk, override=bool(values.get("override_number")))
         m.jersey_number = values["jersey_number"]
     for f in ("is_captain", "is_alternate_captain"):
         if values.get(f) is not None:
@@ -559,6 +567,8 @@ def update_player(actor, m: TeamMembership, values: dict):
     _apply_captaincy(m)
     after = _roster_state(m)
     changes = {k: {"from": before[k], "to": after[k]} for k in after if before[k] != after[k]}
+    if changes and overruled:
+        changes["number_overridden"] = {"from": None, "to": overruled}
     if changes:
         audit.record(actor, "team.roster_updated", member=m.member, target=m, target_label=f"{m.member} - {m.team.name}", changes=changes)
     return get_membership(m.team, m.pk)

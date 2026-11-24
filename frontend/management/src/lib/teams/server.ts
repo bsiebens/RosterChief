@@ -49,7 +49,7 @@ export type Position = { id: string; name: string; short_name: string; ordering:
 /** One teams API call; failures come back as `fail()` data `{teamError, teamFields, teamAction}` for the page. */
 export async function teamCall<T = unknown>(action: string, method: string, path: string, f: Fetch, body?: unknown) {
 	const res = await api<T>(method, path, { body, f });
-	if (!res.ok) return { failure: fail(res.status || 500, { teamError: res.message || 'failed', teamFields: res.fields, teamAction: action }), res };
+	if (!res.ok) return { failure: fail(res.status || 500, { teamError: res.message || 'failed', teamFields: res.fields, teamAction: action, teamCode: res.code }), res };
 	return { failure: null, res };
 }
 

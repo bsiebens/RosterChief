@@ -44,7 +44,8 @@ const rosterBody = (form: FormData) => ({
 	position_id: strOrNull(form, 'position_id'),
 	jersey_number: intOrNull(form, 'jersey_number'),
 	is_captain: flag(form, 'is_captain'),
-	is_alternate_captain: flag(form, 'is_alternate_captain')
+	is_alternate_captain: flag(form, 'is_alternate_captain'),
+	override_number: flag(form, 'override_number')
 });
 
 export const actions: Actions = {

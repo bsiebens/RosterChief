@@ -106,6 +106,7 @@ class RosterIn(Schema):
     season_id: UUID | None = None
     position_id: UUID | None = None
     jersey_number: int | None = None
+    override_number: bool = False  # add them although the number is held or reserved (a 422 with code "number_taken" offers this)
     is_captain: bool = False
     is_alternate_captain: bool = False
 
@@ -113,6 +114,7 @@ class RosterIn(Schema):
 class RosterPatch(Schema):
     position_id: UUID | None = None
     jersey_number: int | None = None
+    override_number: bool = False
     is_captain: bool | None = None
     is_alternate_captain: bool | None = None
 
