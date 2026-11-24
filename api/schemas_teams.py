@@ -142,6 +142,17 @@ class PeopleOut(Schema):
     rows: list[PersonRowOut]
 
 
+class PlayerPhotoRowOut(Schema):
+    index: int
+    ok: bool
+    error: str | None = None
+
+
+class PlayerPhotosOut(Schema):
+    saved: int
+    rows: list[PlayerPhotoRowOut]
+
+
 class StaffIn(Schema):
     member_id: UUID
     season_id: UUID | None = None

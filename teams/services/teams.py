@@ -288,6 +288,29 @@ def set_photo(actor, team, season, image) -> None:
     audit.record(actor, "team.photo_set", target=team, changes={"photo": {"from": bool(old), "to": True}, "season": {"from": None, "to": season.name}})
 
 
+def set_player_photos(actor, team, season, items: list[tuple]) -> list[dict]:
+    """Mass-upload the official player picture (and nothing else) of players on the team's roster for ``season``.
+    ``items`` are ``(member_id, image)`` pairs; each one is saved on its own, so a bad file or a player who is not on the
+    roster is reported in its row (``index`` = position in ``items``) and the others still go in."""
+    from members.services import members as member_services
+
+    require_team_manager(actor, team)
+    on_roster = {m.member_id: m.member for m in roster_for(team, season)}
+    results = []
+    for index, (member_id, image) in enumerate(items):
+        member = on_roster.get(member_id)
+        if member is None:
+            results.append({"index": index, "ok": False, "error": "This player is not on the roster of this season."})
+            continue
+        try:
+            member_services.set_photo(actor, member, image, "player_photo", authorized=True)
+        except Invalid as e:
+            results.append({"index": index, "ok": False, "error": str(e)})
+        else:
+            results.append({"index": index, "ok": True, "error": None})
+    return results
+
+
 @transaction.atomic
 def remove_photo(actor, team, season) -> None:
     require_team_manager(actor, team)
