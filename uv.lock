@@ -1640,7 +1640,7 @@ wheels = [
 
 [[package]]
 name = "rosterchief"
-version = "1.0.0rc12"
+version = "1.0.0rc13"
 source = { virtual = "." }
 dependencies = [
     { name = "beautifulsoup4" },
