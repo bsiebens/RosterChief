@@ -386,11 +386,15 @@ class TeamsApiTests(TestCase):
         self.assertEqual(self.roster_add(self.u12, self.kid, season_id=str(self.old_season.pk)).status_code, 201)
 
     def test_number_clash_can_be_overruled(self):
-        self.assertEqual(self.roster_add(self.u12, self.kid, jersey_number=10).status_code, 201)
+        NumberReservation.objects.create(pool=self.pool, number=10, note="Retired")
         r = self.roster_add(self.u12, self.teen, jersey_number=10)
         self.assertEqual((r.status_code, r.json()["code"]), (422, "number_taken"))
         self.assertEqual(self.roster_add(self.u12, self.teen, jersey_number=10, override_number=True).status_code, 201)
         self.assertTrue(any("number_overridden" in e.changes for e in self.audit("team.roster_added")))
+        # a number already on the same team's roster can never be shared (unique per team and season)
+        r = self.roster_add(self.u12, self.kid, jersey_number=10, override_number=True)
+        self.assertEqual(r.status_code, 422)
+        self.assertIn("jersey_number", r.json()["errors"])
         # the range is not negotiable
         r = self.roster_add(self.u12, self.peer, jersey_number=21, override_number=True)
         self.assertEqual((r.status_code, r.json()["code"]), (422, "invalid"))
